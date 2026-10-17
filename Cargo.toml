@@ -1,8 +1,6 @@
-[package]
-name = "quantum-x"
-version = "0.1.0"
-edition = "2024"
-description = "Rust-based roller coaster design and simulation application"
-license = "MIT OR Apache-2.0"
-
-[dependencies]
+[workspace]
+members = [
+    "apps/quantum-x",
+    "crates/*",
+]
+resolver = "3"
