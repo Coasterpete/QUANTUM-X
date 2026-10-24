@@ -34,6 +34,7 @@ fn domain(d: Domain) -> &'static str {
     match d {
         Domain::Time => "seconds",
         Domain::Distance => "metres",
+        Domain::Normalized => "normalized_arc_distance",
     }
 }
 fn unit(u: Unit) -> &'static str {
@@ -41,10 +42,12 @@ fn unit(u: Unit) -> &'static str {
         Unit::G => "g",
         Unit::RadiansPerSecond => "rad/s",
         Unit::RadiansPerMetre => "rad/m",
+        Unit::RadiansPerNormalized => "rad/normalized_distance",
     }
 }
 fn kind(s: &SectionKind) -> &'static str {
     match s {
+        SectionKind::Spline { curve } => curve.method(),
         SectionKind::Straight {} => "straight",
         SectionKind::Arc { .. } => "arc",
         SectionKind::Force { .. } => "force",
@@ -97,6 +100,115 @@ pub fn write_all(
     transitions(dir, project)?;
     obj(dir, track)?;
     plots(dir, project, track)?;
+    let mut sections = writer(dir, "sections.csv")?;
+    writeln!(
+        sections,
+        "section_id,name,method,start_sample,end_sample,start_distance_m,end_distance_m"
+    )?;
+    for s in &track.sections {
+        let section = project
+            .sections
+            .iter()
+            .find(|section| section.id == s.id)
+            .expect("generated section");
+        row(
+            &mut sections,
+            [
+                s.id.0.to_string(),
+                section.name.clone(),
+                kind(&section.kind).into(),
+                s.start_sample.to_string(),
+                s.end_sample.to_string(),
+                s.start_distance_m.to_string(),
+                s.end_distance_m.to_string(),
+            ],
+        )?;
+    }
+    sections.flush()?;
+    let mut curve_joins = writer(dir, "curve-joins.csv")?;
+    writeln!(
+        curve_joins,
+        "section_id,native_parameter,position_gap_m,tangent_angle_rad,curvature_vector_gap_per_m,first_derivative_gap,second_derivative_gap,g0,g1,g2,c1,c2"
+    )?;
+    for section in &project.sections {
+        if let SectionKind::Spline { curve } = &section.kind {
+            for join in curve
+                .prepare()
+                .map_err(io::Error::other)?
+                .continuity()
+                .map_err(io::Error::other)?
+            {
+                row(
+                    &mut curve_joins,
+                    [
+                        section.id.0.to_string(),
+                        join.parameter.to_string(),
+                        join.position_gap_m.to_string(),
+                        join.tangent_angle_rad.to_string(),
+                        join.curvature_vector_gap_per_m.to_string(),
+                        join.first_derivative_gap.to_string(),
+                        join.second_derivative_gap.to_string(),
+                        join.g0(1e-8).to_string(),
+                        join.g1(1e-8).to_string(),
+                        join.g2(1e-8).to_string(),
+                        join.c1(1e-8).to_string(),
+                        join.c2(1e-8).to_string(),
+                    ],
+                )?;
+            }
+        }
+    }
+    curve_joins.flush()?;
+    let mut connections = writer(dir, "connections.csv")?;
+    writeln!(
+        connections,
+        "section_id,position_gap_m,tangent_angle_rad,orientation_angle_rad,curvature_vector_gap_per_m,twist_rate_gap_rad_per_m,reference_speed_gap_mps"
+    )?;
+    for c in &track.connections {
+        writeln!(
+            connections,
+            "{},{},{},{},{},{},{}",
+            c.section_id.0,
+            c.position_gap_m,
+            c.tangent_angle_rad,
+            c.orientation_angle_rad,
+            c.curvature_vector_gap_per_m,
+            c.twist_rate_gap_rad_per_m,
+            c.reference_speed_gap_mps
+        )?;
+    }
+    connections.flush()?;
+    let mut numerical = writer(dir, "numerical.csv")?;
+    writeln!(
+        numerical,
+        "section_id,length_m,estimated_quadrature_error_m,quadrature_evaluations,table_stations"
+    )?;
+    for n in &track.numerical {
+        writeln!(
+            numerical,
+            "{},{},{},{},{}",
+            n.section_id.0,
+            n.length_m,
+            n.estimated_quadrature_error_m,
+            n.quadrature_evaluations,
+            n.table_stations
+        )?;
+    }
+    numerical.flush()?;
+    let mut warnings = writer(dir, "warnings.csv")?;
+    writeln!(warnings, "section_id,input,code,message")?;
+    for d in &track.diagnostics {
+        row(
+            &mut warnings,
+            [
+                d.section_id.0.to_string(),
+                optional(d.input),
+                d.code.into(),
+                d.message.clone(),
+            ],
+        )?;
+    }
+    warnings.flush()?;
     let mut summary = writer(dir, "summary.txt")?;
     writeln!(
         summary,
@@ -120,6 +232,17 @@ pub fn write_all(
             summary,
             "Section {}: samples {}..={}, distance {}..{} m",
             s.id.0, s.start_sample, s.end_sample, s.start_distance_m, s.end_distance_m
+        )?;
+    }
+    for n in &track.numerical {
+        writeln!(
+            summary,
+            "Spline section {}: length {} m; estimated quadrature error {} m; {} speed evaluations; {} table stations (estimate, not certified bound)",
+            n.section_id.0,
+            n.length_m,
+            n.estimated_quadrature_error_m,
+            n.quadrature_evaluations,
+            n.table_stations
         )?;
     }
     writeln!(summary, "\nWarnings: {}", track.diagnostics.len())?;

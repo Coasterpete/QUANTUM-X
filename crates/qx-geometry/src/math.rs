@@ -229,9 +229,42 @@ impl Frame {
     }
 }
 
+/// Minimal rotation between unit directions. The deterministic antiparallel
+/// fallback is useful for explicit alignment; regular track transport rejects cusps.
+pub fn rotation_between(from: Vec3, to: Vec3) -> Result<Quaternion> {
+    let a = from.normalized()?;
+    let b = to.normalized()?;
+    let dot = a.dot(b).clamp(-1.0, 1.0);
+    let cross = a.cross(b);
+    if dot < -0.9999 && cross.length() > 1e-14 {
+        Quaternion::axis_angle(cross, cross.length().atan2(dot))
+    } else if dot < 0.0 && cross.length() <= 1e-14 {
+        let axis = if a.y.abs() < 0.9 {
+            a.cross(Vec3::Y)
+        } else {
+            a.cross(Vec3::Z)
+        };
+        Quaternion::axis_angle(axis, std::f64::consts::PI)
+    } else {
+        Quaternion {
+            w: 1.0 + dot,
+            x: cross.x,
+            y: cross.y,
+            z: cross.z,
+        }
+        .normalized()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn alignment_is_stable_for_nearly_reversed_tangents() {
+        let direction = Vec3::new(-1., 1e-8, 0.).normalized().unwrap();
+        let frame = Frame::new(rotation_between(direction, Vec3::X).unwrap()).unwrap();
+        assert!((frame.local_to_world(direction) - Vec3::X).length() < 1e-14);
+    }
     #[test]
     fn rotation_and_transform_invariants() {
         let q = Quaternion::axis_angle(Vec3::Z, std::f64::consts::FRAC_PI_2).unwrap();

@@ -11,7 +11,7 @@ use qx_style::{Catalog, StyleSelection};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const SCHEMA_VERSION: u32 = 1;
+pub const SCHEMA_VERSION: u32 = 2;
 #[derive(Debug)]
 pub struct DocumentError(pub String);
 impl fmt::Display for DocumentError {
@@ -70,7 +70,7 @@ impl Project {
     pub fn validate(&self, catalog: &Catalog) -> Result<()> {
         require(
             self.schema_version == SCHEMA_VERSION,
-            "unsupported project schema version; no migration is available",
+            "unsupported in-memory schema version; load version 1 through persistence migration",
         )?;
         require(
             !self.metadata.project_id.trim().is_empty() && self.metadata.project_id.len() <= 128,

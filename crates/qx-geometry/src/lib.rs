@@ -1,8 +1,12 @@
 //! Double-precision graph authoring and reference-speed track generation.
 //! This crate contains no vehicle dynamics, graphics, or editor widgets.
+pub mod arc_length;
 pub mod authoring;
+pub mod curve;
+pub mod curve_edit;
 pub mod math;
 pub mod solver;
+mod spline_track;
 pub mod transition;
 
 use std::fmt;

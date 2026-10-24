@@ -9,3 +9,4 @@ license = "MIT OR Apache-2.0"
 qx-geometry = { path = "../../crates/qx-geometry" }
 qx-document = { path = "../../crates/qx-document" }
 qx-style = { path = "../../crates/qx-style" }
+qx-rendering = { path = "../../crates/rendering" }

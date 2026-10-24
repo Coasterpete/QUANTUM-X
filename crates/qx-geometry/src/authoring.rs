@@ -12,18 +12,22 @@ pub struct SectionId(pub u64);
 pub enum Domain {
     Time,
     Distance,
+    /// Spline roll input xi = physical arc distance / regenerated curve length.
+    Normalized,
 }
 impl Domain {
     pub fn rate_unit(self) -> Unit {
         match self {
             Self::Time => Unit::RadiansPerSecond,
             Self::Distance => Unit::RadiansPerMetre,
+            Self::Normalized => Unit::RadiansPerNormalized,
         }
     }
     pub fn metres_per_input(self, speed: f64) -> f64 {
         match self {
             Self::Time => speed,
             Self::Distance => 1.0,
+            Self::Normalized => 1.0,
         }
     }
 }
@@ -38,6 +42,10 @@ pub enum BoundaryPolicy {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum SectionKind {
+    /// Controls are section-local. Start must be zero with tangent +X.
+    Spline {
+        curve: crate::curve::Curve,
+    },
     Straight {},
     /// Constant rider-frame curvature; plane angle is from normal toward lateral.
     Arc {
@@ -82,6 +90,13 @@ pub enum ChannelKey {
     Yaw,
 }
 impl Section {
+    pub fn spline(id: u64, name: impl Into<String>, curve: crate::curve::Curve) -> Self {
+        let mut section = Self::straight(id, name, 1.0);
+        section.domain = Domain::Normalized;
+        section.roll_rate = Channel::constant(Unit::RadiansPerNormalized, 1.0, 0.0);
+        section.kind = SectionKind::Spline { curve };
+        section
+    }
     pub fn straight(id: u64, name: impl Into<String>, length_m: f64) -> Self {
         Self {
             id: SectionId(id),
@@ -144,6 +159,35 @@ impl Section {
         )?;
         if let Some(v) = self.reference_speed_mps {
             validate_speed(v)?;
+        }
+        if let SectionKind::Spline { curve } = &self.kind {
+            ensure(
+                self.domain == Domain::Normalized && self.extent == 1.0,
+                "spline sections require normalized domain [0,1]",
+            )?;
+            let prepared = curve.prepare()?;
+            let start = prepared.evaluate(prepared.domain().0, crate::transition::Side::Right)?;
+            ensure(
+                start.position_m.length() <= 1e-8 && (start.tangent()? - Vec3::X).length() <= 1e-8,
+                "spline start must be local zero with tangent +X; use explicit AlignStart",
+            )?;
+            prepared
+                .evaluate(prepared.domain().1, crate::transition::Side::Left)?
+                .tangent()?;
+            for join in prepared.continuity()? {
+                ensure(
+                    join.g1(1e-8),
+                    format!(
+                        "spline has a cusp/reversed/discontinuous tangent at parameter {}; track sections require G1",
+                        join.parameter
+                    ),
+                )?;
+            }
+        } else {
+            ensure(
+                self.domain != Domain::Normalized,
+                "normalized domain is reserved for spline sections",
+            )?;
         }
         if let SectionKind::Arc {
             radius_m,
@@ -227,6 +271,7 @@ pub fn validate_track(initial: &InitialConditions, sections: &[Section]) -> Resu
     )?;
     let mut ids = std::collections::HashSet::new();
     let mut count = 0;
+    let mut controls = 0;
     for s in sections {
         s.validate()?;
         ensure(ids.insert(s.id), "duplicate section ID")?;
@@ -235,6 +280,13 @@ pub fn validate_track(initial: &InitialConditions, sections: &[Section]) -> Resu
             .iter()
             .map(|(_, c)| c.transitions.len())
             .sum::<usize>();
+        if let SectionKind::Spline { curve } = &s.kind {
+            controls += curve.points().len();
+        }
     }
-    ensure(count <= 65536, "track exceeds 65536 total transitions")
+    ensure(count <= 65536, "track exceeds 65536 total transitions")?;
+    ensure(
+        controls <= 65536,
+        "track exceeds 65536 total spline controls",
+    )
 }

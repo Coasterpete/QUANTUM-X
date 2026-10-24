@@ -1,5 +1,9 @@
 # Integrated core foundation
 
+This document records Pass 1. Pass 2 extends the same engine with spline sections,
+schema-1-to-2 migration, and native inspection. See [the current authoring guide](authoring-pass-2.md)
+for additions; the original force/geometric equations and fixture remain compatible.
+
 ## Scope and execution
 
 The executable in `apps/quantum-x` is a development-only command-line diagnostic.
