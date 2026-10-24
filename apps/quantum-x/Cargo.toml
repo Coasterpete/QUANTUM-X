@@ -6,3 +6,6 @@ description = "Rust-based roller coaster design and simulation application"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
+qx-geometry = { path = "../../crates/qx-geometry" }
+qx-document = { path = "../../crates/qx-document" }
+qx-style = { path = "../../crates/qx-style" }
