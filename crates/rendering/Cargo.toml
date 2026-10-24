@@ -5,4 +5,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+qx-geometry = { path = "../qx-geometry" }
+wgpu = { version = "30.0.1", default-features = false, features = ["std", "parking_lot", "dx12", "vulkan", "wgsl"] }
+winit = "0.30.13"
+pollster = "0.4"
+bytemuck = { version = "1", features = ["derive"] }
+glam = "0.30"
 

@@ -11,6 +11,7 @@ use crate::{
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GenerationOptions {
+    pub spline_arc_length: crate::arc_length::ArcLengthOptions,
     pub max_step_m: f64,
     pub max_samples: usize,
     pub max_rotation_per_step_rad: f64,
@@ -19,6 +20,7 @@ pub struct GenerationOptions {
 impl Default for GenerationOptions {
     fn default() -> Self {
         Self {
+            spline_arc_length: Default::default(),
             max_step_m: 0.1,
             max_samples: 200_000,
             max_rotation_per_step_rad: 0.15,
@@ -27,7 +29,8 @@ impl Default for GenerationOptions {
     }
 }
 impl GenerationOptions {
-    fn validate(self) -> Result<()> {
+    pub(crate) fn validate(self) -> Result<()> {
+        self.spline_arc_length.validate()?;
         ensure(
             self.max_step_m.is_finite() && (1e-6..=10.0).contains(&self.max_step_m),
             "max_step_m must be in [1e-6,10]",
@@ -104,6 +107,26 @@ pub struct GeneratedTrack {
     pub graphs: Vec<GraphSample>,
     pub sections: Vec<SectionRange>,
     pub diagnostics: Vec<Diagnostic>,
+    pub connections: Vec<SectionConnection>,
+    pub numerical: Vec<SplineNumerics>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SplineNumerics {
+    pub section_id: SectionId,
+    pub length_m: f64,
+    pub estimated_quadrature_error_m: f64,
+    pub quadrature_evaluations: usize,
+    pub table_stations: usize,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SectionConnection {
+    pub section_id: SectionId,
+    pub position_gap_m: f64,
+    pub tangent_angle_rad: f64,
+    pub orientation_angle_rad: f64,
+    pub curvature_vector_gap_per_m: f64,
+    pub twist_rate_gap_rad_per_m: f64,
+    pub reference_speed_gap_mps: f64,
 }
 impl GeneratedTrack {
     pub fn length_m(&self) -> f64 {
@@ -176,6 +199,9 @@ impl Context<'_> {
         let value = |c: &crate::transition::Channel| c.evaluate_side(x, side).map(|e| e.value);
         let twist = value(&self.section.roll_rate)? / scale;
         let dt = match &self.section.kind {
+            SectionKind::Spline { .. } => {
+                return Err(GeometryError("spline uses its analytic evaluator".into()));
+            }
             SectionKind::Straight {} => Vec3::ZERO,
             SectionKind::Arc {
                 radius_m,
@@ -282,11 +308,26 @@ pub fn generate(
         graphs: vec![],
         sections: vec![],
         diagnostics: vec![],
+        connections: vec![],
+        numerical: vec![],
     };
     let mut distance = 0.0;
     let mut time = 0.0;
     let mut previous: Option<(Vec3, f64)> = None;
     for section in sections {
+        if matches!(section.kind, SectionKind::Spline { .. }) {
+            let end =
+                crate::spline_track::append(initial, section, options, &mut result, previous)?;
+            let last = result.samples.last().expect("spline samples");
+            state = State {
+                p: last.position_m,
+                q: last.frame.orientation(),
+            };
+            distance = last.distance_m;
+            time = last.design_time_s;
+            previous = Some(end);
+            continue;
+        }
         let context = Context {
             section,
             speed: section
@@ -297,6 +338,14 @@ pub fn generate(
         let start_omega = context
             .omega(0.0, state.q, Side::Right)
             .map_err(|e| section_error(section, 0.0, e))?;
+        record_connection(
+            section,
+            state.q,
+            start_omega,
+            context.speed,
+            previous,
+            &mut result,
+        )?;
         if let Some((omega, speed)) = previous
             && ((omega - start_omega).length() > 1e-8 || (speed - context.speed).abs() > 1e-8)
         {
@@ -404,6 +453,58 @@ fn section_error(section: &Section, x: f64, e: GeometryError) -> GeometryError {
         "section {} ({}) at input {x}: {e}",
         section.id.0, section.name
     ))
+}
+
+pub(crate) fn measure_section(
+    section: &Section,
+    speed: f64,
+    gravity: f64,
+    x: f64,
+    a: &CenterlineSample,
+    b: &CenterlineSample,
+) -> Result<GraphSample> {
+    measure(
+        Context {
+            section,
+            speed,
+            gravity,
+        },
+        x,
+        a,
+        b,
+    )
+}
+pub(crate) fn record_connection(
+    section: &Section,
+    q: Quaternion,
+    omega: Vec3,
+    speed: f64,
+    previous: Option<(Vec3, f64)>,
+    result: &mut GeneratedTrack,
+) -> Result<()> {
+    if let Some((old, old_speed)) = previous {
+        let t = Frame::new(q)?.tangent();
+        let curvature_vector_gap_per_m = (old.cross(t) - omega.cross(t)).length();
+        let twist_rate_gap_rad_per_m = (omega - old).dot(t);
+        ensure(
+            section.incoming_boundary != BoundaryPolicy::RequireContinuousRates
+                || ((old - omega).length() <= 1e-8 && (speed - old_speed).abs() <= 1e-8),
+            format!(
+                "section {} requires continuous curvature/twist/reference speed at its start",
+                section.id.0
+            ),
+        )?;
+        result.connections.push(SectionConnection {
+            section_id: section.id,
+            position_gap_m: 0.0,
+            tangent_angle_rad: 0.0,
+            orientation_angle_rad: 0.0,
+            curvature_vector_gap_per_m,
+            twist_rate_gap_rad_per_m,
+            reference_speed_gap_mps: speed - old_speed,
+        });
+    }
+    Ok(())
 }
 
 fn measure(

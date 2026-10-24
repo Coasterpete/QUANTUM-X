@@ -1,0 +1,360 @@
+{
+  "schema_version": 2,
+  "metadata": {
+    "project_id": "qx-spline-comparison-v2",
+    "name": "Four spline families",
+    "author": "QUANTUM-X contributors",
+    "description": "Original development geometry; all sections use explicit local-zero/+X joins."
+  },
+  "initial": {
+    "position_m": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "reference_speed_mps": 20.0,
+    "gravity_mps2": 9.80665
+  },
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "sections": [
+    {
+      "id": 100,
+      "name": "bezier comparison",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "bezier",
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 6.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 12.0,
+                "y": 4.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 18.0,
+                "y": 4.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 5,
+              "position_m": {
+                "x": 24.0,
+                "y": 4.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 6,
+              "position_m": {
+                "x": 30.0,
+                "y": -2.0,
+                "z": 5.0
+              }
+            },
+            {
+              "id": 7,
+              "position_m": {
+                "x": 36.0,
+                "y": -2.0,
+                "z": 5.0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 101,
+      "name": "b_spline comparison",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 0.5,
+            "start": 0.0,
+            "end": 0.8,
+            "amplitude": 0.0,
+            "function": {
+              "type": "quintic_smoothstep"
+            }
+          },
+          {
+            "id": 2,
+            "length": 0.5,
+            "start": 0.8,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "quintic_smoothstep"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "b_spline",
+          "degree": 3,
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 6.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 12.0,
+                "y": 3.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 20.0,
+                "y": 7.0,
+                "z": 4.0
+              }
+            },
+            {
+              "id": 5,
+              "position_m": {
+                "x": 28.0,
+                "y": 0.0,
+                "z": 8.0
+              }
+            },
+            {
+              "id": 6,
+              "position_m": {
+                "x": 36.0,
+                "y": 0.0,
+                "z": 8.0
+              }
+            }
+          ],
+          "knots": [
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.3333333333333333,
+            0.6666666666666666,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": 102,
+      "name": "nurbs comparison",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "nurbs",
+          "degree": 2,
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 20.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 20.0,
+                "y": 20.0,
+                "z": 0.0
+              }
+            }
+          ],
+          "knots": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "weights": [
+            1.0,
+            0.7071067811865476,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": 103,
+      "name": "catmull_rom comparison",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "catmull_rom",
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 8.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 17.0,
+                "y": 3.0,
+                "z": 2.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 27.0,
+                "y": -2.0,
+                "z": 5.0
+              }
+            },
+            {
+              "id": 5,
+              "position_m": {
+                "x": 40.0,
+                "y": 0.0,
+                "z": 7.0
+              }
+            }
+          ],
+          "parameterization": "centripetal"
+        }
+      }
+    }
+  ]
+}

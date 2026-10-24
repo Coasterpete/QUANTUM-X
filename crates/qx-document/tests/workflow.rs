@@ -59,7 +59,7 @@ fn compatibility_rejects_unknown_fields_versions_and_bad_references() {
     value["future_data"] = true.into();
     assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
     let mut value = serde_json::to_value(&project).unwrap();
-    value["schema_version"] = 2.into();
+    value["schema_version"] = 999.into();
     assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
     let mut value = serde_json::to_value(&project).unwrap();
     value["sections"][0]["roll_rate"]["future_channel_data"] = 3.into();

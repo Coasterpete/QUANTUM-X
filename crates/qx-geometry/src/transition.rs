@@ -9,6 +9,7 @@ pub enum Unit {
     G,
     RadiansPerSecond,
     RadiansPerMetre,
+    RadiansPerNormalized,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]

@@ -16,7 +16,34 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
     )?;
     // All persisted structs reject unknown fields. Unsupported data never
     // disappears silently in a read/write round trip.
-    let project: Project = serde_json::from_str(json)?;
+    let mut project: Project = serde_json::from_str(json)?;
+    match project.schema_version {
+        1 => {
+            // Version 1 has the same original section semantics, but cannot
+            // contain representations or units introduced by version 2.
+            use qx_geometry::{
+                authoring::{Domain, SectionKind},
+                transition::Unit,
+            };
+            require(
+                project.sections.iter().all(|s| {
+                    s.domain != Domain::Normalized
+                        && !matches!(s.kind, SectionKind::Spline { .. })
+                        && s.channels()
+                            .iter()
+                            .all(|(_, c)| c.unit != Unit::RadiansPerNormalized)
+                }),
+                "version 1 document contains version 2 authoring data",
+            )?;
+            project.schema_version = crate::SCHEMA_VERSION;
+        }
+        crate::SCHEMA_VERSION => {}
+        _ => {
+            return Err(crate::DocumentError(
+                "unsupported project schema version".into(),
+            ));
+        }
+    }
     project.validate(catalog)?;
     Ok(project)
 }

@@ -72,6 +72,17 @@ Do **not** respond with a plan alone when implementation is requested and reposi
 
 Build in dependency order when it helps, but integrate and verify the whole requested feature before declaring it complete. Avoid repeatedly generating skeleton crates, placeholder APIs, or TODO-only implementations.
 
+### 4.1 Computer Use and active-desktop protection
+
+**Never take control of the owner's active Windows desktop without explicit, task-specific permission.** This applies to Codex, Claude Code, ChatGPT computer-control capabilities, and other AI coding agents.
+
+- Do not move the mouse, type into GUI applications, switch windows, click controls, drag objects, or interact with the user's desktop on the owner's behalf unless explicitly authorized for that session.
+- A request to implement a native 3D inspector, test rendering, or verify a feature **does not itself grant permission** to use interactive Computer Use.
+- Prefer Rust/Cargo commands, static analysis, unit/integration tests, headless exports, noninteractive rendering tests, and logs. Launching a process for automated, noninteractive verification is not permission to control the user's active desktop.
+- Provide exact commands and an owner-executable manual checklist for checks that require desktop interaction. If a check cannot be run without taking control, mark it **not manually verified**.
+- Respect cancellation immediately; do not repeatedly reactivate desktop control after the owner cancels or declines it.
+- Do not reduce the requested implementation scope merely because desktop interaction is unavailable. Implement what can be verified and report remaining manual checks honestly.
+
 ## 5. Repository and technology direction
 
 - **Language:** Rust, using the edition and toolchain specified by the workspace (currently Rust 2024).
@@ -133,7 +144,23 @@ Reference implementations are research material, **not code to copy or interface
 
 Additional approaches—including B-splines, NURBS, Catmull–Rom, and direct geometric tools—may be implemented as complementary authoring systems. Do not let them replace the graph/timeline-first design, and do not make all of them prerequisites for the first working force-vector authoring implementation.
 
-### 7.2 Mathematical geometry and precision
+### 7.2 Human-authored coaster layouts and track shaping
+
+**The human user is the coaster designer. The AI coding agent builds, tests, and maintains the tools through which the user designs.** Do not confuse writing a curve solver with choosing the intended coaster layout.
+
+- The owner/user determines track shape, layout, element sequence, forces, banking, transition timing/length, geometric control points, and artistic or ride-experience goals. These decisions belong in direct graph/timeline editing and complementary geometric-authoring tools.
+- Build interactive, precise, predictable authoring operations on top of the tested math engine: editable graphs, ordered sections, numeric parameters, control points/handles where appropriate, responsive 3D feedback, and undo/redo. Follow the human-authored UX documents when implementing these interfaces.
+- Do **not** automatically invent a production coaster, choose a final layout, or reshape authored sections just to make the demo look like a realistic ride. Do not silently move handles, redistribute sections, smooth forces, change banking, adjust curves, or reinterpret user intent.
+- Automatic helpers (smoothing, continuity fitting, endpoint targeting, banking suggestions, section blending, procedural examples) may be offered as **explicit opt-in commands** with clear previews, constraints, diagnostics, and reversible edits. Leave the original authored state intact until the user applies the change.
+- If authored geometry is discontinuous, unsafe-looking, numerically invalid, or mechanically implausible, show specific errors/warnings and optional fixes rather than quietly altering the layout. Report measurable quantities and avoid claiming ride-safety certification.
+- Keep **development fixtures** separate from actual user-authored projects. Synthetic examples, random curves, intentionally sharp joins, and colored diagnostic frames are valid solver tests, **not** demonstrations of finished coaster design quality.
+- Clearly distinguish mathematical validity, smoothness/continuity, simulated ride behavior, and subjective ride quality. No numerical solver or coding agent alone determines whether a layout is a good coaster.
+- All supported authoring methods—force-vector graphs, geometric sections, cubic Bézier, B-splines, NURBS, and Catmull–Rom—must feed the same coherent downstream track representation, without converting every source to Bézier or turning the app into a spline-only editor.
+- The production editor must let a person author a meaningful coaster without hand-editing JSON files, programming Rust, or asking an AI to generate the shape. Developer CLI tools may remain for tests and debugging.
+
+**Acceptance principle:** Codex is successful when a human can deliberately create and refine the desired track using QUANTUM-X; an AI-generated example that happens to render attractively is not proof of a usable authoring workflow.
+
+### 7.3 Mathematical geometry and precision
 
 Treat track authoring as an engineering-grade numerical subsystem, not a visual approximation.
 
@@ -328,6 +355,8 @@ When unable to complete a requested feature, leave the repository in a buildable
 - Do not convert it into a NoLimits 2-only tool or a park-management simulator.
 - Do not substitute attractive mockups for functioning software.
 - Do not autonomously finalize UI/UX or override human-authored designs.
+- Do not mistake generated test tracks or automated shape fitting for the user's own coaster design; human authoring stays in control.
+- Do not take over the active desktop without explicit permission or retry computer control after cancellation.
 - Do not build a massive single-file application to satisfy a one-shot prompt.
 - Do not overengineer empty architecture while delaying visible functionality.
 - Do not fake coaster physics, numerical precision, or performance claims.

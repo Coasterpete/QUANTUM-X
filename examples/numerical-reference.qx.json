@@ -1,0 +1,299 @@
+{
+  "schema_version": 2,
+  "metadata": {
+    "project_id": "qx-numerical-references-v2",
+    "name": "Analytic lines and rational quarter circle",
+    "author": "QUANTUM-X contributors",
+    "description": "Lengths: Bezier 30m, nonuniform B-spline 20m, radius-20m NURBS quarter circle 10*pi m, Catmull-Rom 30m. Total 80+10*pi m."
+  },
+  "initial": {
+    "position_m": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "reference_speed_mps": 20.0,
+    "gravity_mps2": 9.80665
+  },
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "sections": [
+    {
+      "id": 1,
+      "name": "Bezier line 30m",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "bezier",
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 2.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 21.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 30.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "name": "Nonuniform B-spline line 20m",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "b_spline",
+          "degree": 2,
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 2.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 13.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 20.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            }
+          ],
+          "knots": [
+            0.0,
+            0.0,
+            0.0,
+            0.3,
+            1.0,
+            1.0,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "NURBS quarter circle R=20m",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "nurbs",
+          "degree": 2,
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 20.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 20.0,
+                "y": 20.0,
+                "z": 0.0
+              }
+            }
+          ],
+          "knots": [
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "weights": [
+            1.0,
+            0.7071067811865476,
+            1.0
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Centripetal line 30m",
+      "domain": "normalized",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_normalized",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "spline",
+        "curve": {
+          "type": "catmull_rom",
+          "points": [
+            {
+              "id": 1,
+              "position_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 2,
+              "position_m": {
+                "x": 2.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 3,
+              "position_m": {
+                "x": 18.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            {
+              "id": 4,
+              "position_m": {
+                "x": 30.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            }
+          ],
+          "parameterization": "centripetal"
+        }
+      }
+    }
+  ]
+}

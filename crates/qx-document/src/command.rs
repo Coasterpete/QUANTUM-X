@@ -1,6 +1,7 @@
 use crate::{Metadata, Project, Result, require};
 use qx_geometry::{
     authoring::{ChannelKey, InitialConditions, Section, SectionId},
+    curve_edit::CurveEdit,
     transition::Transition,
 };
 use qx_style::{Catalog, StyleSelection};
@@ -21,6 +22,14 @@ pub enum ChannelEdit {
 }
 #[derive(Clone, Debug)]
 pub enum Command {
+    EditSpline {
+        section_id: SectionId,
+        edit: CurveEdit,
+    },
+    /// Explicit generation check of all inherited boundary constraints.
+    ValidateConnections {
+        options: qx_geometry::solver::GenerationOptions,
+    },
     InsertSection {
         after: Option<SectionId>,
         section: Section,
@@ -49,6 +58,20 @@ impl Command {
                 .ok_or_else(|| crate::DocumentError(format!("section ID {} not found", id.0)))
         };
         match self {
+            Self::EditSpline { section_id, edit } => {
+                let i = index(section_id, &project.sections)?;
+                let qx_geometry::authoring::SectionKind::Spline { curve } =
+                    &mut project.sections[i].kind
+                else {
+                    return Err(crate::DocumentError(
+                        "section is not spline-authored".into(),
+                    ));
+                };
+                edit.apply(curve)?;
+            }
+            Self::ValidateConnections { options } => {
+                qx_geometry::solver::generate(&project.initial, &project.sections, options)?;
+            }
             Self::InsertSection { after, section } => {
                 let i = after
                     .map(|id| index(id, &project.sections).map(|n| n + 1))
