@@ -10,3 +10,4 @@ qx-geometry = { path = "../../crates/qx-geometry" }
 qx-document = { path = "../../crates/qx-document" }
 qx-style = { path = "../../crates/qx-style" }
 qx-rendering = { path = "../../crates/rendering" }
+egui = "0.37"

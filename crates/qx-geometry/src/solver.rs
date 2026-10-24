@@ -109,6 +109,14 @@ pub struct GeneratedTrack {
     pub diagnostics: Vec<Diagnostic>,
     pub connections: Vec<SectionConnection>,
     pub numerical: Vec<SplineNumerics>,
+    /// Derivative stencils must never cross section/channel/native-curve knots.
+    pub smooth_ranges: Vec<SmoothRange>,
+}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SmoothRange {
+    pub section_id: SectionId,
+    pub start_sample: usize,
+    pub end_sample: usize,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplineNumerics {
@@ -310,6 +318,7 @@ pub fn generate(
         diagnostics: vec![],
         connections: vec![],
         numerical: vec![],
+        smooth_ranges: vec![],
     };
     let mut distance = 0.0;
     let mut time = 0.0;
@@ -381,6 +390,7 @@ pub fn generate(
         let mut warned_curvature = false;
         let mut warned_vertical = false;
         for pair in knots.windows(2) {
+            let smooth_start = result.samples.len() - 1;
             let interval_m = (pair[1] - pair[0]) * section.domain.metres_per_input(context.speed);
             let count_float = (interval_m / options.max_step_m).ceil().max(4.0);
             ensure(
@@ -433,6 +443,11 @@ pub fn generate(
                 result.graphs.push(graph);
                 result.samples.push(b);
             }
+            result.smooth_ranges.push(SmoothRange {
+                section_id: section.id,
+                start_sample: smooth_start,
+                end_sample: result.samples.len() - 1,
+            });
         }
         previous = Some((
             context.omega(section.extent, state.q, Side::Left)?,

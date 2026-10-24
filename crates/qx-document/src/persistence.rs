@@ -16,6 +16,23 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
     )?;
     // All persisted structs reject unknown fields. Unsupported data never
     // disappears silently in a read/write round trip.
+    let value: serde_json::Value = serde_json::from_str(json)?;
+    let version = value
+        .get("schema_version")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| crate::DocumentError("missing/integer schema version required".into()))?;
+    require(
+        (1..=3).contains(&version),
+        "unsupported project schema version",
+    )?;
+    require(
+        if version < 3 {
+            value.get("heartline").is_none()
+        } else {
+            value.get("heartline").is_some()
+        },
+        "heartline settings require schema version 3 and must be present in version 3",
+    )?;
     let mut project: Project = serde_json::from_str(json)?;
     match project.schema_version {
         1 => {
@@ -37,6 +54,7 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
             )?;
             project.schema_version = crate::SCHEMA_VERSION;
         }
+        2 => project.schema_version = crate::SCHEMA_VERSION,
         crate::SCHEMA_VERSION => {}
         _ => {
             return Err(crate::DocumentError(

@@ -237,7 +237,7 @@ fn version_one_migration_preserves_pass1_output_and_rejects_new_data() {
     let catalog = Catalog::built_in().unwrap();
     let fixture = include_str!("../../../examples/foundation.qx.json");
     let migrated = persistence::from_json(fixture, &catalog).unwrap();
-    assert_eq!(migrated.schema_version, 2);
+    assert_eq!(migrated.schema_version, qx_document::SCHEMA_VERSION);
     assert_eq!(migrated, foundation_project());
     let baseline = migrated
         .generate(&catalog, GenerationOptions::default())
@@ -252,7 +252,7 @@ fn version_one_migration_preserves_pass1_output_and_rejects_new_data() {
     );
     let json = persistence::to_json(&spline_comparison_project(), &catalog)
         .unwrap()
-        .replacen("\"schema_version\": 2", "\"schema_version\": 1", 1);
+        .replacen("\"schema_version\": 3", "\"schema_version\": 1", 1);
     assert!(persistence::from_json(&json, &catalog).is_err());
 }
 #[test]

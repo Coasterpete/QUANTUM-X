@@ -9,6 +9,8 @@ pub struct InspectionScene {
     pub name: String,
     pub track: GeneratedTrack,
     pub labels: Vec<SectionLabel>,
+    pub reference: Option<qx_geometry::heartline::ReferenceTrack>,
+    pub authored_reference: qx_geometry::heartline::AuthoredReference,
 }
 impl InspectionScene {
     pub(crate) fn bounds(&self, section: Option<usize>) -> (Vec3, Vec3) {
@@ -25,6 +27,17 @@ impl InspectionScene {
             min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
             max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
         }
+        if let Some(reference) = &self.reference {
+            let selected_id = section.map(|i| self.track.sections[i].id);
+            for point in &reference.points {
+                if selected_id.is_some_and(|id| id != point.section_id) {
+                    continue;
+                }
+                let p = point.position_m;
+                min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+                max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+            }
+        }
         (min, max)
     }
 }
@@ -34,12 +47,18 @@ pub(crate) struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
 }
-pub(crate) struct DisplayOptions {
+#[derive(Clone, Debug, PartialEq)]
+pub struct DisplayOptions {
     pub grid: bool,
     pub grid_spacing: f64,
     pub frames: bool,
     pub curvature: bool,
     pub selected: Option<usize>,
+    pub centerline: bool,
+    pub reference: bool,
+    pub offsets: bool,
+    pub points: bool,
+    pub loads: bool,
 }
 impl Default for DisplayOptions {
     fn default() -> Self {
@@ -49,6 +68,11 @@ impl Default for DisplayOptions {
             frames: false,
             curvature: false,
             selected: None,
+            centerline: true,
+            reference: false,
+            offsets: false,
+            points: false,
+            loads: false,
         }
     }
 }
@@ -108,8 +132,10 @@ pub(crate) fn vertices(
         } else {
             colors[i % colors.len()]
         };
-        for pair in scene.track.samples[s.start_sample..=s.end_sample].windows(2) {
-            line(pair[0].position_m, pair[1].position_m, color);
+        if display.centerline {
+            for pair in scene.track.samples[s.start_sample..=s.end_sample].windows(2) {
+                line(pair[0].position_m, pair[1].position_m, color);
+            }
         }
         for index in [s.start_sample, s.end_sample] {
             let sample = &scene.track.samples[index];
@@ -118,6 +144,41 @@ pub(crate) fn vertices(
                     sample.position_m - axis * scale,
                     sample.position_m + axis * scale,
                     [1., 1., 1.],
+                );
+            }
+        }
+    }
+    if let Some(reference) = &scene.reference {
+        if display.reference {
+            for pair in reference.points.windows(2) {
+                if pair[1].source_distance_m > pair[0].source_distance_m {
+                    line(pair[0].position_m, pair[1].position_m, [0.95, 0.78, 0.35]);
+                }
+            }
+        }
+        let stride = (reference.points.len() / 100).max(1);
+        for point in reference.points.iter().step_by(stride) {
+            if display.offsets
+                && let Ok(source) = scene.track.sample_at_distance(point.source_distance_m)
+            {
+                line(source.position_m, point.position_m, [0.65, 0.65, 0.65]);
+            }
+            if display.points {
+                for axis in [point.frame.normal(), point.frame.lateral()] {
+                    line(
+                        point.position_m - axis * scale * 0.25,
+                        point.position_m + axis * scale * 0.25,
+                        [1., 0.9, 0.5],
+                    );
+                }
+            }
+            if display.loads {
+                let load =
+                    point.frame.normal() * point.normal_g + point.frame.lateral() * point.lateral_g;
+                line(
+                    point.position_m,
+                    point.position_m + load * scale,
+                    [0.9, 0.5, 0.4],
                 );
             }
         }

@@ -22,6 +22,11 @@ pub enum ChannelEdit {
 }
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetHeartline(crate::HeartlineSettings),
+    MoveSection {
+        id: SectionId,
+        after: Option<SectionId>,
+    },
     EditSpline {
         section_id: SectionId,
         edit: CurveEdit,
@@ -58,6 +63,17 @@ impl Command {
                 .ok_or_else(|| crate::DocumentError(format!("section ID {} not found", id.0)))
         };
         match self {
+            Self::SetHeartline(settings) => project.heartline = settings,
+            Self::MoveSection { id, after } => {
+                require(after != Some(id), "cannot move a section after itself")?;
+                let i = index(id, &project.sections)?;
+                let section = project.sections.remove(i);
+                let target = after
+                    .map(|id| index(id, &project.sections).map(|n| n + 1))
+                    .transpose()?
+                    .unwrap_or(0);
+                project.sections.insert(target, section);
+            }
             Self::EditSpline { section_id, edit } => {
                 let i = index(section_id, &project.sections)?;
                 let qx_geometry::authoring::SectionKind::Spline { curve } =
@@ -133,6 +149,12 @@ impl Editor {
     }
     pub fn project(&self) -> &Project {
         &self.project
+    }
+    pub fn can_undo(&self) -> bool {
+        !self.undo.is_empty()
+    }
+    pub fn can_redo(&self) -> bool {
+        !self.redo.is_empty()
     }
     pub fn execute(&mut self, commands: impl IntoIterator<Item = Command>) -> Result<()> {
         let mut candidate = self.project.clone();

@@ -51,7 +51,7 @@ pub fn foundation_project() -> Project {
         plane_angle_rad: std::f64::consts::FRAC_PI_2,
     };
     Project{schema_version:SCHEMA_VERSION,metadata:Metadata{project_id:"qx-foundation-example-1".into(),name:"Core foundation diagnostic".into(),author:"QUANTUM-X contributors".into(),description:"Five authored sections exercising force, world/rider-local geometry, both domains, banking, and construction geometry.".into()},
-        initial:InitialConditions::default(),style:StyleSelection{family_id:"hybrid".into(),style_id:"hybrid-100".into()},sections:vec![lead,force,local,geometric,arc]}
+        initial:InitialConditions::default(),style:StyleSelection{family_id:"hybrid".into(),style_id:"hybrid-100".into()},sections:vec![lead,force,local,geometric,arc],heartline:Default::default()}
 }
 
 fn controls(values: &[[f64; 3]]) -> Vec<qx_geometry::curve::ControlPoint> {
@@ -63,6 +63,25 @@ fn controls(values: &[[f64; 3]]) -> Vec<qx_geometry::curve::ControlPoint> {
             position_m: qx_geometry::math::Vec3::new(p[0], p[1], p[2]),
         })
         .collect()
+}
+/// Independent circle: track R=20 m, inward normal offset 2 m gives rider R=18 m.
+/// This is an analytic development fixture, not a proposed coaster layout.
+pub fn heartline_reference_project() -> Project {
+    let mut p = foundation_project();
+    p.metadata.project_id = "qx-heartline-circle-v3".into();
+    p.metadata.name = "Heartline analytic circle (development fixture)".into();
+    p.metadata.description = "Vertical radius-20 m reference circle with a +2 m rider-normal offset. Expected rider radius 18 m. Design-speed estimates only.".into();
+    let mut section = Section::straight(1, "Analytic vertical circle", 20. * std::f64::consts::TAU);
+    section.kind = SectionKind::Arc {
+        radius_m: 20.,
+        plane_angle_rad: 0.,
+    };
+    p.sections = vec![section];
+    p.heartline.rider_offset = qx_geometry::heartline::OffsetProfile::Constant {
+        offset_m: qx_geometry::math::Vec3::Y * 2.,
+    };
+    p.heartline.train_configuration_id = Some("nominal-reference-point-only".into());
+    p
 }
 pub fn reference_arc(radius: f64) -> qx_geometry::curve::Curve {
     qx_geometry::curve::Curve::Nurbs {
