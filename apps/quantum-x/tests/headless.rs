@@ -1,4 +1,7 @@
 use std::{path::PathBuf, process::Command};
+// These tests share the executable under test. Concurrent CreateProcess/pipe
+// startup stalled on native Windows; serialize workflows without skipping checks.
+static CLI_WORKFLOW: std::sync::Mutex<()> = std::sync::Mutex::new(());
 fn temporary() -> PathBuf {
     std::env::temp_dir().join(format!(
         "qx-demo-test-{}-{}",
@@ -11,6 +14,7 @@ fn temporary() -> PathBuf {
 }
 #[test]
 fn diagnostic_executable_exports_and_reloads_real_project() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
     let dir = temporary();
     let demo = dir.join("demo");
     let regenerated = dir.join("regenerated");
@@ -29,6 +33,8 @@ fn diagnostic_executable_exports_and_reloads_real_project() {
         "centerline.csv",
         "measurements.csv",
         "transitions.csv",
+        "reference-points.csv",
+        "reference-info.txt",
         "centerline.obj",
         "measurements.svg",
         "transitions.svg",
@@ -109,9 +115,58 @@ fn diagnostic_executable_exports_and_reloads_real_project() {
     // Test owns this uniquely named temporary directory.
     std::fs::remove_dir_all(dir).unwrap();
 }
+#[test]
+fn heartline_cli_roundtrip_retains_nominal_offset_and_independent_reference_geometry() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
+    let dir = temporary();
+    let first = dir.join("heartline");
+    let second = dir.join("reopened");
+    let output = Command::new(env!("CARGO_BIN_EXE_quantum-x"))
+        .args(["heartline-demo"])
+        .arg(&first)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let output = Command::new(env!("CARGO_BIN_EXE_quantum-x"))
+        .arg("generate")
+        .arg(first.join("project.qx.json"))
+        .arg(&second)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for name in [
+        "reference-points.csv",
+        "reference-info.txt",
+        "project.qx.json",
+    ] {
+        assert_eq!(
+            std::fs::read(first.join(name)).unwrap(),
+            std::fs::read(second.join(name)).unwrap()
+        );
+    }
+    let catalog = qx_style::Catalog::built_in().unwrap();
+    let project = qx_document::persistence::load(&first.join("project.qx.json"), &catalog).unwrap();
+    let source = project
+        .generate(&catalog, qx_geometry::solver::GenerationOptions::default())
+        .unwrap();
+    let reference = project.reference_geometry(&source).unwrap();
+    assert!((source.length_m() - 20. * std::f64::consts::TAU).abs() < 1e-8);
+    assert!((reference.length_m - 18. * std::f64::consts::TAU).abs() < 1e-6);
+    assert!((reference.points[0].speed_mps - 18.).abs() < 1e-7);
+    std::fs::remove_dir_all(dir).unwrap();
+}
 
 #[test]
 fn mixed_examples_export_actual_splines_and_precise_cli_edit_regenerates() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
     let dir = temporary();
     let result = Command::new(env!("CARGO_BIN_EXE_quantum-x"))
         .arg("examples")

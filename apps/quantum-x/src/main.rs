@@ -1,4 +1,5 @@
 //! Development-only authoring diagnostics and native inspection; no final editor UX.
+mod authoring;
 mod benchmark;
 mod export;
 use qx_document::{
@@ -10,7 +11,7 @@ use qx_geometry::solver::GenerationOptions;
 use qx_style::Catalog;
 use std::{error::Error, path::PathBuf};
 
-const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x benchmark\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
+const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x edit [project.qx.json]\n  quantum-x heartline-demo <output-directory>\n  quantum-x render-editor <project.qx.json> <output.png>\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x benchmark\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() || (args.len() == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -18,6 +19,20 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let catalog = Catalog::built_in()?;
+    if args[0] == "render-editor" && args.len() == 3 {
+        return authoring::render(PathBuf::from(&args[1]), PathBuf::from(&args[2]));
+    }
+    if args[0] == "heartline-demo" && args.len() == 2 {
+        return export_project(
+            qx_document::sample::heartline_reference_project(),
+            PathBuf::from(&args[1]),
+            0.1,
+            &catalog,
+        );
+    }
+    if args[0] == "edit" && args.len() <= 2 {
+        return authoring::run(args.get(1).map(PathBuf::from));
+    }
     if args[0] == "inspect" && args.len() == 2 {
         let path = PathBuf::from(&args[1]);
         return qx_rendering::inspect(path, move |path| {
@@ -46,6 +61,8 @@ fn run() -> Result<(), Box<dyn Error>> {
                 name: p.metadata.name,
                 track,
                 labels,
+                reference: None,
+                authored_reference: p.heartline.authored_reference,
             })
         })
         .map_err(Into::into);

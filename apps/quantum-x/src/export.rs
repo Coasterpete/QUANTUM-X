@@ -98,6 +98,7 @@ pub fn write_all(
     centerline(dir, track)?;
     graphs(dir, project, track)?;
     transitions(dir, project)?;
+    reference_geometry(dir, project, track)?;
     obj(dir, track)?;
     plots(dir, project, track)?;
     let mut sections = writer(dir, "sections.csv")?;
@@ -254,6 +255,58 @@ pub fn write_all(
         )?;
     }
     summary.flush()
+}
+fn reference_geometry(dir: &Path, project: &Project, track: &GeneratedTrack) -> io::Result<()> {
+    let reference = project
+        .reference_geometry(track)
+        .map_err(io::Error::other)?;
+    let mut w = writer(dir, "reference-points.csv")?;
+    writeln!(
+        w,
+        "section_id,source_s_m,reference_s_m,x_m,y_m,z_m,tangent_x,tangent_y,tangent_z,curvature_per_m,design_speed_mps,accel_x_mps2,accel_y_mps2,accel_z_mps2,normal_g,lateral_g,longitudinal_g"
+    )?;
+    for p in &reference.points {
+        writeln!(
+            w,
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            p.section_id.0,
+            p.source_distance_m,
+            p.path_distance_m,
+            p.position_m.x,
+            p.position_m.y,
+            p.position_m.z,
+            p.tangent.x,
+            p.tangent.y,
+            p.tangent.z,
+            p.curvature_per_m,
+            p.speed_mps,
+            p.acceleration_mps2.x,
+            p.acceleration_mps2.y,
+            p.acceleration_mps2.z,
+            p.normal_g,
+            p.lateral_g,
+            p.longitudinal_g
+        )?;
+    }
+    w.flush()?;
+    let mut info = writer(dir, "reference-info.txt")?;
+    writeln!(
+        info,
+        "Authored reference: {:?}\nCalculated path: {}\nCalculated length: {:.12} m\nDesign-speed kinematic estimates, not vehicle simulation telemetry.\nOne-sided derivatives at smooth-range boundaries; no finite impulse estimate.",
+        project.heartline.authored_reference,
+        if project.heartline.authored_reference
+            == qx_geometry::heartline::AuthoredReference::TrackCenterline
+        {
+            "rider reference"
+        } else {
+            "constrained physical track reference"
+        },
+        reference.length_m
+    )?;
+    for warning in &reference.warnings {
+        writeln!(info, "{warning}")?;
+    }
+    info.flush()
 }
 fn centerline(dir: &Path, track: &GeneratedTrack) -> io::Result<()> {
     let mut w = writer(dir, "centerline.csv")?;

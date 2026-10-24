@@ -105,6 +105,7 @@ pub(crate) fn append(
     let start_index = result.samples.len() - 1;
     let mut warned = false;
     for pair in boundaries.windows(2) {
+        let smooth_start = result.samples.len() - 1;
         let count = (((pair[1] - pair[0]) * length / options.max_step_m).ceil() as usize).max(4);
         ensure(
             count <= options.max_samples.saturating_sub(result.samples.len()),
@@ -173,6 +174,11 @@ pub(crate) fn append(
             result.graphs.push(graph);
             result.samples.push(next);
         }
+        result.smooth_ranges.push(crate::solver::SmoothRange {
+            section_id: section.id,
+            start_sample: smooth_start,
+            end_sample: result.samples.len() - 1,
+        });
     }
     result.sections.push(SectionRange {
         id: section.id,

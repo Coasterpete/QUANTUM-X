@@ -4,6 +4,7 @@ pub mod arc_length;
 pub mod authoring;
 pub mod curve;
 pub mod curve_edit;
+pub mod heartline;
 pub mod math;
 pub mod solver;
 mod spline_track;

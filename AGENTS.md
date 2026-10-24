@@ -322,6 +322,15 @@ Do not weaken, delete, or bypass failing tests merely to obtain green checks. Fi
 - Preserve licensing, attribution, and relevant source-history information.
 - Clearly distinguish work done locally from work pushed or published remotely.
 
+**Owner-authorized Git workflow (2026-10-24):** Git management is part of every
+major development pass. Preserve existing work, separate development passes into
+traceable commits, fetch remote state, validate, commit and push feature branches,
+create descriptive PRs targeting `main`, and merge after successful verification
+and conflict resolution. Synchronize the development branch with updated `main`.
+Do not leave completed passes uncommitted without a technical blocker. Never use
+`git reset --hard`, force-push, discard work, or delete branches with unmerged work.
+Stop destructive operations or irreconcilable conflicts and explain the issue.
+
 ## 15. Security, reliability, and dependency hygiene
 
 - Treat external files, plugins, scripts, imported models, and network content as untrusted inputs.
