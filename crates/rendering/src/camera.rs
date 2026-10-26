@@ -75,6 +75,10 @@ impl Camera {
         }
         self.distance = distance.clamp(0.01, 1e10);
     }
+    pub fn eye(&self, origin: Vec3) -> Vec3 {
+        let p = self.target + self.direction() * self.distance - dvec(origin);
+        Vec3::new(p.x, p.y, p.z)
+    }
     fn direction(&self) -> DVec3 {
         DVec3::new(
             self.yaw.cos() * self.pitch.cos(),

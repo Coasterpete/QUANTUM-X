@@ -109,7 +109,7 @@ async fn render(
         return Err("editor has no visible 3D viewport at this size".into());
     }
     let paint = ctx.tessellate(output.shapes, output.pixels_per_point);
-    let (min, max) = scene.visible_bounds(None, display.reference);
+    let (min, max) = scene.display_bounds(None, &display);
     let origin = (min + max) * 0.5;
     let mut camera = Camera::default();
     camera.fit(min, max, viewport.width() as f64 / viewport.height() as f64);
@@ -136,6 +136,23 @@ async fn render(
             resource: uniform.as_entire_binding(),
         }],
     });
+    let mut mesh = crate::mesh_gpu::MeshGpu::new(&device, format);
+    mesh.upload(&device, &queue, scene, origin)?;
+    mesh.upload(&device, &queue, scene, origin)?;
+    if scene.mesh.is_some() && mesh.uploads != 1 {
+        return Err("unchanged mesh was uploaded twice".into());
+    }
+    mesh.camera(
+        &queue,
+        &camera,
+        display
+            .selected
+            .and_then(|i| scene.track.sections.get(i))
+            .map(|r| (r.start_distance_m, r.end_distance_m)),
+        &display,
+        origin,
+        viewport.width() as f64 / viewport.height() as f64,
+    );
     let lines = vertices(scene, origin, &display);
     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
@@ -194,8 +211,22 @@ async fn render(
         pass.set_pipeline(&grid_pipeline);
         pass.set_bind_group(0, &grid_bind, &[]);
         pass.draw(0..grid_count, 0..1);
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind, &[]);
+        mesh.draw(&mut pass, &display);
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        pass.set_pipeline(if display.mode == crate::DisplayMode::Technical {
+            &pipeline
+        } else {
+            &grid_pipeline
+        });
+        pass.set_bind_group(
+            0,
+            if display.mode == crate::DisplayMode::Technical {
+                &bind
+            } else {
+                &grid_bind
+            },
+            &[],
+        );
         pass.draw(grid_count..lines.len() as u32, 0..1);
     }
     {
@@ -280,6 +311,7 @@ async fn render(
     // This reads actual GPU pixels, so it catches depth fighting that a finite
     // camera matrix or numerical geometry test cannot detect.
     if display.centerline
+        && display.mode != crate::DisplayMode::Rendered
         && display.selected == Some(0)
         && scene.track.sections.len() == 1
         && scene.track.graphs.iter().all(|g| g.curvature_per_m < 1e-12)
@@ -327,13 +359,16 @@ async fn render(
         .write_image_data(&pixels)
         .map_err(|e| e.to_string())?;
     Ok(format!(
-        "{} {:?} / {}; {} line vertices, {} visible pixels; {}x{}",
+        "{} {:?} / {}; {} line vertices, {} visible pixels; {}x{}; GPU upload {:.3} ms, {} bytes, {} uploads (second unchanged upload reused)",
         info.name,
         info.backend,
         info.driver_info,
         lines.len(),
         lit_pixels,
         width,
-        height
+        height,
+        mesh.upload_ms,
+        mesh.upload_bytes,
+        mesh.uploads
     ))
 }

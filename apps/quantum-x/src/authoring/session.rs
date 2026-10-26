@@ -20,19 +20,41 @@ pub(super) fn scene(
     catalog: &Catalog,
     options: GenerationOptions,
 ) -> Result<InspectionScene, String> {
-    let mut track = project
-        .generate(catalog, options)
-        .map_err(|e| e.to_string())?;
-    let reference = match project.reference_geometry(&track) {
-        Ok(reference) => Some(reference),
-        Err(error) => {
-            track.diagnostics.push(qx_geometry::solver::Diagnostic {
-                section_id: project.sections[0].id,
-                input: None,
-                code: "reference_error",
-                message: format!("Reference geometry unavailable: {error}"),
-            });
-            None
+    scene_cached(project, catalog, options, None)
+}
+fn scene_cached(
+    project: &Project,
+    catalog: &Catalog,
+    options: GenerationOptions,
+    cache: Option<&(Project, GenerationOptions, InspectionScene)>,
+) -> Result<InspectionScene, String> {
+    let same_path = cache.is_some_and(|(p, o, _)| {
+        *o == options && p.initial == project.initial && p.sections == project.sections
+    });
+    let solver_start = Instant::now();
+    let mut track = if same_path {
+        cache.unwrap().2.track.clone()
+    } else {
+        project
+            .generate(catalog, options)
+            .map_err(|e| e.to_string())?
+    };
+    track.diagnostics.retain(|d| d.code != "reference_error");
+    let solver_ms = solver_start.elapsed().as_secs_f64() * 1000.;
+    let reference = if same_path && cache.unwrap().0.heartline == project.heartline {
+        cache.unwrap().2.reference.clone()
+    } else {
+        match project.reference_geometry(&track) {
+            Ok(reference) => Some(reference),
+            Err(error) => {
+                track.diagnostics.push(qx_geometry::solver::Diagnostic {
+                    section_id: project.sections[0].id,
+                    input: None,
+                    code: "reference_error",
+                    message: format!("Reference geometry unavailable: {error}"),
+                });
+                None
+            }
         }
     };
     let labels = project
@@ -44,7 +66,35 @@ pub(super) fn scene(
             method: method(s).into(),
         })
         .collect();
+    let start = Instant::now();
+    let mesh = if same_path
+        && cache.unwrap().0.heartline == project.heartline
+        && cache.unwrap().0.construction == project.construction
+    {
+        cache.unwrap().2.mesh.clone().unwrap()
+    } else {
+        std::sync::Arc::new(
+            if project.heartline.authored_reference
+                == qx_geometry::heartline::AuthoredReference::RiderReference
+            {
+                qx_geometry::construction::build_reference(
+                    &track,
+                    reference
+                        .as_ref()
+                        .ok_or("Physical track inverse unavailable; previous mesh retained")?,
+                    &project.construction,
+                    Default::default(),
+                )
+            } else {
+                qx_geometry::construction::build(&track, &project.construction, Default::default())
+            }
+            .map_err(|e| e.to_string())?,
+        )
+    };
     Ok(InspectionScene {
+        mesh: Some(mesh),
+        mesh_ms: start.elapsed().as_secs_f64() * 1000.,
+        solver_ms,
         name: project.metadata.name.clone(),
         track,
         labels,
@@ -109,6 +159,13 @@ pub(super) struct Session {
     pub apply_section_requested: bool,
     pub initial_draft: qx_geometry::authoring::InitialConditions,
     pub metadata_draft: qx_document::Metadata,
+    pub construction_draft: qx_style::construction::TrackConstruction,
+    pub draft_request: Option<super::draft_workflow::DraftRequest>,
+    pub resolution_error: Option<String>,
+    pub save_failure: Option<String>,
+    pub open_dialog_requested: bool,
+    pub open_dialog_confirmed: bool,
+    pub ui_action: Option<super::draft_workflow::UiAction>,
     saved: Option<Project>,
     jobs: mpsc::SyncSender<Job>,
     queued_job: Option<Job>,
@@ -127,12 +184,16 @@ impl Session {
         let (send, results) = mpsc::channel();
         let worker_catalog = catalog.clone();
         std::thread::spawn(move || {
+            let mut cache = None;
             while let Ok(mut job) = work.recv() {
                 while let Ok(newer) = work.try_recv() {
                     job = newer;
                 }
                 let start = Instant::now();
-                let result = scene(&job.1, &worker_catalog, job.2);
+                let result = scene_cached(&job.1, &worker_catalog, job.2, cache.as_ref());
+                if let Ok(scene) = &result {
+                    cache = Some((job.1, job.2, scene.clone()));
+                }
                 if send
                     .send(GenerationResult {
                         revision: job.0,
@@ -165,6 +226,13 @@ impl Session {
             heartline_draft: project.heartline.clone(),
             initial_draft: project.initial.clone(),
             metadata_draft: project.metadata.clone(),
+            construction_draft: project.construction.clone(),
+            draft_request: None,
+            resolution_error: None,
+            save_failure: None,
+            open_dialog_requested: false,
+            open_dialog_confirmed: false,
+            ui_action: None,
             status: "Ready. Select a section to author its transitions.".into(),
             path: path.map_or(String::new(), |p| p.to_string_lossy().into_owned()),
             file_dialog: None,
@@ -219,6 +287,7 @@ impl Session {
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.metadata_draft != self.editor.project().metadata
+            || self.construction_draft != self.editor.project().construction
     }
     pub fn sync_draft(&mut self) {
         let selected = self
@@ -281,6 +350,7 @@ impl Session {
             .cloned();
         let previous_heartline = self.editor.project().heartline.clone();
         let previous_initial = self.editor.project().initial.clone();
+        let previous_construction = self.editor.project().construction.clone();
         let previous_metadata = self.editor.project().metadata.clone();
         let draft = self.draft.clone();
         // Explicit acceptance validates the complete candidate, including strict
@@ -290,7 +360,10 @@ impl Session {
         if commands.iter().any(|c| {
             !matches!(
                 c,
-                Command::SetMetadata(_) | Command::SetStyle(_) | Command::SetHeartline(_)
+                Command::SetMetadata(_)
+                    | Command::SetStyle(_)
+                    | Command::SetHeartline(_)
+                    | Command::SetConstruction(_)
             )
         }) {
             commands.push(Command::ValidateConnections {
@@ -318,6 +391,9 @@ impl Session {
                 }
                 if self.editor.project().metadata != previous_metadata {
                     self.metadata_draft = self.editor.project().metadata.clone();
+                }
+                if self.editor.project().construction != previous_construction {
+                    self.construction_draft = self.editor.project().construction.clone();
                 }
                 self.refresh_view();
                 self.draft_error = None;
@@ -352,6 +428,7 @@ impl Session {
         if self.draft_dirty()
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
+            || self.construction_draft != self.editor.project().construction
         {
             self.preview();
         } else {
@@ -372,6 +449,7 @@ impl Session {
         }
         candidate.heartline = self.heartline_draft.clone();
         candidate.initial = self.initial_draft.clone();
+        candidate.construction = self.construction_draft.clone();
         candidate
     }
     fn queue_generation(&mut self, project: Project, preview: bool) {
@@ -474,7 +552,7 @@ impl Session {
     }
     pub fn undo(&mut self, redo: bool) {
         if self.has_drafts() {
-            self.status = "Apply or cancel drafts before undo/redo.".into();
+            self.request_drafts(super::draft_workflow::DraftRequest::History { redo });
             return;
         }
         if if redo {
@@ -487,12 +565,13 @@ impl Session {
             self.heartline_draft = self.editor.project().heartline.clone();
             self.initial_draft = self.editor.project().initial.clone();
             self.metadata_draft = self.editor.project().metadata.clone();
+            self.construction_draft = self.editor.project().construction.clone();
             self.regenerate();
         }
     }
     pub fn save(&mut self) {
         if self.has_drafts() {
-            self.status = "Apply or cancel drafts before saving.".into();
+            self.request_drafts(super::draft_workflow::DraftRequest::Save);
             return;
         }
         if self.path.trim().is_empty() {
@@ -503,16 +582,25 @@ impl Session {
     }
     pub fn save_to(&mut self, path: &Path) {
         if self.has_drafts() {
-            self.status = "Apply or cancel drafts before saving.".into();
+            self.request_drafts(super::draft_workflow::DraftRequest::SaveTo(
+                path.to_path_buf(),
+            ));
             return;
         }
         match persistence::save(path, self.editor.project(), &self.catalog) {
             Ok(()) => {
                 self.path = path.to_string_lossy().into_owned();
                 self.saved = Some(self.editor.project().clone());
-                self.status = "Project saved (schema 3).".into();
+                self.save_failure = None;
+                self.status = "Project saved (schema 4).".into();
             }
-            Err(error) => self.status = format!("Save failed; document retained: {error}"),
+            Err(error) => {
+                self.status = format!(
+                    "Save failed for {}; document retained: {error}",
+                    path.display()
+                );
+                self.save_failure = Some(self.status.clone());
+            }
         }
     }
     pub fn open(&mut self, path: Option<PathBuf>, confirmed: bool) {
@@ -537,6 +625,11 @@ impl Session {
                 self.hovered = None;
                 self.viewport_inspection = None;
                 self.last_job = None;
+                self.draft_request = None;
+                self.resolution_error = None;
+                self.save_failure = None;
+                self.confirm_replace = None;
+                self.close_requested = false;
                 self.editor = editor;
                 self.saved = path.as_ref().map(|_| self.editor.project().clone());
                 self.path = path.map_or(String::new(), |p| p.to_string_lossy().into_owned());
@@ -554,6 +647,7 @@ impl Session {
                 self.heartline_draft = self.editor.project().heartline.clone();
                 self.initial_draft = self.editor.project().initial.clone();
                 self.metadata_draft = self.editor.project().metadata.clone();
+                self.construction_draft = self.editor.project().construction.clone();
                 self.regenerate();
                 self.frame_revision = Some(self.revision);
             }
@@ -565,6 +659,7 @@ impl Session {
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.metadata_draft != self.editor.project().metadata
+            || self.construction_draft != self.editor.project().construction
     }
 }
 pub(super) fn blank_project() -> Project {

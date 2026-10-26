@@ -58,6 +58,7 @@ pub(super) fn workspace(
     let before_draft = session.draft.clone();
     let before_heartline = session.heartline_draft.clone();
     let before_initial = session.initial_draft.clone();
+    let before_construction = session.construction_draft.clone();
     session.inspect_input = None;
     session.hovered = None;
     if session.visible_revision == session.revision
@@ -73,7 +74,7 @@ pub(super) fn workspace(
         ));
     }
     session.poll_file_dialog(ctx);
-    if session.file_dialog.is_none() {
+    if session.file_dialog.is_none() && !session.project_prompt_open() {
         shortcuts(session, ctx);
     }
     super::graph_gesture::update(session, ctx);
@@ -84,6 +85,8 @@ pub(super) fn workspace(
     if std::mem::take(&mut session.apply_section_requested) {
         session.apply_draft();
     }
+    // File/history actions run after numeric widgets consume this input batch.
+    session.run_ui_action();
     if session.file_dialog.is_some() {
         egui::Modal::new(egui::Id::unique("native file dialog pending")).show(ctx, |ui| {
             ui.heading("Project file dialog");
@@ -137,36 +140,52 @@ pub(super) fn workspace(
     {
         view_command = Some(ViewCommand::FitAll);
     }
-    if session.confirm_replace.is_some() {
-        egui::Window::new("Unsaved edits").collapsible(false).resizable(false).show(ctx, |ui| {
-            ui.label("Opening or creating a project will discard the current unsaved document and drafts.");
-            ui.horizontal(|ui| {
-                if ui.button("Keep current project").clicked() { session.confirm_replace = None; }
-                if ui.button("Discard and continue").clicked() { let path = session.confirm_replace.take().unwrap(); session.open(path, true); }
-            });
-        });
-    }
-    if session.close_requested {
-        egui::Window::new("Close with unsaved edits?")
-            .collapsible(false)
-            .show(ctx, |ui| {
-                ui.label("Apply/cancel drafts and save before closing, or explicitly discard.");
-                if ui.button("Keep working").clicked() {
-                    session.close_requested = false;
+    if session.file_dialog.is_none() {
+        if session.draft_request.is_some() {
+            super::draft_workflow::dialog(session, ctx);
+        } else if session.confirm_replace.is_some() || session.open_dialog_requested {
+            egui::Modal::new(egui::Id::unique("replace unsaved project")).show(ctx, |ui| {
+                ui.heading("Unsaved edits");
+                ui.label("Opening or creating a project will discard the current unsaved document and drafts only after explicit confirmation and a successful load.");
+                ui.label(session.save_state());
+                for name in session.draft_names() { ui.label(name); }
+                if ui.button("Keep current project").clicked() {
+                    session.confirm_replace = None;
+                    session.open_dialog_requested = false;
                 }
+                if ui.button("Discard and continue").clicked() {
+                    if std::mem::take(&mut session.open_dialog_requested) {
+                        session.open_dialog_confirmed = true;
+                        session.file_dialog(super::files::FileAction::Open);
+                    } else {
+                        let path = session.confirm_replace.take().unwrap();
+                        session.open(path, true);
+                    }
+                }
+            });
+        } else if session.close_requested {
+            egui::Modal::new(egui::Id::unique("close unsaved project")).show(ctx, |ui| {
+                ui.heading("Close with unsaved edits?");
+                ui.label(session.save_state());
+                for name in session.draft_names() { ui.label(name); }
+                ui.label("Keep working to save, or explicitly discard both committed changes and drafts.");
+                if ui.button("Keep working").clicked() { session.close_requested = false; }
                 if ui.button("Discard edits and close").clicked() {
                     session.close_requested = false;
                     session.close_approved = true;
                 }
             });
+        }
     }
     if session.draft != before_draft
         || session.heartline_draft != before_heartline
         || session.initial_draft != before_initial
+        || session.construction_draft != before_construction
     {
         if session.draft_dirty()
             || session.heartline_draft != session.editor.project().heartline
             || session.initial_draft != session.editor.project().initial
+            || session.construction_draft != session.editor.project().construction
         {
             session.preview();
         } else {
@@ -215,6 +234,8 @@ pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
     }
     if session.track_tab == 1 {
         ui.heading("Track Style Properties");
+        super::construction_ui::controls(session, ui);
+        ui.separator();
         styles(session, ui);
     }
     if session.track_tab == 2 {
@@ -276,13 +297,13 @@ pub(super) fn shortcuts(session: &mut Session, ctx: &egui::Context) {
         return;
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::S)) {
-        session.file_dialog(super::files::FileAction::SaveAs);
+        session.ui_action = Some(super::draft_workflow::UiAction::SaveAs);
     } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
-        session.save();
+        session.ui_action = Some(super::draft_workflow::UiAction::Save);
     }
     if !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Z))
     {
-        session.undo(false);
+        session.ui_action = Some(super::draft_workflow::UiAction::History(false));
     }
     if !ctx.egui_wants_keyboard_input()
         && ctx.input_mut(|i| {
@@ -290,13 +311,13 @@ pub(super) fn shortcuts(session: &mut Session, ctx: &egui::Context) {
                 || i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Z)
         })
     {
-        session.undo(true);
+        session.ui_action = Some(super::draft_workflow::UiAction::History(true));
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::N)) {
-        session.open(None, false);
+        session.ui_action = Some(super::draft_workflow::UiAction::New);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::O)) {
-        session.file_dialog(super::files::FileAction::Open);
+        session.ui_action = Some(super::draft_workflow::UiAction::Open);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Enter)) {
         session.apply_section_requested = true;
@@ -778,7 +799,7 @@ fn styles(session: &mut Session, ui: &mut egui::Ui) {
                 ));
                 ui.label(&style.description);
                 if style.preview.is_none() {
-                    ui.small("Concept: no asset or representative preview available.");
+                    ui.small("Concept: no production geometry or representative preview. Procedural validation construction remains separate.");
                 }
                 ui.small(format!(
                     "Compatible trains: {}",
@@ -787,7 +808,7 @@ fn styles(session: &mut Session, ui: &mut egui::Ui) {
                 if ui
                     .add_enabled(
                         selection.style_id != style.id,
-                        egui::Button::new("Apply visual style"),
+                        egui::Button::new(if style.geometry.is_some(){"Apply visual style"}else{"Apply concept selection"}),
                     )
                     .clicked()
                 {
@@ -800,7 +821,16 @@ fn styles(session: &mut Session, ui: &mut egui::Ui) {
         });
     }
     if let Some(selection) = choose {
-        session.execute(vec![Command::SetStyle(selection)]);
+        let geometry = session
+            .catalog
+            .validate_selection(&selection)
+            .ok()
+            .and_then(|s| s.geometry.clone());
+        let mut commands = vec![Command::SetStyle(selection)];
+        if let Some(geometry) = geometry {
+            commands.push(Command::SetConstruction(geometry));
+        }
+        session.execute(commands);
     }
 }
 fn vector(ui: &mut egui::Ui, label: &str, v: &mut Vec3) -> bool {

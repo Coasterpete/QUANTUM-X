@@ -5,7 +5,11 @@ pub struct SectionLabel {
     pub name: String,
     pub method: String,
 }
+#[derive(Clone)]
 pub struct InspectionScene {
+    pub mesh: Option<std::sync::Arc<qx_geometry::construction::TrackMesh>>,
+    pub mesh_ms: f64,
+    pub solver_ms: f64,
     pub name: String,
     pub track: GeneratedTrack,
     pub labels: Vec<SectionLabel>,
@@ -20,6 +24,21 @@ impl InspectionScene {
         &self,
         section: Option<usize>,
         reference_visible: bool,
+    ) -> (Vec3, Vec3) {
+        self.filtered_bounds(section, reference_visible, None)
+    }
+    pub(crate) fn display_bounds(
+        &self,
+        section: Option<usize>,
+        display: &DisplayOptions,
+    ) -> (Vec3, Vec3) {
+        self.filtered_bounds(section, display.reference, Some(display))
+    }
+    fn filtered_bounds(
+        &self,
+        section: Option<usize>,
+        reference_visible: bool,
+        display: Option<&DisplayOptions>,
     ) -> (Vec3, Vec3) {
         let samples = if let Some(s) = section.and_then(|i| self.track.sections.get(i)) {
             &self.track.samples[s.start_sample..=s.end_sample]
@@ -44,6 +63,62 @@ impl InspectionScene {
                 let p = point.position_m;
                 min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
                 max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+            }
+        }
+        if let Some(mesh) = &self.mesh {
+            let (start, end) = section
+                .and_then(|i| self.track.sections.get(i))
+                .map_or((0., self.track.length_m()), |s| {
+                    (s.start_distance_m, s.end_distance_m)
+                });
+            for c in &mesh.components {
+                if !c.visible
+                    || display.is_some_and(|d| {
+                        d.mode == DisplayMode::Technical
+                            || !match c.role {
+                                qx_style::construction::Role::Running => d.running,
+                                qx_style::construction::Role::Structure => d.structure,
+                                qx_style::construction::Role::Hardware => d.hardware,
+                            }
+                    })
+                {
+                    continue;
+                }
+                if section.is_none() {
+                    min = Vec3::new(
+                        min.x.min(c.bounds.min.x),
+                        min.y.min(c.bounds.min.y),
+                        min.z.min(c.bounds.min.z),
+                    );
+                    max = Vec3::new(
+                        max.x.max(c.bounds.max.x),
+                        max.y.max(c.bounds.max.y),
+                        max.z.max(c.bounds.max.z),
+                    );
+                } else if c.role == qx_style::construction::Role::Hardware {
+                    for p in c
+                        .placements
+                        .iter()
+                        .filter(|p| p.source_station_m >= start && p.source_station_m <= end)
+                    {
+                        for v in &c.mesh.vertices {
+                            let p = p.position_m + p.frame.local_to_world(v.position_m);
+                            min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+                            max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+                        }
+                    }
+                } else {
+                    for v in c
+                        .mesh
+                        .vertices
+                        .iter()
+                        .filter(|v| v.source_station_m >= start && v.source_station_m <= end)
+                    {
+                        let p = v.position_m;
+                        min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+                        max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+                    }
+                }
             }
         }
         (min, max)
@@ -103,8 +178,31 @@ pub(crate) fn grid_vertex_count(display: &DisplayOptions) -> u32 {
         0
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DisplayMode {
+    Rendered,
+    RenderedCenterline,
+    Technical,
+    Wireframe,
+}
+impl DisplayMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rendered => "Rendered Track",
+            Self::RenderedCenterline => "Rendered + Centerline",
+            Self::Technical => "Technical Lines",
+            Self::Wireframe => "Wireframe / Mesh Inspection",
+        }
+    }
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayOptions {
+    pub mode: DisplayMode,
+    pub running: bool,
+    pub structure: bool,
+    pub hardware: bool,
+    pub boundaries: bool,
+    pub highlights: bool,
     pub grid: bool,
     pub grid_spacing: f64,
     pub frames: bool,
@@ -121,6 +219,12 @@ pub struct DisplayOptions {
 impl Default for DisplayOptions {
     fn default() -> Self {
         Self {
+            mode: DisplayMode::RenderedCenterline,
+            running: true,
+            structure: true,
+            hardware: true,
+            boundaries: true,
+            highlights: true,
             grid: true,
             grid_spacing: 10.,
             frames: false,
@@ -162,12 +266,20 @@ pub(crate) fn vertices(
             line(
                 Vec3::new(cx + offset, 0., cz - 30. * step),
                 Vec3::new(cx + offset, 0., cz + 30. * step),
-                [0.035, 0.045, 0.055],
+                if display.mode == DisplayMode::Technical {
+                    [0.035, 0.045, 0.055]
+                } else {
+                    [0.025, 0.033, 0.044]
+                },
             );
             line(
                 Vec3::new(cx - 30. * step, 0., cz + offset),
                 Vec3::new(cx + 30. * step, 0., cz + offset),
-                [0.035, 0.045, 0.055],
+                if display.mode == DisplayMode::Technical {
+                    [0.035, 0.045, 0.055]
+                } else {
+                    [0.025, 0.033, 0.044]
+                },
             );
         }
     }
@@ -185,7 +297,7 @@ pub(crate) fn vertices(
         [0.8, 0.6, 0.9],
     ];
     for (i, s) in scene.track.sections.iter().enumerate() {
-        let color = if display.selected == Some(i) {
+        let color = if display.selected == Some(i) && display.highlights {
             [1., 1., 1.]
         } else if display.hovered == Some(i) {
             [0.95, 0.8, 0.4]
@@ -194,14 +306,17 @@ pub(crate) fn vertices(
         } else {
             colors[i % colors.len()]
         };
-        if display.centerline {
+        if display.centerline && display.mode != DisplayMode::Rendered {
             for pair in scene.track.samples[s.start_sample..=s.end_sample].windows(2) {
                 line(pair[0].position_m, pair[1].position_m, color);
             }
         }
-        for index in [s.start_sample, s.end_sample] {
+        for index in [s.start_sample, s.end_sample]
+            .into_iter()
+            .filter(|_| display.boundaries)
+        {
             let sample = &scene.track.samples[index];
-            let marker_scale = if display.selected == Some(i) {
+            let marker_scale = if display.selected == Some(i) && display.highlights {
                 ((s.end_distance_m - s.start_distance_m) * 0.01).clamp(0.001, 3.)
             } else {
                 scale
@@ -213,7 +328,7 @@ pub(crate) fn vertices(
                     [1., 1., 1.],
                 );
             }
-            if display.selected == Some(i) {
+            if display.selected == Some(i) && display.highlights {
                 let end = sample.position_m + sample.frame.tangent() * marker_scale * 3.;
                 line(sample.position_m, end, [0.9, 0.65, 0.3]);
                 for side in [-1., 1.] {
@@ -324,6 +439,9 @@ mod tests {
     };
     fn scene() -> InspectionScene {
         InspectionScene {
+            mesh: None,
+            mesh_ms: 0.,
+            solver_ms: 0.,
             name: "picking fixture".into(),
             track: generate(
                 &InitialConditions::default(),

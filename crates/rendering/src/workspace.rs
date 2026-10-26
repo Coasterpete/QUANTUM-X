@@ -104,13 +104,13 @@ struct Workspace {
 }
 impl Workspace {
     fn fit(&mut self, selected: bool) {
-        let (min, max) = self.scene.visible_bounds(
+        let (min, max) = self.scene.display_bounds(
             if selected {
                 self.display.selected
             } else {
                 None
             },
-            self.display.reference,
+            &self.display,
         );
         self.camera.fit(
             min,
@@ -120,6 +120,7 @@ impl Workspace {
     }
     fn rebuild(&mut self) -> Result<(), String> {
         if let Some(gpu) = &mut self.gpu {
+            gpu.upload_scene(&self.scene, self.origin, &self.display)?;
             gpu.upload(
                 &vertices(&self.scene, self.origin, &self.display),
                 crate::scene::grid_vertex_count(&self.display),

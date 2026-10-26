@@ -734,3 +734,39 @@ fn endpoint_drag_preserves_every_transition_function_and_constant_semantics() {
         assert!(h.session.draft.validate().is_ok());
     }
 }
+#[test]
+fn m7_real_graph_gestures_regenerate_solids_and_reuse_accepted_preview() {
+    for channel in [ChannelKey::Normal, ChannelKey::Lateral, ChannelKey::Roll] {
+        let mut h = Harness::new(channel, 1., false);
+        h.session.regenerate();
+        h.wait();
+        let initial = h.scene.mesh.as_ref().unwrap().clone();
+        let pos = h.target(1, Some(true));
+        h.press(pos);
+        h.move_to(pos - egui::vec2(0., 8.));
+        h.wait();
+        let preview = h.scene.mesh.as_ref().unwrap().clone();
+        assert_ne!(initial.components[0].mesh, preview.components[0].mesh);
+        assert!(h.session.visible_preview);
+        let revision = h.session.revision;
+        h.release(pos - egui::vec2(0., 8.));
+        assert!(!h.session.visible_preview);
+        assert_eq!(h.session.revision, revision);
+        assert!(std::sync::Arc::ptr_eq(
+            &preview,
+            h.scene.mesh.as_ref().unwrap()
+        ));
+        h.session.undo(false);
+        h.wait();
+        assert_eq!(
+            &initial.components,
+            &h.scene.mesh.as_ref().unwrap().components
+        );
+        h.session.undo(true);
+        h.wait();
+        assert_eq!(
+            &preview.components,
+            &h.scene.mesh.as_ref().unwrap().components
+        );
+    }
+}

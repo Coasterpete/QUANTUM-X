@@ -1,6 +1,6 @@
 //! Desktop command shell; all actions dispatch existing document, view or layout services.
 use super::{
-    files::FileAction,
+    draft_workflow::UiAction,
     icons::{self, Icon},
     session::Session,
     workbench::{Pane, Profile},
@@ -27,6 +27,10 @@ pub(super) fn status_height(session: &Session) -> f32 {
                 32.
             } else {
                 0.
+            } + if session.save_failure.is_some() {
+                24.
+            } else {
+                0.
             }
         },
         |drag| drag.status_height,
@@ -40,25 +44,26 @@ pub(super) fn show(
     let (mut window, mut floating, mut view) = (None, None, None);
     ctx.root_ui(|root| {
         egui::Panel::top("workbench commands").show(root, |ui| {
-            ui.add_enabled_ui(session.file_dialog.is_none(), |ui| {
+            ui.add_enabled_ui(session.file_dialog.is_none() && !session.project_prompt_open() && session.graph_drag.is_none(), |ui| {
                 egui::MenuBar::new().ui(ui, |ui| {
                     ui.menu_button("File", |ui| {
-                        if icons::button(ui, Icon::New, "New project   Ctrl+N", true, "Create an untitled project").clicked() { session.open(None, false); ui.close(); }
-                        if icons::button(ui, Icon::Open, "Open…   Ctrl+O", true, "Choose an existing project").clicked() { session.file_dialog(FileAction::Open); ui.close(); }
+                        if icons::button(ui, Icon::New, "New project   Ctrl+N", true, "Create an untitled project").clicked() { session.ui_action = Some(UiAction::New); ui.close(); }
+                        if icons::button(ui, Icon::Open, "Open…   Ctrl+O", true, "Choose an existing project").clicked() { session.ui_action = Some(UiAction::Open); ui.close(); }
                         ui.separator();
-                        if icons::button(ui, Icon::Save, "Save   Ctrl+S", true, "Save to current file, or choose a file for an untitled project").clicked() { session.save(); ui.close(); }
-                        if icons::button(ui, Icon::SaveAs, "Save As…   Ctrl+Shift+S", true, "Save to another project file").clicked() { session.file_dialog(FileAction::SaveAs); ui.close(); }
+                        if icons::button(ui, Icon::Save, "Save   Ctrl+S", true, "Save to current file, or choose a file for an untitled project").clicked() { session.ui_action = Some(UiAction::Save); ui.close(); }
+                        if icons::button(ui, Icon::SaveAs, "Save As…   Ctrl+Shift+S", true, "Save to another project file").clicked() { session.ui_action = Some(UiAction::SaveAs); ui.close(); }
                         ui.separator();
                         ui.label("Current file"); ui.monospace(if session.path.is_empty() { "Untitled · no file yet" } else { &session.path });
                     });
                     ui.menu_button("Edit", |ui| {
-                        if icons::button(ui, Icon::Undo, "Undo   Ctrl+Z", session.editor.can_undo() && !session.has_drafts(), "Undo last document transaction").clicked() { session.undo(false); ui.close(); }
-                        if icons::button(ui, Icon::Redo, "Redo   Ctrl+Y", session.editor.can_redo() && !session.has_drafts(), "Redo last document transaction").clicked() { session.undo(true); ui.close(); }
+                        if icons::button(ui, Icon::Undo, "Undo   Ctrl+Z", session.editor.can_undo() || session.has_drafts(), "Undo last document transaction").clicked() { session.ui_action = Some(UiAction::History(false)); ui.close(); }
+                        if icons::button(ui, Icon::Redo, "Redo   Ctrl+Y", session.editor.can_redo() || session.has_drafts(), "Redo last document transaction").clicked() { session.ui_action = Some(UiAction::History(true)); ui.close(); }
                         ui.separator();
                         if icons::button(ui, Icon::Apply, "Apply section   Ctrl+Enter", session.draft_dirty(), "Commit selected section draft").clicked() { session.apply_draft(); ui.close(); }
                         if icons::button(ui, Icon::Cancel, "Cancel section draft   Esc", session.draft_dirty(), "Restore committed section").clicked() { session.cancel_section(); ui.close(); }
                     });
                     ui.menu_button("View", |ui| {
+                        ui.menu_button("Track display",|ui|{for mode in [qx_rendering::DisplayMode::Rendered,qx_rendering::DisplayMode::RenderedCenterline,qx_rendering::DisplayMode::Technical,qx_rendering::DisplayMode::Wireframe] {ui.selectable_value(&mut display.mode,mode,mode.label());}});
                         if icons::button(ui, Icon::FitAll, "Fit All   F over viewport", true, "Fit all generated track references").clicked() { view = Some(ViewCommand::FitAll); ui.close(); }
                         if icons::button(ui, Icon::FitSelection, "Fit Selection", true, "Fit selected section").clicked() { view = Some(ViewCommand::FitSelected); ui.close(); }
                         for (label, command) in [("Perspective", ViewCommand::Perspective), ("Top", ViewCommand::Top), ("Side", ViewCommand::Side), ("Front", ViewCommand::Front), ("Toggle orthographic", ViewCommand::ToggleOrthographic)] {
@@ -92,18 +97,21 @@ pub(super) fn show(
                 });
                 ui.separator();
                 ui.horizontal_wrapped(|ui| {
-                    if icons::button(ui, Icon::New, "New", true, "New project · Ctrl+N").clicked() { session.open(None, false); }
-                    if icons::button(ui, Icon::Open, "Open", true, "Open project · Ctrl+O").clicked() { session.file_dialog(FileAction::Open); }
-                    if icons::button(ui, Icon::Save, "Save", true, "Save project · Ctrl+S").clicked() { session.save(); }
+                    if icons::button(ui, Icon::New, "New", true, "New project · Ctrl+N").clicked() { session.ui_action = Some(UiAction::New); }
+                    if icons::button(ui, Icon::Open, "Open", true, "Open project · Ctrl+O").clicked() { session.ui_action = Some(UiAction::Open); }
+                    if icons::button(ui, Icon::Save, "Save", true, "Save project · Ctrl+S").clicked() { session.ui_action = Some(UiAction::Save); }
                     ui.separator();
-                    if icons::button(ui, Icon::Undo, "Undo", session.editor.can_undo() && !session.has_drafts(), "Undo · Ctrl+Z. Apply/Cancel pending drafts first.").clicked() { session.undo(false); }
-                    if icons::button(ui, Icon::Redo, "Redo", session.editor.can_redo() && !session.has_drafts(), "Redo · Ctrl+Y. Apply/Cancel pending drafts first.").clicked() { session.undo(true); }
+                    if icons::button(ui, Icon::Undo, "Undo", session.editor.can_undo() || session.has_drafts(), "Undo · Ctrl+Z. Apply/Cancel pending drafts first.").clicked() { session.ui_action = Some(UiAction::History(false)); }
+                    if icons::button(ui, Icon::Redo, "Redo", session.editor.can_redo() || session.has_drafts(), "Redo · Ctrl+Y. Apply/Cancel pending drafts first.").clicked() { session.ui_action = Some(UiAction::History(true)); }
                     ui.separator();
                     ui.selectable_value(&mut session.workbench.active, Profile::Track, "Track · Ctrl+1");
                     ui.selectable_value(&mut session.workbench.active, Profile::Train, "Train · Ctrl+2");
                     ui.separator();
                     ui.add_sized([(ui.available_size_before_wrap().x - 110.).clamp(80., 400.), 20.], egui::Label::new(egui::RichText::new(&session.editor.project().metadata.name).strong()).truncate().halign(egui::Align::Min)).on_hover_text(if session.path.is_empty() { "Untitled project" } else { &session.path });
-                    ui.small(if session.pending_edits() { "Unsaved edits" } else { "Saved" });
+                    ui.small(session.save_state()).on_hover_text(session.save_failure.as_deref().unwrap_or("Drafts are previews; only committed changes are written to disk."));
+                    if ui.add_enabled(session.has_drafts(), egui::Button::new("Drafts…")).on_hover_text(session.draft_names().join("\n")).clicked() {
+                        session.request_drafts(super::draft_workflow::DraftRequest::Review);
+                    }
                 });
             });
         });
@@ -111,6 +119,9 @@ pub(super) fn show(
         // resize the dock and move a graph handle under the held pointer.
         egui::Panel::bottom("project status").exact_size(status_height(session)).show(root, |ui| {
             super::workflow::resolution(session, ui);
+            if let Some(error) = &session.save_failure {
+                ui.add(egui::Label::new(egui::RichText::new(error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(error);
+            }
             ui.add(egui::Label::new(&session.status).truncate()).on_hover_text(&session.status);
             let readout = session.graph_readout.take();
             if let Some(message) = &session.graph_feedback {

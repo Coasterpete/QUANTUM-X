@@ -11,7 +11,7 @@ use qx_geometry::solver::GenerationOptions;
 use qx_style::Catalog;
 use std::{error::Error, path::PathBuf};
 
-const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x edit [project.qx.json]\n  quantum-x heartline-demo <output-directory>\n  quantum-x render-editor <project.qx.json> <output.png> [track|train [width height [section-id channel]]]\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x authoring-scenario <output-directory>\n  quantum-x benchmark\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
+const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x edit [project.qx.json]\n  quantum-x heartline-demo <output-directory>\n  quantum-x render-editor <project.qx.json> <output.png> [track|train [width height [section-id channel]]]\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x authoring-scenario <output-directory>\n  quantum-x track-scenario <output-directory>\n  quantum-x benchmark\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() || (args.len() == 1 && (args[0] == "--help" || args[0] == "-h")) {
@@ -19,6 +19,9 @@ fn run() -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
     let catalog = Catalog::built_in()?;
+    if args[0] == "track-scenario" && args.len() == 2 {
+        return authoring::track_scenario(PathBuf::from(&args[1]));
+    }
     if args[0] == "authoring-scenario" && args.len() == 2 {
         return authoring::authoring_scenario(PathBuf::from(&args[1]));
     }
@@ -70,33 +73,7 @@ fn run() -> Result<(), Box<dyn Error>> {
         let path = PathBuf::from(&args[1]);
         return qx_rendering::inspect(path, move |path| {
             let p = persistence::load(path, &catalog).map_err(|e| e.to_string())?;
-            let track = p
-                .generate(&catalog, GenerationOptions::default())
-                .map_err(|e| e.to_string())?;
-            let labels = p
-                .sections
-                .iter()
-                .map(|s| qx_rendering::SectionLabel {
-                    id: s.id,
-                    name: s.name.clone(),
-                    method: match &s.kind {
-                        qx_geometry::authoring::SectionKind::Spline { curve } => curve.method(),
-                        qx_geometry::authoring::SectionKind::Straight {} => "straight",
-                        qx_geometry::authoring::SectionKind::Arc { .. } => "arc",
-                        qx_geometry::authoring::SectionKind::Force { .. } => "force-vector",
-                        qx_geometry::authoring::SectionKind::Geometric { .. } => "world-geometric",
-                        qx_geometry::authoring::SectionKind::RiderLocal { .. } => "rider-local",
-                    }
-                    .into(),
-                })
-                .collect();
-            Ok(qx_rendering::InspectionScene {
-                name: p.metadata.name,
-                track,
-                labels,
-                reference: None,
-                authored_reference: p.heartline.authored_reference,
-            })
+            authoring::inspection_scene(&p, &catalog)
         })
         .map_err(Into::into);
     }

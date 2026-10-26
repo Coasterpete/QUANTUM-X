@@ -22,7 +22,7 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
         .and_then(|v| v.as_u64())
         .ok_or_else(|| crate::DocumentError("missing/integer schema version required".into()))?;
     require(
-        (1..=3).contains(&version),
+        (1..=4).contains(&version),
         "unsupported project schema version",
     )?;
     require(
@@ -32,6 +32,14 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
             value.get("heartline").is_some()
         },
         "heartline settings require schema version 3 and must be present in version 3",
+    )?;
+    require(
+        if version < 4 {
+            value.get("construction").is_none()
+        } else {
+            value.get("construction").is_some()
+        },
+        "construction requires schema version 4 and must be present in version 4",
     )?;
     let mut project: Project = serde_json::from_str(json)?;
     match project.schema_version {
@@ -54,7 +62,7 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
             )?;
             project.schema_version = crate::SCHEMA_VERSION;
         }
-        2 => project.schema_version = crate::SCHEMA_VERSION,
+        2 | 3 => project.schema_version = crate::SCHEMA_VERSION,
         crate::SCHEMA_VERSION => {}
         _ => {
             return Err(crate::DocumentError(
