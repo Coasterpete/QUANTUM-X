@@ -71,6 +71,10 @@ pub struct SectionRange {
     pub end_sample: usize,
     pub start_distance_m: f64,
     pub end_distance_m: f64,
+    /// Exact one-sided endpoint angular rate in world radians/metre. Derived,
+    /// never persisted; used to initialize an explicitly inserted section.
+    pub end_angular_rate_rad_per_m: Vec3,
+    pub reference_speed_mps: f64,
 }
 /// Measurements are at integration-interval midpoints. Derivatives come from
 /// adjacent generated frames, independently of the authored force values.
@@ -459,6 +463,8 @@ pub fn generate(
             end_sample: result.samples.len() - 1,
             start_distance_m: start_distance,
             end_distance_m: distance,
+            end_angular_rate_rad_per_m: previous.expect("resolved endpoint").0,
+            reference_speed_mps: context.speed,
         });
     }
     Ok(result)
@@ -505,8 +511,11 @@ pub(crate) fn record_connection(
             section.incoming_boundary != BoundaryPolicy::RequireContinuousRates
                 || ((old - omega).length() <= 1e-8 && (speed - old_speed).abs() <= 1e-8),
             format!(
-                "section {} requires continuous curvature/twist/reference speed at its start",
-                section.id.0
+                "section {} requires continuous incoming rates: curvature gap {:.10} /m, twist gap {:.10} rad/m, design-speed gap {:.10} m/s. Edit the incoming profiles/speed, or explicitly allow a rate jump; the pose is inherited unchanged",
+                section.id.0,
+                curvature_vector_gap_per_m,
+                twist_rate_gap_rad_per_m,
+                speed - old_speed
             ),
         )?;
         result.connections.push(SectionConnection {

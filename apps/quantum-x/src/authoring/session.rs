@@ -66,17 +66,23 @@ struct GenerationResult {
     revision: u64,
     result: Result<InspectionScene, String>,
     elapsed_ms: f64,
-    preview: bool,
 }
-type Job = (u64, Project, GenerationOptions, bool);
+type Job = (u64, Project, GenerationOptions);
 pub(super) struct Session {
+    pub workbench: super::workbench::Workbench,
+    pub preferences: super::workbench::PreferenceStore,
+    pub display_dialog: bool,
+    pub window_draft: qx_rendering::WindowPreferences,
     pub editor: Editor,
     pub catalog: Catalog,
     pub path: String,
+    pub file_dialog: Option<super::files::Dialog>,
     pub selected: SectionId,
+    pub next_section_id: Option<u64>,
     pub draft: Section,
     pub channel: ChannelKey,
     pub transition: usize,
+    pub track_tab: usize,
     pub heartline_draft: HeartlineSettings,
     pub status: String,
     pub revision: u64,
@@ -87,15 +93,28 @@ pub(super) struct Session {
     pub confirm_replace: Option<Option<PathBuf>>,
     pub close_requested: bool,
     pub close_approved: bool,
-    pub graph_min: f64,
-    pub graph_max: f64,
+    pub graph_view: super::graph_view::State,
     pub derived_graph: usize,
+    pub graph_drag: Option<super::graph_gesture::Drag>,
+    pub graph_feedback: Option<String>,
+    pub graph_readout: Option<String>,
+    pub pending_action: Option<super::workflow::PendingAction>,
+    pub draft_error: Option<String>,
+    pub visible_preview: bool,
+    pub frame_requested: bool,
+    pub inspect_input: Option<(SectionId, f64)>,
+    pub hovered: Option<SectionId>,
+    pub viewport_inspection: Option<(SectionId, f64)>,
+    pub keyboard_owned_last_frame: bool,
+    pub apply_section_requested: bool,
     pub initial_draft: qx_geometry::authoring::InitialConditions,
     pub metadata_draft: qx_document::Metadata,
     saved: Option<Project>,
     jobs: mpsc::SyncSender<Job>,
     queued_job: Option<Job>,
     results: mpsc::Receiver<GenerationResult>,
+    last_job: Option<(Project, GenerationOptions, bool)>,
+    frame_revision: Option<u64>,
 }
 impl Session {
     pub fn new(
@@ -119,7 +138,6 @@ impl Session {
                         revision: job.0,
                         result,
                         elapsed_ms: start.elapsed().as_secs_f64() * 1000.,
-                        preview: job.3,
                     })
                     .is_err()
                 {
@@ -127,16 +145,29 @@ impl Session {
                 }
             }
         });
-        Ok(Self {
+        let mut session = Self {
+            workbench: Default::default(),
+            preferences: Default::default(),
+            display_dialog: false,
+            window_draft: Default::default(),
             selected: project.sections[0].id,
+            next_section_id: project
+                .sections
+                .iter()
+                .map(|s| s.id.0)
+                .max()
+                .unwrap_or(0)
+                .checked_add(1),
             draft: project.sections[0].clone(),
             channel: ChannelKey::Roll,
             transition: 0,
+            track_tab: 0,
             heartline_draft: project.heartline.clone(),
             initial_draft: project.initial.clone(),
             metadata_draft: project.metadata.clone(),
-            status: "Ready. Development controls; authored graphs drive the Rust solver.".into(),
+            status: "Ready. Select a section to author its transitions.".into(),
             path: path.map_or(String::new(), |p| p.to_string_lossy().into_owned()),
+            file_dialog: None,
             saved: path.map(|_| project),
             editor,
             catalog,
@@ -151,10 +182,25 @@ impl Session {
             confirm_replace: None,
             close_requested: false,
             close_approved: false,
-            graph_min: -1.,
-            graph_max: 3.,
+            graph_view: Default::default(),
             derived_graph: 0,
-        })
+            graph_drag: None,
+            graph_feedback: None,
+            graph_readout: None,
+            pending_action: None,
+            draft_error: None,
+            visible_preview: false,
+            frame_requested: true,
+            inspect_input: None,
+            hovered: None,
+            viewport_inspection: None,
+            keyboard_owned_last_frame: false,
+            apply_section_requested: false,
+            last_job: None,
+            frame_revision: None,
+        };
+        super::graph_view::sync(&mut session);
+        Ok(session)
     }
     pub fn dirty(&self) -> bool {
         self.saved.as_ref() != Some(self.editor.project())
@@ -195,17 +241,37 @@ impl Session {
                 .len()
                 - 1,
         );
+        super::graph_view::sync(self);
     }
     pub fn select(&mut self, id: SectionId) {
-        if self.draft_dirty() {
-            self.status =
-                "Apply or cancel the section draft before selecting another section.".into();
+        if id == self.selected {
+            return;
+        }
+        if !self.editor.project().sections.iter().any(|s| s.id == id) {
+            self.status = "Selected section is no longer in this document.".into();
+            return;
+        }
+        if self.defer_section_action(super::workflow::PendingAction::Select(id)) {
             return;
         }
         self.selected = id;
+        self.graph_feedback = None;
+        self.inspect_input = None;
+        self.pending_action = None;
         self.sync_draft();
     }
-    pub fn execute(&mut self, commands: Vec<Command>) {
+    pub fn select_channel(&mut self, key: ChannelKey) {
+        if self.graph_drag.is_none()
+            && key != self.channel
+            && qx_document::editing::channel_keys(&self.draft).contains(&key)
+        {
+            self.channel = key;
+            self.graph_feedback = None;
+            self.transition = 0;
+            super::graph_view::sync(self);
+        }
+    }
+    pub fn execute(&mut self, mut commands: Vec<Command>) -> bool {
         let previous_section = self
             .editor
             .project()
@@ -217,6 +283,20 @@ impl Session {
         let previous_initial = self.editor.project().initial.clone();
         let previous_metadata = self.editor.project().metadata.clone();
         let draft = self.draft.clone();
+        // Explicit acceptance validates the complete candidate, including strict
+        // downstream boundaries, before publishing either document or history.
+        // Live previews remain on the coalescing worker. This bounded preflight
+        // runs only at a transaction boundary, never on ordinary pointer motion.
+        if commands.iter().any(|c| {
+            !matches!(
+                c,
+                Command::SetMetadata(_) | Command::SetStyle(_) | Command::SetHeartline(_)
+            )
+        }) {
+            commands.push(Command::ValidateConnections {
+                options: self.options,
+            });
+        }
         match self.editor.execute(commands) {
             Ok(()) => {
                 self.sync_draft();
@@ -239,22 +319,49 @@ impl Session {
                 if self.editor.project().metadata != previous_metadata {
                     self.metadata_draft = self.editor.project().metadata.clone();
                 }
-                self.regenerate();
+                self.refresh_view();
+                self.draft_error = None;
+                self.graph_feedback = None;
+                true
             }
             Err(error) => {
-                self.status = format!("Edit rejected; document/history retained: {error}")
+                // Results queued before the rejected inputs must not erase the
+                // actionable failure or publish a now-unrelated preview.
+                self.revision += 1;
+                self.queued_job = None;
+                self.last_job = None;
+                self.status = format!("Edit rejected; document/history retained: {error}");
+                self.draft_error = Some(self.status.clone());
+                false
             }
         }
     }
-    pub fn apply_draft(&mut self) {
-        self.execute(vec![Command::ReplaceSection {
+    pub fn apply_draft(&mut self) -> bool {
+        let accepted = self.execute(vec![Command::ReplaceSection {
             section: self.draft.clone(),
         }]);
+        if accepted {
+            self.pending_action = None;
+        }
+        accepted
     }
     pub fn regenerate(&mut self) {
         self.queue_generation(self.editor.project().clone(), false);
     }
+    pub fn refresh_view(&mut self) {
+        if self.draft_dirty()
+            || self.heartline_draft != self.editor.project().heartline
+            || self.initial_draft != self.editor.project().initial
+        {
+            self.preview();
+        } else {
+            self.regenerate();
+        }
+    }
     pub fn preview(&mut self) {
+        self.queue_generation(self.preview_project(), true);
+    }
+    pub fn preview_project(&self) -> Project {
         let mut candidate = self.editor.project().clone();
         if let Some(section) = candidate
             .sections
@@ -264,15 +371,45 @@ impl Session {
             *section = self.draft.clone();
         }
         candidate.heartline = self.heartline_draft.clone();
-        self.queue_generation(candidate, true);
+        candidate.initial = self.initial_draft.clone();
+        candidate
     }
     fn queue_generation(&mut self, project: Project, preview: bool) {
-        self.revision += 1;
-        self.queued_job = None;
-        match self
-            .jobs
-            .try_send((self.revision, project, self.options, preview))
+        if let Some((p, o, was_preview)) = &mut self.last_job
+            && p == &project
+            && *o == self.options
         {
+            // Acceptance changes the role of identical geometry, not its inputs.
+            // Reuse an in-flight or published preview instead of generating twice.
+            if *was_preview != preview
+                && self.visible_revision == self.revision
+                && self.draft_error.is_none()
+            {
+                self.visible_preview = preview;
+                self.status = self.status.replace(
+                    if preview {
+                        "Document"
+                    } else {
+                        "DRAFT PREVIEW (Apply to save)"
+                    },
+                    if preview {
+                        "DRAFT PREVIEW (Apply to save)"
+                    } else {
+                        "Document"
+                    },
+                );
+            }
+            *was_preview = preview;
+            return;
+        }
+        self.last_job = Some((project.clone(), self.options, preview));
+        self.draft_error = None;
+        self.revision += 1;
+        if self.frame_revision.is_some() {
+            self.frame_revision = Some(self.revision);
+        }
+        self.queued_job = None;
+        match self.jobs.try_send((self.revision, project, self.options)) {
             Ok(()) => self.status = format!("Generating revision {}…", self.revision),
             Err(mpsc::TrySendError::Full(job)) => {
                 self.queued_job = Some(job);
@@ -301,9 +438,18 @@ impl Session {
             match result.result {
                 Ok(scene) => {
                     self.visible_revision = result.revision;
+                    self.visible_preview = self
+                        .last_job
+                        .as_ref()
+                        .is_some_and(|(_, _, preview)| *preview);
+                    self.draft_error = None;
+                    if self.frame_revision == Some(result.revision) {
+                        self.frame_requested = true;
+                        self.frame_revision = None;
+                    }
                     self.status = format!(
                         "{} revision {} generated in {:.2} ms; {:.3} m, {} samples",
-                        if result.preview {
+                        if self.visible_preview {
                             "DRAFT PREVIEW (Apply to save)"
                         } else {
                             "Document"
@@ -319,7 +465,8 @@ impl Session {
                     self.status = format!(
                         "Generation failed for revision {}: {error}. Previous view retained; undo or revise inputs.",
                         result.revision
-                    )
+                    );
+                    self.draft_error = Some(self.status.clone());
                 }
             }
         }
@@ -335,6 +482,7 @@ impl Session {
         } else {
             self.editor.undo()
         } {
+            self.graph_feedback = None;
             self.sync_draft();
             self.heartline_draft = self.editor.project().heartline.clone();
             self.initial_draft = self.editor.project().initial.clone();
@@ -348,11 +496,19 @@ impl Session {
             return;
         }
         if self.path.trim().is_empty() {
-            self.status = "Enter a project save path first.".into();
+            self.file_dialog(super::files::FileAction::SaveAs);
             return;
         }
-        match persistence::save(Path::new(&self.path), self.editor.project(), &self.catalog) {
+        self.save_to(&PathBuf::from(&self.path));
+    }
+    pub fn save_to(&mut self, path: &Path) {
+        if self.has_drafts() {
+            self.status = "Apply or cancel drafts before saving.".into();
+            return;
+        }
+        match persistence::save(path, self.editor.project(), &self.catalog) {
             Ok(()) => {
+                self.path = path.to_string_lossy().into_owned();
                 self.saved = Some(self.editor.project().clone());
                 self.status = "Project saved (schema 3).".into();
             }
@@ -368,17 +524,38 @@ impl Session {
             Some(path) => persistence::load(path, &self.catalog),
             None => Ok(blank_project()),
         };
-        match result.and_then(|p| Editor::new(p, self.catalog.clone(), 64)) {
+        match result.and_then(|p| {
+            p.generate(&self.catalog, self.options)?;
+            Editor::new(p, self.catalog.clone(), 64)
+        }) {
             Ok(editor) => {
+                self.graph_view = Default::default();
+                self.graph_drag = None;
+                self.graph_feedback = None;
+                self.pending_action = None;
+                self.inspect_input = None;
+                self.hovered = None;
+                self.viewport_inspection = None;
+                self.last_job = None;
                 self.editor = editor;
                 self.saved = path.as_ref().map(|_| self.editor.project().clone());
                 self.path = path.map_or(String::new(), |p| p.to_string_lossy().into_owned());
                 self.selected = self.editor.project().sections[0].id;
+                self.next_section_id = self
+                    .editor
+                    .project()
+                    .sections
+                    .iter()
+                    .map(|s| s.id.0)
+                    .max()
+                    .unwrap_or(0)
+                    .checked_add(1);
                 self.sync_draft();
                 self.heartline_draft = self.editor.project().heartline.clone();
                 self.initial_draft = self.editor.project().initial.clone();
                 self.metadata_draft = self.editor.project().metadata.clone();
                 self.regenerate();
+                self.frame_revision = Some(self.revision);
             }
             Err(error) => self.status = format!("Open failed; current document retained: {error}"),
         }

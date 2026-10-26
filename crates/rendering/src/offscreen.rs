@@ -45,7 +45,8 @@ async fn render(
         let _ = error_tx.send(e.to_string());
     }));
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let pipeline = line_pipeline(&device, format);
+    let pipeline = line_pipeline(&device, format, true);
+    let grid_pipeline = line_pipeline(&device, format, false);
     let texture_descriptor = wgpu::TextureDescriptor {
         label: Some("headless editor verification"),
         size: wgpu::Extent3d {
@@ -70,16 +71,13 @@ async fn render(
         })
         .create_view(&Default::default());
     let ctx = egui::Context::default();
-    let mut display = DisplayOptions {
-        reference: true,
-        ..Default::default()
-    };
+    let mut display = DisplayOptions::default();
     let mut viewport = egui::Rect::NOTHING;
     let mut renderer = egui_wgpu::Renderer::new(&device, format, Default::default());
     let mut output = None;
     let mut pending_free = vec![];
-    // Two passes allow egui panel sizing and font atlases to settle.
-    for _ in 0..2 {
+    // Font installation, nested command rows and dock sizing settle on successive passes.
+    for frame in 0..4 {
         let mut next = ctx.run_pass(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
@@ -89,7 +87,12 @@ async fn render(
                 ..Default::default()
             },
             |ctx| {
-                viewport = surface.ui(ctx, scene, &mut display).viewport;
+                let result = surface.ui(ctx, scene, &mut display);
+                viewport = result.viewport;
+                if frame == 0 && result.profile == 1 {
+                    display.reference = true;
+                    display.offsets = true;
+                }
             },
         );
         for (id, deltas) in &next.textures_delta.set {
@@ -106,7 +109,7 @@ async fn render(
         return Err("editor has no visible 3D viewport at this size".into());
     }
     let paint = ctx.tessellate(output.shapes, output.pixels_per_point);
-    let (min, max) = scene.bounds(None);
+    let (min, max) = scene.visible_bounds(None, display.reference);
     let origin = (min + max) * 0.5;
     let mut camera = Camera::default();
     camera.fit(min, max, viewport.width() as f64 / viewport.height() as f64);
@@ -120,6 +123,14 @@ async fn render(
     let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: None,
         layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: uniform.as_entire_binding(),
+        }],
+    });
+    let grid_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("headless grid camera"),
+        layout: &grid_pipeline.get_bind_group_layout(0),
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: uniform.as_entire_binding(),
@@ -164,8 +175,6 @@ async fn render(
             }),
             ..Default::default()
         });
-        pass.set_pipeline(&pipeline);
-        pass.set_bind_group(0, &bind, &[]);
         pass.set_vertex_buffer(0, buffer.slice(..));
         pass.set_viewport(
             viewport.left(),
@@ -181,7 +190,13 @@ async fn render(
             viewport.width() as u32,
             viewport.height() as u32,
         );
-        pass.draw(0..lines.len() as u32, 0..1);
+        let grid_count = crate::scene::grid_vertex_count(&display);
+        pass.set_pipeline(&grid_pipeline);
+        pass.set_bind_group(0, &grid_bind, &[]);
+        pass.draw(0..grid_count, 0..1);
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.draw(grid_count..lines.len() as u32, 0..1);
     }
     {
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -260,6 +275,48 @@ async fn render(
         .count();
     if lit_pixels < 100 {
         return Err("offscreen render produced no meaningful visible content".into());
+    }
+    // A selected isolated straight must stay visible across the coplanar grid.
+    // This reads actual GPU pixels, so it catches depth fighting that a finite
+    // camera matrix or numerical geometry test cannot detect.
+    if display.centerline
+        && display.selected == Some(0)
+        && scene.track.sections.len() == 1
+        && scene.track.graphs.iter().all(|g| g.curvature_per_m < 1e-12)
+    {
+        let projection = camera.projection(origin, viewport);
+        let mut tested = 0;
+        let mut visible = 0;
+        for sample in scene
+            .track
+            .samples
+            .iter()
+            .step_by((scene.track.samples.len() / 64).max(1))
+        {
+            let Some(p) = projection
+                .project(sample.position_m)
+                .filter(|p| viewport.shrink(3.).contains(*p))
+            else {
+                continue;
+            };
+            tested += 1;
+            let hit = (-2..=2).any(|dy| {
+                (-2..=2).any(|dx| {
+                    let x = (p.x as i32 + dx).clamp(0, width as i32 - 1) as usize;
+                    let y = (p.y as i32 + dy).clamp(0, height as i32 - 1) as usize;
+                    let pixel = &pixels[(y * width as usize + x) * 4..][..3];
+                    pixel.iter().all(|c| *c > 220)
+                })
+            });
+            if hit {
+                visible += 1;
+            }
+        }
+        if tested > 0 && visible * 10 < tested * 9 {
+            return Err(format!(
+                "coplanar straight visibility regression: {visible}/{tested} projected samples are visible"
+            ));
+        }
     }
     let file = std::fs::File::create(path).map_err(|e| e.to_string())?;
     let mut png = png::Encoder::new(BufWriter::new(file), width, height);

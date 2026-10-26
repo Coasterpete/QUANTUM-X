@@ -14,8 +14,14 @@ pub struct InspectionScene {
 }
 impl InspectionScene {
     pub(crate) fn bounds(&self, section: Option<usize>) -> (Vec3, Vec3) {
-        let samples = if let Some(i) = section {
-            let s = &self.track.sections[i];
+        self.visible_bounds(section, true)
+    }
+    pub(crate) fn visible_bounds(
+        &self,
+        section: Option<usize>,
+        reference_visible: bool,
+    ) -> (Vec3, Vec3) {
+        let samples = if let Some(s) = section.and_then(|i| self.track.sections.get(i)) {
             &self.track.samples[s.start_sample..=s.end_sample]
         } else {
             &self.track.samples[..]
@@ -27,8 +33,10 @@ impl InspectionScene {
             min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
             max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
         }
-        if let Some(reference) = &self.reference {
-            let selected_id = section.map(|i| self.track.sections[i].id);
+        if reference_visible && let Some(reference) = &self.reference {
+            let selected_id = section
+                .and_then(|i| self.track.sections.get(i))
+                .map(|s| s.id);
             for point in &reference.points {
                 if selected_id.is_some_and(|id| id != point.section_id) {
                     continue;
@@ -40,12 +48,60 @@ impl InspectionScene {
         }
         (min, max)
     }
+    /// Hit-test projected centerline segments, retaining stable IDs and station.
+    /// Hover/picking is inspection only; this never moves authored geometry.
+    pub(crate) fn pick(
+        &self,
+        camera: &crate::camera::Camera,
+        origin: Vec3,
+        viewport: egui::Rect,
+        pointer: egui::Pos2,
+    ) -> Option<(SectionId, f64)> {
+        if !viewport.contains(pointer) {
+            return None;
+        }
+        let mut nearest = 8_f32.powi(2);
+        let mut hit = None;
+        let projection = camera.projection(origin, viewport);
+        for section in &self.track.sections {
+            for pair in self.track.samples[section.start_sample..=section.end_sample].windows(2) {
+                let (Some(a), Some(b)) = (
+                    projection.project(pair[0].position_m),
+                    projection.project(pair[1].position_m),
+                ) else {
+                    continue;
+                };
+                let delta = b - a;
+                let fraction =
+                    ((pointer - a).dot(delta) / delta.length_sq().max(1e-12)).clamp(0., 1.);
+                let distance = (a + delta * fraction).distance_sq(pointer);
+                if distance < nearest {
+                    nearest = distance;
+                    hit = Some((
+                        section.id,
+                        pair[0].distance_m
+                            + (pair[1].distance_m - pair[0].distance_m) * fraction as f64,
+                    ));
+                }
+            }
+        }
+        hit
+    }
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub(crate) struct Vertex {
     pub position: [f32; 3],
     pub color: [f32; 3],
+}
+const GRID_HALF_LINES: i32 = 30;
+/// Grid lines are the leading batch and never write the geometry depth buffer.
+pub(crate) fn grid_vertex_count(display: &DisplayOptions) -> u32 {
+    if display.grid {
+        (2 * GRID_HALF_LINES as u32 + 1) * 4
+    } else {
+        0
+    }
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayOptions {
@@ -54,6 +110,8 @@ pub struct DisplayOptions {
     pub frames: bool,
     pub curvature: bool,
     pub selected: Option<usize>,
+    pub hovered: Option<usize>,
+    pub inspection_distance_m: Option<f64>,
     pub centerline: bool,
     pub reference: bool,
     pub offsets: bool,
@@ -68,6 +126,8 @@ impl Default for DisplayOptions {
             frames: false,
             curvature: false,
             selected: None,
+            hovered: None,
+            inspection_distance_m: None,
             centerline: true,
             reference: false,
             offsets: false,
@@ -97,7 +157,7 @@ pub(crate) fn vertices(
         let step = display.grid_spacing;
         let cx = (origin.x / step).round() * step;
         let cz = (origin.z / step).round() * step;
-        for i in -30..=30 {
+        for i in -GRID_HALF_LINES..=GRID_HALF_LINES {
             let offset = i as f64 * step;
             line(
                 Vec3::new(cx + offset, 0., cz - 30. * step),
@@ -127,8 +187,10 @@ pub(crate) fn vertices(
     for (i, s) in scene.track.sections.iter().enumerate() {
         let color = if display.selected == Some(i) {
             [1., 1., 1.]
+        } else if display.hovered == Some(i) {
+            [0.95, 0.8, 0.4]
         } else if display.selected.is_some() {
-            [0.22, 0.3, 0.36]
+            [0.4, 0.58, 0.68]
         } else {
             colors[i % colors.len()]
         };
@@ -139,13 +201,50 @@ pub(crate) fn vertices(
         }
         for index in [s.start_sample, s.end_sample] {
             let sample = &scene.track.samples[index];
+            let marker_scale = if display.selected == Some(i) {
+                ((s.end_distance_m - s.start_distance_m) * 0.01).clamp(0.001, 3.)
+            } else {
+                scale
+            };
             for axis in [sample.frame.normal(), sample.frame.lateral()] {
                 line(
-                    sample.position_m - axis * scale,
-                    sample.position_m + axis * scale,
+                    sample.position_m - axis * marker_scale,
+                    sample.position_m + axis * marker_scale,
                     [1., 1., 1.],
                 );
             }
+            if display.selected == Some(i) {
+                let end = sample.position_m + sample.frame.tangent() * marker_scale * 3.;
+                line(sample.position_m, end, [0.9, 0.65, 0.3]);
+                for side in [-1., 1.] {
+                    line(
+                        end,
+                        end - sample.frame.tangent() * marker_scale
+                            + sample.frame.normal() * marker_scale * 0.5 * side,
+                        [0.9, 0.65, 0.3],
+                    );
+                }
+                line(
+                    sample.position_m,
+                    sample.position_m + sample.frame.normal() * marker_scale * 2.,
+                    [0.35, 0.85, 0.6],
+                );
+            }
+        }
+    }
+    if let Some(distance) = display.inspection_distance_m
+        && let Ok(sample) = scene.track.sample_at_distance(distance)
+    {
+        for axis in [
+            sample.frame.normal(),
+            sample.frame.lateral(),
+            sample.frame.tangent(),
+        ] {
+            line(
+                sample.position_m - axis * scale * 2.,
+                sample.position_m + axis * scale * 2.,
+                [1., 0.8, 0.25],
+            );
         }
     }
     if let Some(reference) = &scene.reference {
@@ -214,4 +313,94 @@ pub(crate) fn vertices(
         }
     }
     v
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use qx_geometry::{
+        authoring::{InitialConditions, Section},
+        solver::{GenerationOptions, generate},
+    };
+    fn scene() -> InspectionScene {
+        InspectionScene {
+            name: "picking fixture".into(),
+            track: generate(
+                &InitialConditions::default(),
+                &[
+                    Section::straight(1, "Short", 10.),
+                    Section::straight(2, "Long", 100.),
+                ],
+                GenerationOptions::default(),
+            )
+            .unwrap(),
+            labels: vec![],
+            reference: None,
+            authored_reference: qx_geometry::heartline::AuthoredReference::TrackCenterline,
+        }
+    }
+    #[test]
+    fn bounds_and_projected_picking_resolve_the_same_section_and_station() {
+        let s = scene();
+        assert_eq!(
+            s.visible_bounds(Some(0), false),
+            (Vec3::ZERO, Vec3::X * 10.)
+        );
+        assert!((s.visible_bounds(None, false).1.x - 110.).abs() < 1e-9);
+        let viewport = egui::Rect::from_min_size(egui::pos2(250., 100.), egui::vec2(800., 400.));
+        let mut camera = crate::camera::Camera::default();
+        let (min, max) = s.visible_bounds(None, false);
+        camera.fit(min, max, 2.);
+        for station in [5., 40., 100.] {
+            let pos = camera
+                .project(Vec3::X * station, Vec3::ZERO, viewport)
+                .unwrap();
+            let (id, picked) = s.pick(&camera, Vec3::ZERO, viewport, pos).unwrap();
+            assert_eq!(id, SectionId(if station < 10. { 1 } else { 2 }));
+            assert!((picked - station).abs() < 1e-3, "{picked} versus {station}");
+        }
+        assert!(
+            s.pick(&camera, Vec3::ZERO, viewport, egui::Pos2::ZERO)
+                .is_none()
+        );
+        // Fitting a short selection remains independent of the long neighbor.
+        camera.fit(Vec3::ZERO, Vec3::X * 10., 2.);
+        let a = camera.project(Vec3::ZERO, Vec3::ZERO, viewport).unwrap();
+        let b = camera.project(Vec3::X * 10., Vec3::ZERO, viewport).unwrap();
+        assert!(a.distance(b) > viewport.width() * 0.4);
+    }
+    #[test]
+    fn hidden_rider_reference_does_not_expand_track_framing() {
+        let mut s = scene();
+        s.reference = Some(
+            qx_geometry::heartline::generate_reference(
+                &s.track,
+                &qx_geometry::heartline::OffsetProfile::Constant {
+                    offset_m: Vec3::Y * 100.,
+                },
+                s.authored_reference,
+                9.80665,
+            )
+            .unwrap(),
+        );
+        assert_eq!(s.visible_bounds(None, false).1.y, 0.);
+        assert!((s.visible_bounds(None, true).1.y - 100.).abs() < 1e-9);
+        assert!((s.visible_bounds(Some(0), true).1.x - 10.).abs() < 1e-9);
+        // Every selection/inspection/endpoint overlay is derived line data.
+        let before = s.track.clone();
+        assert!(
+            vertices(
+                &s,
+                Vec3::ZERO,
+                &DisplayOptions {
+                    selected: Some(0),
+                    inspection_distance_m: Some(5.),
+                    ..Default::default()
+                }
+            )
+            .len()
+                > 100
+        );
+        assert_eq!(s.track, before);
+    }
 }

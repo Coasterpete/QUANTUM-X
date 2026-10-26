@@ -103,7 +103,10 @@ impl Inspector {
     }
     fn rebuild(&mut self) -> Result<(), String> {
         if let Some(gpu) = &mut self.gpu {
-            gpu.upload(&vertices(&self.scene, self.origin, &self.display))?;
+            gpu.upload(
+                &vertices(&self.scene, self.origin, &self.display),
+                crate::scene::grid_vertex_count(&self.display),
+            )?;
         }
         Ok(())
     }
