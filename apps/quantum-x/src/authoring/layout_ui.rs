@@ -72,7 +72,7 @@ pub(super) fn show(
         );
         let position = egui::pos2(floating.position[0], floating.position[1])
             .clamp(available.min, (available.max - size).max(available.min));
-        let window = egui::Window::new(floating.pane.title())
+        let window = egui::Window::new(behavior.session.pane_title(floating.pane))
             .id(egui::Id::unique((
                 "floating",
                 profile.index(),
@@ -186,7 +186,7 @@ impl PaneUi<'_> {
                         ui.small(if pane == Pane::Preview {
                             "Reference preview · train geometry unavailable"
                         } else {
-                            "3D track references · no rail surfaces"
+                            self.display.mode.label()
                         });
                     }
                     for (icon, name, command) in [
@@ -294,6 +294,27 @@ impl PaneUi<'_> {
         }
     }
     fn view(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Track display");
+        egui::ComboBox::from_id_salt("track display mode")
+            .selected_text(self.display.mode.label())
+            .show_ui(ui, |ui| {
+                for mode in [
+                    qx_rendering::DisplayMode::Rendered,
+                    qx_rendering::DisplayMode::RenderedCenterline,
+                    qx_rendering::DisplayMode::Technical,
+                    qx_rendering::DisplayMode::Wireframe,
+                ] {
+                    ui.selectable_value(&mut self.display.mode, mode, mode.label());
+                }
+            });
+        ui.checkbox(&mut self.display.running, "Running rails / primary beam");
+        ui.checkbox(&mut self.display.structure, "Structural spine / beams");
+        ui.checkbox(&mut self.display.hardware, "Repeated hardware");
+        ui.checkbox(&mut self.display.boundaries, "Section boundaries");
+        ui.checkbox(
+            &mut self.display.highlights,
+            "Selected solid section highlight",
+        );
         ui.heading("Viewport references");
         ui.horizontal_wrapped(|ui| {
             for (label, command) in [
@@ -333,6 +354,21 @@ impl PaneUi<'_> {
     }
     fn diagnostics(&mut self, ui: &mut egui::Ui) {
         ui.heading("Generation diagnostics");
+        if let Some(mesh) = &self.scene.mesh {
+            ui.monospace(format!(
+                "{} vertices · {} stored triangles · {} expanded triangles · {} hardware instances",
+                mesh.stats.vertices,
+                mesh.stats.triangles,
+                mesh.stats.rendered_triangles,
+                mesh.stats.instances
+            ));
+            ui.monospace(format!(
+                "Solver {:.2} ms · CPU mesh {:.2} ms · ~{:.2} MiB CPU payload",
+                self.scene.solver_ms,
+                self.scene.mesh_ms,
+                mesh.stats.bytes as f64 / 1048576.
+            ));
+        }
         ui.monospace(format!(
             "Authored path: {:.6} m",
             self.scene.track.length_m()
@@ -367,7 +403,7 @@ impl PaneUi<'_> {
 }
 impl Behavior<Pane> for PaneUi<'_> {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        pane.title().into()
+        self.session.pane_title(*pane).into()
     }
     fn pane_ui(&mut self, ui: &mut egui::Ui, _: TileId, pane: &mut Pane) -> egui_tiles::UiResponse {
         ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));

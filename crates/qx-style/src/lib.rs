@@ -1,5 +1,6 @@
 //! Data-only visual catalog. It never depends on the geometry solver.
 use serde::{Deserialize, Serialize};
+pub mod construction;
 use std::{collections::HashSet, fmt};
 
 #[derive(Debug)]
@@ -33,9 +34,11 @@ pub struct Family {
     pub name: String,
     pub description: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geometry: Option<construction::TrackConstruction>,
     pub id: String,
     pub family_id: String,
     pub number: u32,
@@ -54,7 +57,7 @@ pub struct StyleSelection {
     pub family_id: String,
     pub style_id: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Catalog {
     pub version: u32,
@@ -116,6 +119,9 @@ impl Catalog {
         let mut ids = HashSet::new();
         let mut numbers = HashSet::new();
         for s in &self.styles {
+            if let Some(geometry) = &s.geometry {
+                geometry.validate()?;
+            }
             require(
                 identifier(&s.id) && ids.insert(&s.id),
                 "invalid or duplicate style ID",

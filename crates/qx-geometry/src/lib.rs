@@ -2,6 +2,7 @@
 //! This crate contains no vehicle dynamics, graphics, or editor widgets.
 pub mod arc_length;
 pub mod authoring;
+pub mod construction;
 pub mod curve;
 pub mod curve_edit;
 pub mod heartline;

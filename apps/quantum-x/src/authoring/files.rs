@@ -17,7 +17,12 @@ impl Session {
             return;
         }
         if matches!(action, FileAction::SaveAs) && self.has_drafts() {
-            self.status = "Apply or cancel drafts before saving.".into();
+            self.request_drafts(super::draft_workflow::DraftRequest::SaveAs);
+            return;
+        }
+        if matches!(action, FileAction::Open) && self.pending_edits() && !self.open_dialog_confirmed
+        {
+            self.open_dialog_requested = true;
             return;
         }
         #[cfg(windows)]
@@ -57,9 +62,10 @@ impl Session {
         match result {
             Some(Ok(path)) => {
                 let action = self.file_dialog.take().unwrap().action;
+                let confirmed = std::mem::take(&mut self.open_dialog_confirmed);
                 match path {
                     Some(path) => match action {
-                        FileAction::Open => self.open(Some(path), false),
+                        FileAction::Open => self.open(Some(path), confirmed),
                         FileAction::SaveAs => self.save_to(&path),
                     },
                     None => {
@@ -70,6 +76,7 @@ impl Session {
             }
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.file_dialog = None;
+                self.open_dialog_confirmed = false;
                 self.status =
                     "File dialog stopped; project retained. Try the command again.".into();
             }

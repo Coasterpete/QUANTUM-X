@@ -51,7 +51,7 @@ python tools/verify-m6-exports.py target/m6/scenario
 
 The original five-section foundation and new spline-comparison, mixed-authoring,
 and analytic-reference examples all save/reopen with identical regeneration.
-Version-1 and version-2 projects migrate explicitly to version 3; their fixtures
+Version-1, version-2 and version-3 projects migrate explicitly to version 4; their fixtures
 are preserved. Heartline configuration, train configuration association and authored
 reference intent persist without changing the existing section equations.
 Exports include centerline/measurement/transition/reference-point CSV, spline and
@@ -93,3 +93,21 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo build --workspace --release
 ```
+
+
+### M7 procedural track construction
+
+The editor now builds solid procedural track downstream of the mathematical
+solver. Track Workspace → Coaster offers clearly labeled generic dual-rail and
+single-rail validation configurations with profile, hardware and material
+settings. View → Track display switches solid, centerline, technical and mesh-edge
+presentations. Valid graph edits regenerate meshes on the background worker;
+Apply/Cancel, undo/redo and save/reopen retain the authored geometry contract.
+The named Hybrid/Monorail catalog concepts remain unfinished production styles.
+
+```powershell
+cargo run --release -p quantum-x -- track-scenario target/m7-review/final
+python tools/verify-m7-exports.py target/m7-review/final
+```
+
+See [the M7 architecture, evidence, limitations and Windows checklist](docs/m7-procedural-track-engine.md).

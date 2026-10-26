@@ -252,7 +252,7 @@ fn version_one_migration_preserves_pass1_output_and_rejects_new_data() {
     );
     let json = persistence::to_json(&spline_comparison_project(), &catalog)
         .unwrap()
-        .replacen("\"schema_version\": 3", "\"schema_version\": 1", 1);
+        .replacen("\"schema_version\": 4", "\"schema_version\": 1", 1);
     assert!(persistence::from_json(&json, &catalog).is_err());
 }
 #[test]

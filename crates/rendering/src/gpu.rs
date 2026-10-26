@@ -4,6 +4,9 @@ use std::sync::{Arc, mpsc};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 pub(crate) struct Gpu {
+    mesh: crate::mesh_gpu::MeshGpu,
+    mesh_display: crate::DisplayOptions,
+    mesh_range: Option<(f64, f64)>,
     instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -98,7 +101,11 @@ impl Gpu {
         });
         let depth = Self::depth(&device, &config);
         let egui = egui_wgpu::Renderer::new(&device, config.format, Default::default());
+        let mesh = crate::mesh_gpu::MeshGpu::new(&device, config.format);
         Ok(Self {
+            mesh,
+            mesh_display: Default::default(),
+            mesh_range: None,
             instance,
             surface,
             device,
@@ -145,6 +152,19 @@ impl Gpu {
             self.surface.configure(&self.device, &self.config);
             self.depth = Self::depth(&self.device, &self.config);
         }
+    }
+    pub fn upload_scene(
+        &mut self,
+        scene: &crate::InspectionScene,
+        origin: Vec3,
+        display: &crate::DisplayOptions,
+    ) -> Result<(), String> {
+        self.mesh_display = display.clone();
+        self.mesh_range = display
+            .selected
+            .and_then(|i| scene.track.sections.get(i))
+            .map(|r| (r.start_distance_m, r.end_distance_m));
+        self.mesh.upload(&self.device, &self.queue, scene, origin)
     }
     pub fn upload(&mut self, vertices: &[Vertex], grid_count: u32) -> Result<(), String> {
         if grid_count as usize > vertices.len() || !grid_count.is_multiple_of(2) {
@@ -250,6 +270,14 @@ impl Gpu {
             0,
             bytemuck::cast_slice(&camera.matrix(origin, viewport[2] as f64 / viewport[3] as f64)),
         );
+        self.mesh.camera(
+            &self.queue,
+            camera,
+            self.mesh_range,
+            &self.mesh_display,
+            origin,
+            viewport[2] as f64 / viewport[3] as f64,
+        );
         let view = frame.texture.create_view(&Default::default());
         let mut encoder = self.device.create_command_encoder(&Default::default());
         let screen = egui_wgpu::ScreenDescriptor {
@@ -300,8 +328,22 @@ impl Gpu {
                 pass.set_pipeline(&self.grid_pipeline);
                 pass.set_bind_group(0, &self.grid_bind, &[]);
                 pass.draw(0..self.grid_count, 0..1);
-                pass.set_pipeline(&self.pipeline);
-                pass.set_bind_group(0, &self.bind, &[]);
+                self.mesh.draw(&mut pass, &self.mesh_display);
+                pass.set_vertex_buffer(0, self.vertices.slice(..));
+                pass.set_pipeline(if self.mesh_display.mode == crate::DisplayMode::Technical {
+                    &self.pipeline
+                } else {
+                    &self.grid_pipeline
+                });
+                pass.set_bind_group(
+                    0,
+                    if self.mesh_display.mode == crate::DisplayMode::Technical {
+                        &self.bind
+                    } else {
+                        &self.grid_bind
+                    },
+                    &[],
+                );
                 pass.draw(self.grid_count..self.count, 0..1);
             }
         }
@@ -371,7 +413,11 @@ pub(crate) fn line_pipeline(
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
             depth_write_enabled: Some(write_depth),
-            depth_compare: Some(wgpu::CompareFunction::LessEqual),
+            depth_compare: Some(if write_depth {
+                wgpu::CompareFunction::LessEqual
+            } else {
+                wgpu::CompareFunction::Always
+            }),
             stencil: Default::default(),
             bias: Default::default(),
         }),

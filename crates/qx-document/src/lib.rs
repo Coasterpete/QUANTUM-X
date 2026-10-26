@@ -13,7 +13,7 @@ use qx_style::{Catalog, StyleSelection};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 #[derive(Debug)]
 pub struct DocumentError(pub String);
 impl fmt::Display for DocumentError {
@@ -66,6 +66,8 @@ pub struct Project {
     pub metadata: Metadata,
     pub initial: InitialConditions,
     pub style: StyleSelection,
+    #[serde(default)]
+    pub construction: qx_style::construction::TrackConstruction,
     pub sections: Vec<Section>,
     #[serde(default)]
     pub heartline: HeartlineSettings,
@@ -110,6 +112,7 @@ impl Project {
         catalog.validate_selection(&self.style)?;
         validate_track(&self.initial, &self.sections)?;
         self.heartline.validate()?;
+        self.construction.validate()?;
         Ok(())
     }
     pub fn generate(

@@ -63,7 +63,7 @@ fn v1_v2_migration_and_v3_strict_settings_are_preserved() {
         include_str!("../../../examples/mixed-authoring.qx.json"),
     ] {
         let p = persistence::from_json(fixture, &catalog).unwrap();
-        assert_eq!(p.schema_version, 3);
+        assert_eq!(p.schema_version, qx_document::SCHEMA_VERSION);
         assert_eq!(p.heartline, HeartlineSettings::default());
     }
     let mut value: serde_json::Value =
@@ -75,6 +75,7 @@ fn v1_v2_migration_and_v3_strict_settings_are_preserved() {
         .as_object_mut()
         .unwrap()
         .remove("unknown");
+    value.as_object_mut().unwrap().remove("construction");
     value["schema_version"] = 2.into();
     assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
     value["schema_version"] = 3.into();

@@ -1,6 +1,8 @@
 mod commands;
+mod construction_ui;
 #[cfg(test)]
 mod correction_tests;
+mod draft_workflow;
 mod files;
 mod graph;
 mod graph_canvas;
@@ -14,9 +16,18 @@ mod layout_ui;
 mod m5_tests;
 #[cfg(test)]
 mod m6_tests;
+mod m7_live;
+mod m7_scenario;
+#[cfg(test)]
+mod m7_tests;
 mod panels;
 mod plot;
+#[cfg(test)]
+mod save_tests;
 mod scenario;
+pub fn track_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
+    m7_scenario::run(output)
+}
 mod session;
 mod spline;
 #[cfg(test)]
@@ -32,6 +43,12 @@ use std::{
     error::Error,
     path::{Path, PathBuf},
 };
+pub fn inspection_scene(
+    p: &qx_document::Project,
+    c: &qx_style::Catalog,
+) -> Result<InspectionScene, String> {
+    scene(p, c, Default::default())
+}
 pub fn authoring_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
     scenario::run(output)
 }

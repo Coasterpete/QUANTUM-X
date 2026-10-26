@@ -18,7 +18,7 @@ def rows(path):
 
 root = Path(sys.argv[1])
 project = json.loads((root / "project.qx.json").read_text(encoding="utf-8"))
-assert project["schema_version"] == 3
+assert project["schema_version"] == 4
 sections = rows(root / "sections.csv")
 assert [s["method"] for s in sections] == ["straight", "force"]
 assert sections[0]["end_sample"] == sections[1]["start_sample"]
