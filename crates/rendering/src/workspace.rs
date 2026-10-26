@@ -5,6 +5,7 @@ use crate::{
     camera::Camera,
     gpu::{Gpu, GuiFrame},
     scene::vertices,
+    window::{self, WindowCommand, WindowPreferences},
 };
 use qx_geometry::math::Vec3;
 use std::{
@@ -33,8 +34,18 @@ pub struct SurfaceOutput {
     pub viewport: egui::Rect,
     pub view_command: Option<ViewCommand>,
     pub close: bool,
+    pub window_command: Option<WindowCommand>,
+    pub profile: usize,
+    pub reset_navigation: bool,
 }
 pub trait EditorSurface {
+    fn select_section(&mut self, _id: qx_geometry::authoring::SectionId) {}
+    fn inspect_station(&mut self, _point: Option<(qx_geometry::authoring::SectionId, f64)>) {}
+    fn window_preferences(&self) -> WindowPreferences {
+        WindowPreferences::default()
+    }
+    fn window_changed(&mut self, _preferences: WindowPreferences) {}
+    fn persist_preferences(&mut self, _force: bool) {}
     fn ui(
         &mut self,
         ctx: &egui::Context,
@@ -57,10 +68,14 @@ pub fn edit(scene: InspectionScene, surface: impl EditorSurface + 'static) -> Re
         input: None,
         camera: Camera::default(),
         display: DisplayOptions::default(),
+        navigation: std::array::from_fn(|_| (Camera::default(), DisplayOptions::default())),
+        profile: 0,
         origin: Vec3::ZERO,
         viewport: egui::Rect::NOTHING,
         cursor: None,
         drag: None,
+        drag_start: None,
+        needs_fit: [true; 2],
         fatal: None,
         exit_requested: false,
     };
@@ -76,20 +91,27 @@ struct Workspace {
     input: Option<egui_winit::State>,
     camera: Camera,
     display: DisplayOptions,
+    navigation: [(Camera, DisplayOptions); 2],
+    profile: usize,
     origin: Vec3,
     viewport: egui::Rect,
     cursor: Option<(f64, f64)>,
     drag: Option<MouseButton>,
+    drag_start: Option<(f64, f64)>,
+    needs_fit: [bool; 2],
     fatal: Option<String>,
     exit_requested: bool,
 }
 impl Workspace {
     fn fit(&mut self, selected: bool) {
-        let (min, max) = self.scene.bounds(if selected {
-            self.display.selected
-        } else {
-            None
-        });
+        let (min, max) = self.scene.visible_bounds(
+            if selected {
+                self.display.selected
+            } else {
+                None
+            },
+            self.display.reference,
+        );
         self.camera.fit(
             min,
             max,
@@ -98,7 +120,10 @@ impl Workspace {
     }
     fn rebuild(&mut self) -> Result<(), String> {
         if let Some(gpu) = &mut self.gpu {
-            gpu.upload(&vertices(&self.scene, self.origin, &self.display))?;
+            gpu.upload(
+                &vertices(&self.scene, self.origin, &self.display),
+                crate::scene::grid_vertex_count(&self.display),
+            )?;
         }
         Ok(())
     }
@@ -115,16 +140,46 @@ impl Workspace {
         let input = self.input.as_mut().unwrap().take_egui_input(&window);
         let before = self.display.clone();
         let mut action = None;
+        let mut window_command = None;
+        let mut profile = self.profile;
+        let mut reset_navigation = false;
         let output = self.ctx.run_pass(input, |ctx| {
             let result = self.surface.ui(ctx, &self.scene, &mut self.display);
             self.viewport = result.viewport;
             action = result.view_command;
             self.exit_requested = result.close;
+            window_command = result.window_command;
+            profile = result.profile.min(1);
+            reset_navigation = result.reset_navigation;
         });
         self.input
             .as_mut()
             .unwrap()
             .handle_platform_output(&window, output.platform_output);
+        if profile != self.profile {
+            self.navigation[self.profile] = (self.camera.clone(), before.clone());
+            (self.camera, self.display) = self.navigation[profile].clone();
+            self.profile = profile;
+            self.drag = None;
+        }
+        if reset_navigation {
+            self.needs_fit = [true; 2];
+        }
+        if self.needs_fit[self.profile] && self.viewport.is_positive() {
+            self.fit(false);
+            self.needs_fit[self.profile] = false;
+        }
+        if let Some(command) = window_command {
+            let preferences = match command {
+                WindowCommand::Apply(p) => p,
+                WindowCommand::Reset => WindowPreferences::default(),
+            };
+            window::apply(&window, &preferences);
+            self.surface.window_changed(preferences);
+            self.cursor = None;
+            self.drag = None;
+        }
+        self.surface.persist_preferences(false);
         if let Some(command) = action {
             match command {
                 ViewCommand::FitAll => self.fit(false),
@@ -177,12 +232,28 @@ impl ApplicationHandler for Workspace {
             return;
         }
         let result = (|| -> Result<(), String> {
+            let preferences = self.surface.window_preferences();
+            let mut monitors: Vec<_> = event_loop.available_monitors().collect();
+            if let Some(primary) = event_loop.primary_monitor() {
+                monitors.sort_by_key(|m| *m != primary);
+            }
+            let areas: Vec<_> = monitors.iter().map(window::work_area).collect();
+            let placement = window::resolve(&preferences, &areas);
             let window = Arc::new(
                 event_loop
                     .create_window(
                         Window::default_attributes()
-                            .with_title("QUANTUM-X — DEVELOPMENT authoring workspace")
-                            .with_inner_size(LogicalSize::new(1440., 960.)),
+                            .with_title("QUANTUM-X — Development workbench")
+                            .with_inner_size(LogicalSize::new(placement.size[0], placement.size[1]))
+                            .with_min_inner_size(LogicalSize::new(
+                                placement.minimum[0],
+                                placement.minimum[1],
+                            ))
+                            .with_position(winit::dpi::PhysicalPosition::new(
+                                placement.position[0],
+                                placement.position[1],
+                            ))
+                            .with_maximized(preferences.maximized),
                     )
                     .map_err(|e| e.to_string())?,
             );
@@ -201,6 +272,9 @@ impl ApplicationHandler for Workspace {
             self.origin = (min + max) * 0.5;
             self.viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 500.));
             self.fit(false);
+            self.navigation = std::array::from_fn(|_| (self.camera.clone(), self.display.clone()));
+            self.navigation[1].1.reference = true;
+            self.navigation[1].1.offsets = true;
             self.rebuild()?;
             Ok(())
         })();
@@ -214,6 +288,12 @@ impl ApplicationHandler for Workspace {
             return;
         };
         let _response = self.input.as_mut().unwrap().on_window_event(window, &event);
+        let capture_window = matches!(
+            event,
+            WindowEvent::Resized(_)
+                | WindowEvent::Moved(_)
+                | WindowEvent::ScaleFactorChanged { .. }
+        );
         let result = match event {
             WindowEvent::CloseRequested => {
                 if self.surface.request_close() {
@@ -226,6 +306,8 @@ impl ApplicationHandler for Workspace {
                 Ok(())
             }
             WindowEvent::ScaleFactorChanged { .. } => {
+                self.cursor = None;
+                self.drag = None;
                 self.gpu.as_mut().unwrap().resize(window.inner_size());
                 Ok(())
             }
@@ -240,20 +322,42 @@ impl ApplicationHandler for Workspace {
             }
             WindowEvent::MouseInput { state, button, .. } => {
                 if state == ElementState::Released {
+                    if self.drag == Some(MouseButton::Left)
+                        && button == MouseButton::Left
+                        && let (Some(start), Some(end)) = (self.drag_start, self.cursor)
+                        && (end.0 - start.0).hypot(end.1 - start.1) < 4.
+                        && pointer_in_view(&self.ctx, self.viewport, self.cursor)
+                        && let Some((id, _)) = self.scene.pick(
+                            &self.camera,
+                            self.origin,
+                            self.viewport,
+                            egui::pos2(end.0 as f32, end.1 as f32),
+                        )
+                    {
+                        self.surface.select_section(id);
+                    }
                     self.drag = None;
+                    self.drag_start = None;
                 } else if pointer_in_view(&self.ctx, self.viewport, self.cursor) {
                     self.drag = Some(button);
+                    self.drag_start = self.cursor;
                 }
                 Ok(())
             }
             WindowEvent::CursorMoved { position, .. } => {
-                let dpi = window.scale_factor();
+                let dpi = self.ctx.pixels_per_point() as f64;
                 let next = (position.x / dpi, position.y / dpi);
                 if let Some((x, y)) = self.cursor {
                     let dx = next.0 - x;
                     let dy = next.1 - y;
                     match self.drag {
-                        Some(MouseButton::Left) => self.camera.orbit(-dx * 0.007, dy * 0.007),
+                        Some(MouseButton::Left)
+                            if self
+                                .drag_start
+                                .is_some_and(|s| (next.0 - s.0).hypot(next.1 - s.1) >= 4.) =>
+                        {
+                            self.camera.orbit(-dx * 0.007, dy * 0.007)
+                        }
                         Some(MouseButton::Right | MouseButton::Middle) => self.camera.pan(
                             -dx * self.camera.distance * 0.0015,
                             dy * self.camera.distance * 0.0015,
@@ -262,6 +366,19 @@ impl ApplicationHandler for Workspace {
                     }
                 }
                 self.cursor = Some(next);
+                let hit = if self.drag.is_none()
+                    && pointer_in_view(&self.ctx, self.viewport, self.cursor)
+                {
+                    self.scene.pick(
+                        &self.camera,
+                        self.origin,
+                        self.viewport,
+                        egui::pos2(next.0 as f32, next.1 as f32),
+                    )
+                } else {
+                    None
+                };
+                self.surface.inspect_station(hit);
                 Ok(())
             }
             WindowEvent::MouseWheel { delta, .. }
@@ -276,6 +393,11 @@ impl ApplicationHandler for Workspace {
             WindowEvent::RedrawRequested => self.draw(),
             _ => Ok(()),
         };
+        if capture_window {
+            let mut preferences = self.surface.window_preferences();
+            window::capture(self.window.as_ref().unwrap(), &mut preferences);
+            self.surface.window_changed(preferences);
+        }
         if let Err(error) = result {
             eprintln!("Authoring renderer: {error}");
             self.fatal = Some(error);
@@ -294,6 +416,14 @@ impl ApplicationHandler for Workspace {
         event_loop.set_control_flow(ControlFlow::WaitUntil(
             Instant::now() + Duration::from_millis(16),
         ));
+    }
+    fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(window) = &self.window {
+            let mut preferences = self.surface.window_preferences();
+            window::capture(window, &mut preferences);
+            self.surface.window_changed(preferences);
+        }
+        self.surface.persist_preferences(true);
     }
 }
 fn pointer_in_view(ctx: &egui::Context, viewport: egui::Rect, cursor: Option<(f64, f64)>) -> bool {

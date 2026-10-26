@@ -1,5 +1,4 @@
 use super::{
-    graph,
     session::{Session, method},
     spline,
 };
@@ -13,6 +12,43 @@ use qx_geometry::{
 };
 use qx_rendering::{DisplayOptions, InspectionScene, SurfaceOutput, ViewCommand};
 
+/// Parameter popovers must survive clicks on inputs and nested combo boxes.
+/// egui's command-menu default closes on every click, including those inputs.
+pub(super) fn input_menu<R>(
+    ui: &mut egui::Ui,
+    label: &str,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let (response, inner) = egui::menu::MenuButton::new(label)
+        .config(
+            egui::menu::MenuConfig::new()
+                .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside),
+        )
+        .ui(ui, content);
+    egui::InnerResponse {
+        response,
+        inner: inner.map(|r| r.inner),
+    }
+}
+
+/// egui 0.37 stores one memory-backed popup. A ComboBox nested in a menu
+/// replaces that parent popup, so its contents disappear on the next pass.
+/// Use the menu's submenu stack for choices inside parameter popovers.
+pub(super) fn choice_menu<R>(
+    ui: &mut egui::Ui,
+    salt: &str,
+    label: &str,
+    content: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    if egui::menu::is_in_menu(ui) {
+        ui.push_id(salt, |ui| ui.menu_button(label, content)).inner
+    } else {
+        egui::ComboBox::from_id_salt(salt)
+            .selected_text(label)
+            .show_ui(ui, content)
+    }
+}
+
 pub(super) fn workspace(
     session: &mut Session,
     ctx: &egui::Context,
@@ -21,103 +57,83 @@ pub(super) fn workspace(
 ) -> SurfaceOutput {
     let before_draft = session.draft.clone();
     let before_heartline = session.heartline_draft.clone();
-    shortcuts(session, ctx);
-    let mut viewport = egui::Rect::NOTHING;
-    let mut view_command = None;
-    ctx.root_ui(|root| {
-        egui::Panel::top("commands").show(root, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong("QUANTUM-X — DEVELOPMENT authoring workspace");
-                if ui.button("New (Ctrl+N)").clicked() { session.open(None, false); }
-                if ui.button("Open path (Ctrl+O)").clicked() { session.open(Some(session.path.clone().into()), false); }
-                if ui.button("Save path (Ctrl+S)").clicked() { session.save(); }
-                if ui.add_enabled(session.editor.can_undo(), egui::Button::new("Undo (Ctrl+Z)")).clicked() { session.undo(false); }
-                if ui.add_enabled(session.editor.can_redo(), egui::Button::new("Redo (Ctrl+Y)")).clicked() { session.undo(true); }
-                ui.label(if session.dirty() { "* Unsaved document" } else { "Saved" });
-            });
-            ui.horizontal(|ui| { ui.label("Project path"); ui.add(egui::TextEdit::singleline(&mut session.path).desired_width(f32::INFINITY)); });
-            ui.label(&session.status);
-            if session.visible_revision != session.revision { ui.colored_label(egui::Color32::YELLOW, format!("View revision {} differs from document request {}. See generation status.", session.visible_revision, session.revision)); }
+    let before_initial = session.initial_draft.clone();
+    session.inspect_input = None;
+    session.hovered = None;
+    if session.visible_revision == session.revision
+        && session.draft_error.is_none()
+        && let Some((id, station)) = session.viewport_inspection
+        && id == session.selected
+        && let Some(range) = scene.track.sections.iter().find(|r| r.id == id)
+    {
+        session.inspect_input = Some((
+            id,
+            session.draft.extent * (station - range.start_distance_m)
+                / (range.end_distance_m - range.start_distance_m),
+        ));
+    }
+    session.poll_file_dialog(ctx);
+    if session.file_dialog.is_none() {
+        shortcuts(session, ctx);
+    }
+    super::graph_gesture::update(session, ctx);
+    let (viewport, mut view_command, window_command) =
+        super::layout_ui::show(session, ctx, scene, display);
+    // Parse numeric/text events before accepting a keyboard transaction, even
+    // when typing and Ctrl+Enter arrive together in one native input batch.
+    if std::mem::take(&mut session.apply_section_requested) {
+        session.apply_draft();
+    }
+    if session.file_dialog.is_some() {
+        egui::Modal::new(egui::Id::unique("native file dialog pending")).show(ctx, |ui| {
+            ui.heading("Project file dialog");
+            ui.label("Complete or cancel the Windows file dialog to continue.");
         });
-        egui::Panel::bottom("transition editor").resizable(true).default_size(360.).show(root, |ui| {
-            egui::ScrollArea::vertical().id_salt("transition scroll").show(ui, |ui| graph::editor(session, ui, scene));
-        });
-        egui::Panel::left("track workspace").resizable(true).default_size(285.).show(root, |ui| {
-            egui::ScrollArea::vertical().id_salt("track scroll").show(ui, |ui| {
-                ui.heading("Track Workspace");
-                ui.small("Replaceable developer controls; graph/timeline is the primary shaping surface.");
-                sections(session, ui);
-                ui.separator();
-                section_properties(session, ui);
-                ui.collapsing("Spline controls (complementary)", |ui| spline::controls(&mut session.draft, ui, &mut session.status));
-                ui.collapsing("Rider reference / heartline", |ui| heartline(session, ui));
-                ui.collapsing("Coaster Properties — concept catalog", |ui| styles(session, ui));
-                ui.collapsing("Project metadata", |ui| {
-                    ui.label("Name"); ui.text_edit_singleline(&mut session.metadata_draft.name);
-                    ui.label("Author"); ui.text_edit_singleline(&mut session.metadata_draft.author);
-                    ui.label("Description"); ui.text_edit_multiline(&mut session.metadata_draft.description);
-                    if ui.button("Apply metadata").clicked() { session.execute(vec![Command::SetMetadata(session.metadata_draft.clone())]); }
-                    if ui.button("Cancel metadata draft").clicked() { session.metadata_draft = session.editor.project().metadata.clone(); }
-                });
-                ui.collapsing("Initial conditions", |ui| {
-                    let initial = &mut session.initial_draft;
-                    vector(ui, "Start XYZ m", &mut initial.position_m);
-                    ui.label("Orientation quaternion WXYZ (normalized by generator)");
-                    for v in [&mut initial.orientation.w, &mut initial.orientation.x, &mut initial.orientation.y, &mut initial.orientation.z] { ui.add(egui::DragValue::new(v).speed(0.001).max_decimals(12)); }
-                    ui.horizontal(|ui| { ui.label("Design speed m/s"); ui.add(egui::DragValue::new(&mut initial.reference_speed_mps).speed(0.1).max_decimals(10)); });
-                    if ui.button("Apply initial conditions").clicked() { session.execute(vec![Command::SetInitial(session.initial_draft.clone())]); }
-                    if ui.button("Cancel initial draft").clicked() { session.initial_draft = session.editor.project().initial.clone(); }
-                });
-            });
-        });
-        egui::Panel::right("support workspace").resizable(true).default_size(270.).show(root, |ui| {
-            egui::ScrollArea::vertical().id_salt("support scroll").show(ui, |ui| {
-                ui.heading("Support Workspace");
-                ui.small("Development diagnostics. Support construction is not implemented in this pass.");
-                ui.separator(); ui.strong("Viewport");
-                ui.horizontal_wrapped(|ui| {
-                    for (label, command) in [("Fit all (F)", ViewCommand::FitAll), ("Fit section", ViewCommand::FitSelected), ("Perspective", ViewCommand::Perspective), ("Top", ViewCommand::Top), ("Side", ViewCommand::Side), ("Front", ViewCommand::Front), ("Orthographic", ViewCommand::ToggleOrthographic)] {
-                        if ui.button(label).clicked() { view_command = Some(command); }
-                    }
-                });
-                ui.small("Viewport drag: left orbit; middle/right pan. Wheel zoom. T/N/L axes: X/Y/Z at identity.");
-                ui.checkbox(&mut display.centerline, "Authored reference path");
-                ui.checkbox(&mut display.reference, if scene.authored_reference == AuthoredReference::TrackCenterline { "Calculated rider heartline" } else { "Constrained physical track reference" });
-                ui.checkbox(&mut display.offsets, "Signed offset vectors");
-                ui.checkbox(&mut display.points, "Reference-point crosses");
-                ui.checkbox(&mut display.frames, "Orientation frames");
-                ui.checkbox(&mut display.curvature, "Curvature vectors (scaled)");
-                ui.checkbox(&mut display.loads, "Calculated-path loads (scaled)");
-                ui.checkbox(&mut display.grid, "Ground reference grid");
-                ui.add(egui::DragValue::new(&mut display.grid_spacing).range(0.01..=1e6).prefix("Grid m "));
-                ui.separator();
-                ui.label(format!("Authored path: {:.6} m", scene.track.length_m()));
-                if let Some(reference) = &scene.reference {
-                    ui.label(format!("Calculated path: {:.6} m", reference.length_m));
-                    ui.small("Loads use each section's constant design speed, rotating-frame offsets and gravity. They are kinematic estimates, not train telemetry.");
-                    for warning in &reference.warnings { ui.label(warning); }
-                }
-                ui.strong("Continuity / generation diagnostics");
-                for diagnostic in &scene.track.diagnostics { ui.label(format!("Section {} / {}: {}", diagnostic.section_id.0, diagnostic.code, diagnostic.message)); }
-                if scene.track.diagnostics.is_empty() { ui.label("No configured diagnostics triggered."); }
-                ui.collapsing("Sampling", |ui| {
-                    ui.add(egui::DragValue::new(&mut session.options.max_step_m).speed(0.01).range(1e-6..=10.).prefix("Max step m "));
-                    if ui.button("Regenerate").clicked() { session.regenerate(); }
-                });
-            });
-        });
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(root, |ui| {
-            viewport = ui.available_rect_before_wrap();
-            ui.label("Live 3D · geometric references · no rail surfaces");
-            ui.allocate_rect(viewport, egui::Sense::hover());
-        });
-    });
+    }
     display.selected = scene
         .track
         .sections
         .iter()
         .position(|s| s.id == session.selected);
-    if !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F))
+    display.hovered = session
+        .hovered
+        .and_then(|id| scene.track.sections.iter().position(|s| s.id == id));
+    display.inspection_distance_m = session
+        .inspect_input
+        .filter(|_| session.visible_revision == session.revision && session.draft_error.is_none())
+        .and_then(|(id, input)| {
+            let section = if id == session.selected {
+                &session.draft
+            } else {
+                session
+                    .editor
+                    .project()
+                    .sections
+                    .iter()
+                    .find(|s| s.id == id)?
+            };
+            let range = scene.track.sections.iter().find(|s| s.id == id)?;
+            Some(
+                range.start_distance_m
+                    + (input / section.extent).clamp(0., 1.)
+                        * (range.end_distance_m - range.start_distance_m),
+            )
+        });
+    if viewport.contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
+        && let Some((id, station)) = session.viewport_inspection
+    {
+        display.hovered = scene.track.sections.iter().position(|s| s.id == id);
+        display.inspection_distance_m = Some(station);
+    }
+    let reset_navigation = session.frame_requested;
+    if session.frame_requested {
+        view_command = Some(ViewCommand::FitAll);
+        session.frame_requested = false;
+    }
+    if !ctx.egui_wants_keyboard_input()
+        && viewport.contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
+        && session.file_dialog.is_none()
+        && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F))
     {
         view_command = Some(ViewCommand::FitAll);
     }
@@ -144,139 +160,317 @@ pub(super) fn workspace(
                 }
             });
     }
-    if session.draft != before_draft || session.heartline_draft != before_heartline {
-        if session.draft_dirty() || session.heartline_draft != session.editor.project().heartline {
+    if session.draft != before_draft
+        || session.heartline_draft != before_heartline
+        || session.initial_draft != before_initial
+    {
+        if session.draft_dirty()
+            || session.heartline_draft != session.editor.project().heartline
+            || session.initial_draft != session.editor.project().initial
+        {
             session.preview();
         } else {
             session.regenerate();
         }
     }
+    session.keyboard_owned_last_frame = ctx.any_popup_open() || ctx.egui_wants_keyboard_input();
     SurfaceOutput {
         viewport,
         view_command,
         close: session.close_approved,
+        window_command,
+        profile: session.workbench.active.index(),
+        reset_navigation,
     }
 }
-fn shortcuts(session: &mut Session, ctx: &egui::Context) {
-    if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
+pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
+    ui.heading("Section List");
+    ui.push_id("section navigation", |ui| sections(session, ui));
+    ui.separator();
+    ui.horizontal_wrapped(|ui| {
+        for (index, title) in ["Section", "Coaster", "Reference", "Project"]
+            .iter()
+            .enumerate()
+        {
+            ui.selectable_value(&mut session.track_tab, index, *title);
+        }
+    });
+    if session.track_tab == 0 {
+        ui.collapsing("Starting pose and design speed", |ui| {
+            basic_initial(session, ui)
+        });
+        // Dynamic draft notices and the section list must never shift numeric
+        // editor IDs: a retained keyboard focus could otherwise land on Cancel.
+        ui.push_id(("section properties", session.selected.0), |ui| {
+            section_properties(session, ui)
+        });
+        if matches!(session.draft.kind, SectionKind::Spline { .. }) {
+            ui.collapsing("Advanced curve controls — existing representation", |ui| {
+                spline::controls(&mut session.draft, ui, &mut session.status)
+            });
+        }
+        ui.collapsing("Mechanism Segment Properties", |ui| {
+        ui.label("Lift, launch, brake and station mechanisms require a future document and operating model.");
+    });
+    }
+    if session.track_tab == 1 {
+        ui.heading("Track Style Properties");
+        styles(session, ui);
+    }
+    if session.track_tab == 2 {
+        heartline(session, ui);
+    }
+    if session.track_tab == 3 {
+        ui.collapsing("Project metadata", |ui| {
+            ui.label("Name");
+            ui.text_edit_singleline(&mut session.metadata_draft.name);
+            ui.label("Author");
+            ui.text_edit_singleline(&mut session.metadata_draft.author);
+            ui.label("Description");
+            ui.text_edit_multiline(&mut session.metadata_draft.description);
+            if ui.button("Apply metadata").clicked() {
+                session.execute(vec![Command::SetMetadata(session.metadata_draft.clone())]);
+            }
+            if ui.button("Cancel metadata draft").clicked() {
+                session.metadata_draft = session.editor.project().metadata.clone();
+            }
+        });
+        ui.collapsing("Initial conditions", |ui| {
+            let initial = &mut session.initial_draft;
+            vector(ui, "Start XYZ m", &mut initial.position_m);
+            ui.label("Orientation quaternion WXYZ (normalized by generator)");
+            for v in [
+                &mut initial.orientation.w,
+                &mut initial.orientation.x,
+                &mut initial.orientation.y,
+                &mut initial.orientation.z,
+            ] {
+                ui.add(egui::DragValue::new(v).speed(0.001).max_decimals(12));
+            }
+            ui.horizontal(|ui| {
+                ui.label("Design speed m/s");
+                ui.add(
+                    egui::DragValue::new(&mut initial.reference_speed_mps)
+                        .speed(0.1)
+                        .max_decimals(10),
+                );
+            });
+            if ui.button("Apply initial conditions").clicked() {
+                session.execute(vec![Command::SetInitial(session.initial_draft.clone())]);
+            }
+            if ui.button("Cancel initial draft").clicked() {
+                session.initial_draft = session.editor.project().initial.clone();
+            }
+        });
+    }
+}
+
+pub(super) fn shortcuts(session: &mut Session, ctx: &egui::Context) {
+    if session.graph_drag.is_some() {
+        if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
+            super::graph_gesture::cancel(
+                session,
+                "Graph gesture canceled; preceding draft restored.",
+            );
+        }
+        return;
+    }
+    if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::S)) {
+        session.file_dialog(super::files::FileAction::SaveAs);
+    } else if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::S)) {
         session.save();
     }
-    if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Z)) {
+    if !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Z))
+    {
         session.undo(false);
     }
-    if ctx.input_mut(|i| {
-        i.consume_key(Modifiers::CTRL, Key::Y)
-            || i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Z)
-    }) {
+    if !ctx.egui_wants_keyboard_input()
+        && ctx.input_mut(|i| {
+            i.consume_key(Modifiers::CTRL, Key::Y)
+                || i.consume_key(Modifiers::CTRL | Modifiers::SHIFT, Key::Z)
+        })
+    {
         session.undo(true);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::N)) {
         session.open(None, false);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::O)) {
-        session.open(Some(session.path.clone().into()), false);
+        session.file_dialog(super::files::FileAction::Open);
     }
     if ctx.input_mut(|i| i.consume_key(Modifiers::CTRL, Key::Enter)) {
-        session.apply_draft();
+        session.apply_section_requested = true;
     }
-    if ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape)) {
-        session.sync_draft();
+    // egui can dismiss a popup or release text focus at the start of the pass.
+    // Preserve that Escape's owner from the preceding frame so the same key
+    // cannot also discard the section draft after closing the local editor.
+    if !session.keyboard_owned_last_frame
+        && !ctx.any_popup_open()
+        && !ctx.egui_wants_keyboard_input()
+        && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
+    {
+        session.cancel_section();
     }
 }
 fn sections(session: &mut Session, ui: &mut egui::Ui) {
     let sections = session.editor.project().sections.clone();
-    for section in &sections {
-        if ui
-            .selectable_label(
-                section.id == session.selected,
-                format!("{}: {} ({})", section.id.0, section.name, method(section)),
-            )
-            .clicked()
+    let list_height = (ui.clip_rect().height() * 0.32).clamp(86., 210.);
+    egui::ScrollArea::vertical()
+        .id_salt("track section list")
+        .max_height(list_height)
+        .auto_shrink([false, true])
+        .show(ui, |ui| {
+            for (index, section) in sections.iter().enumerate() {
+                let response = super::timeline::card(
+                    ui,
+                    section,
+                    index,
+                    section.id == session.selected,
+                    false,
+                );
+                if response.clicked() {
+                    session.select(section.id);
+                }
+                if response.hovered() {
+                    session.hovered = Some(section.id);
+                }
+                response.on_hover_text(format!(
+                    "Stable section ID {}. Selection is shared with the Transition Editor.",
+                    section.id.0
+                ));
+            }
+        });
+    super::timeline::ordering(session, ui);
+    ui.horizontal_wrapped(|ui| {
+        input_menu(ui, "Insert section…", |ui| insertion(session, ui));
+        if super::icons::button(
+            ui,
+            super::icons::Icon::Remove,
+            "Remove",
+            sections.len() > 1 && session.graph_drag.is_none(),
+            "Remove selected section. Undo restores it.",
+        )
+        .clicked()
         {
-            session.select(section.id);
-        }
-    }
-    let index = sections
-        .iter()
-        .position(|s| s.id == session.selected)
-        .unwrap_or(0);
-    ui.horizontal(|ui| {
-        let ready = !session.draft_dirty();
-        if ui
-            .add_enabled(ready && index > 0, egui::Button::new("Earlier"))
-            .clicked()
-        {
-            let after = index.checked_sub(2).map(|i| sections[i].id);
-            session.execute(vec![Command::MoveSection {
-                id: session.selected,
-                after,
-            }]);
-        }
-        if ui
-            .add_enabled(
-                ready && index + 1 < sections.len(),
-                egui::Button::new("Later"),
-            )
-            .clicked()
-        {
-            session.execute(vec![Command::MoveSection {
-                id: session.selected,
-                after: Some(sections[index + 1].id),
-            }]);
-        }
-        if ui
-            .add_enabled(
-                ready && sections.len() > 1,
-                egui::Button::new("Remove section"),
-            )
-            .clicked()
-        {
-            session.execute(vec![Command::RemoveSection {
-                id: session.selected,
-            }]);
+            session.remove_selected();
         }
     });
-    const KINDS: [&str; 9] = [
+    if session.draft_dirty() {
+        ui.strong(format!("Section {} · unapplied draft", session.selected.0));
+    }
+}
+pub(super) fn insertion(session: &mut Session, ui: &mut egui::Ui) {
+    const KINDS: [&str; 5] = [
         "Force-vector",
-        "Rider-local",
+        "Rider-local geometric",
         "World-geometric",
         "Straight",
-        "Arc",
-        "Bézier",
-        "B-spline",
-        "NURBS",
-        "Catmull–Rom",
+        "Circular arc",
     ];
-    egui::ComboBox::from_id_salt("new section type")
-        .selected_text(KINDS[session.new_kind])
-        .show_ui(ui, |ui| {
+    choice_menu(
+        ui,
+        "new section type",
+        KINDS[session.new_kind.min(4)],
+        |ui| {
             for (i, kind) in KINDS.iter().enumerate() {
                 ui.selectable_value(&mut session.new_kind, i, *kind);
             }
-        });
-    if ui
-        .add_enabled(
-            !session.draft_dirty(),
-            egui::Button::new("Insert after selected"),
-        )
-        .clicked()
-    {
-        let Some(id) = sections
+        },
+    );
+    ui.horizontal_wrapped(|ui| {
+        for (before, label) in [(true, "Insert before"), (false, "Insert after")] {
+            if super::icons::button(
+                ui,
+                super::icons::Icon::Insert,
+                label,
+                session.graph_drag.is_none(),
+                "Insert chosen section type relative to the selected section. One undo step.",
+            )
+            .clicked()
+            {
+                insert_section(session, session.new_kind.min(4), before);
+                ui.close();
+            }
+        }
+    });
+    ui.collapsing("Advanced mathematical representations", |ui| {
+        ui.small("Explicit complementary authoring. Existing curves retain their original representation.");
+        for (kind, name) in [(5, "Bézier"), (6, "B-spline"), (7, "NURBS"), (8, "Catmull–Rom")] {
+            if ui.add_enabled(session.graph_drag.is_none(), egui::Button::new(format!("Insert {name} section"))).clicked() {
+                insert_section(session, kind, false);
+            }
+        }
+    });
+}
+pub(super) fn insert_section(session: &mut Session, kind: usize, before: bool) {
+    if session.defer_section_action(super::workflow::PendingAction::Insert { kind, before }) {
+        return;
+    }
+    let Some(id) = session.next_section_id else {
+        session.status = "Section IDs exhausted".into();
+        return;
+    };
+    session.next_section_id = id.checked_add(1);
+    let after = if before {
+        let sections = &session.editor.project().sections;
+        sections
             .iter()
-            .map(|s| s.id.0)
-            .max()
-            .unwrap_or(0)
-            .checked_add(1)
-        else {
-            session.status = "Section IDs exhausted".into();
+            .position(|s| s.id == session.selected)
+            .and_then(|i| i.checked_sub(1))
+            .map(|i| sections[i].id)
+    } else {
+        Some(session.selected)
+    };
+    let index = after
+        .and_then(|id| {
+            session
+                .editor
+                .project()
+                .sections
+                .iter()
+                .position(|s| s.id == id)
+        })
+        .map_or(0, |i| i + 1);
+    let initialized = session
+        .editor
+        .project()
+        .generate(&session.catalog, session.options)
+        .and_then(|track| {
+            qx_document::insertion::initialize(
+                session.editor.project(),
+                &track,
+                index,
+                new_section(id, kind),
+            )
+        });
+    let section = match initialized {
+        Ok(section) => section,
+        Err(error) => {
+            session.status = format!("Insertion rejected: {error}");
+            session.draft_error = Some(session.status.clone());
             return;
-        };
-        let section = new_section(id, session.new_kind);
-        session.execute(vec![Command::InsertSection {
-            after: Some(session.selected),
-            section,
-        }]);
+        }
+    };
+    session.execute(vec![Command::InsertSection { after, section }]);
+    if session
+        .editor
+        .project()
+        .sections
+        .iter()
+        .any(|s| s.id.0 == id)
+    {
         session.select(qx_geometry::authoring::SectionId(id));
+        session.track_tab = 0;
+        session.select_channel(match kind {
+            0 => qx_geometry::authoring::ChannelKey::Normal,
+            1 | 2 => qx_geometry::authoring::ChannelKey::Pitch,
+            _ => qx_geometry::authoring::ChannelKey::Roll,
+        });
+        session.status = format!(
+            "Inserted {} section {} from the preceding endpoint. Edit its graph below; Fit Selection frames it.",
+            method(&session.draft),
+            id
+        );
     }
 }
 pub(super) fn new_section(id: u64, kind: usize) -> Section {
@@ -332,18 +526,24 @@ pub(super) fn new_section(id: u64, kind: usize) -> Section {
 }
 fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
     ui.strong(format!(
-        "Selected {} — {}",
+        "Track Segment Properties · {} · {}",
         session.selected.0,
         method(&session.draft)
     ));
     ui.text_edit_singleline(&mut session.draft.name);
-    ui.label(
-        "Values below are a draft; Apply commits and regenerates. Cancel restores the document.",
-    );
+    ui.small(if session.draft_dirty() {
+        "Unapplied draft · viewport previews valid inputs"
+    } else {
+        "Committed · edit values or the graph below"
+    });
+    section_commit(session, ui);
     if session.draft.domain != Domain::Normalized {
         let mut extent = session.draft.extent;
         ui.horizontal(|ui| {
-            ui.label(format!("Extent {:?}", session.draft.domain));
+            ui.label(match session.draft.domain {
+                Domain::Time => "Duration (s)",
+                _ => "Length (m)",
+            });
             ui.add(
                 egui::DragValue::new(&mut extent)
                     .speed(0.01)
@@ -356,54 +556,8 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
                 Err(e) => session.status = e.to_string(),
             }
         }
-        ui.horizontal(|ui| {
-            for domain in [Domain::Time, Domain::Distance] {
-                if ui
-                    .add_enabled(
-                        domain != session.draft.domain,
-                        egui::Button::new(format!("Convert to {domain:?}")),
-                    )
-                    .clicked()
-                {
-                    let speed = session
-                        .draft
-                        .reference_speed_mps
-                        .unwrap_or(session.editor.project().initial.reference_speed_mps);
-                    match qx_document::editing::convert_domain(&session.draft, domain, speed) {
-                        Ok(s) => session.draft = s,
-                        Err(e) => session.status = e.to_string(),
-                    }
-                }
-            }
-        });
     }
-    let mut override_speed = session.draft.reference_speed_mps.is_some();
-    if ui
-        .checkbox(&mut override_speed, "Section design-speed override")
-        .changed()
-    {
-        session.draft.reference_speed_mps =
-            override_speed.then_some(session.editor.project().initial.reference_speed_mps);
-    }
-    if let Some(speed) = &mut session.draft.reference_speed_mps {
-        ui.add(
-            egui::DragValue::new(speed)
-                .speed(0.1)
-                .max_decimals(12)
-                .suffix(" m/s"),
-        );
-    }
-    let mut strict = session.draft.incoming_boundary == BoundaryPolicy::RequireContinuousRates;
-    if ui
-        .checkbox(&mut strict, "Require continuous incoming rates")
-        .changed()
-    {
-        session.draft.incoming_boundary = if strict {
-            BoundaryPolicy::RequireContinuousRates
-        } else {
-            BoundaryPolicy::AllowRateJump
-        };
-    }
+
     if let SectionKind::Arc {
         radius_m,
         plane_angle_rad,
@@ -422,14 +576,129 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
                 .max_decimals(12),
         );
     }
-    if ui.button("Apply section (Ctrl+Enter)").clicked() {
-        session.apply_draft();
+    ui.small("Authored channels · edit selected transition");
+    ui.horizontal_wrapped(|ui| {
+        for key in qx_document::editing::channel_keys(&session.draft) {
+            if ui
+                .selectable_label(
+                    session.channel == key,
+                    super::graph_canvas::channel_style(key).0,
+                )
+                .clicked()
+            {
+                session.select_channel(key);
+            }
+        }
+    });
+    super::graph::transition_values(session, ui, "section values");
+    ui.small("Roll is an angular rate, integrated from the incoming bank. Force targets generate geometry at design speed.");
+    if session.draft.domain != Domain::Normalized {
+        ui.collapsing("Domain conversion", |ui| {
+            ui.horizontal_wrapped(|ui| {
+                for domain in [Domain::Time, Domain::Distance] {
+                    if ui
+                        .add_enabled(
+                            domain != session.draft.domain,
+                            egui::Button::new(format!("Convert to {domain:?}")),
+                        )
+                        .clicked()
+                    {
+                        let speed = session
+                            .draft
+                            .reference_speed_mps
+                            .unwrap_or(session.editor.project().initial.reference_speed_mps);
+                        match qx_document::editing::convert_domain(&session.draft, domain, speed) {
+                            Ok(s) => session.draft = s,
+                            Err(e) => session.status = e.to_string(),
+                        }
+                    }
+                }
+            });
+        });
     }
-    if ui.button("Cancel section draft").clicked() {
-        session.sync_draft();
-    }
+    ui.collapsing("Advanced section settings", |ui| {
+        let mut override_speed = session.draft.reference_speed_mps.is_some();
+        if ui
+            .checkbox(&mut override_speed, "Section design-speed override")
+            .changed()
+        {
+            session.draft.reference_speed_mps =
+                override_speed.then_some(session.editor.project().initial.reference_speed_mps);
+        }
+        if let Some(speed) = &mut session.draft.reference_speed_mps {
+            ui.add(
+                egui::DragValue::new(speed)
+                    .speed(0.1)
+                    .max_decimals(12)
+                    .suffix(" m/s"),
+            );
+        }
+        let mut strict = session.draft.incoming_boundary == BoundaryPolicy::RequireContinuousRates;
+        if ui
+            .checkbox(&mut strict, "Require continuous incoming rates")
+            .changed()
+        {
+            session.draft.incoming_boundary = if strict {
+                BoundaryPolicy::RequireContinuousRates
+            } else {
+                BoundaryPolicy::AllowRateJump
+            };
+        }
+    });
 }
-fn heartline(session: &mut Session, ui: &mut egui::Ui) {
+fn section_commit(session: &mut Session, ui: &mut egui::Ui) {
+    ui.horizontal_wrapped(|ui| {
+        if super::icons::button(
+            ui,
+            super::icons::Icon::Apply,
+            "Apply section",
+            session.draft_dirty(),
+            "Commit section draft · Ctrl+Enter",
+        )
+        .clicked()
+        {
+            session.apply_draft();
+        }
+        if super::icons::button(
+            ui,
+            super::icons::Icon::Cancel,
+            "Cancel draft",
+            session.draft_dirty(),
+            "Restore committed section · Esc",
+        )
+        .clicked()
+        {
+            session.cancel_section();
+        }
+    });
+}
+fn basic_initial(session: &mut Session, ui: &mut egui::Ui) {
+    vector(ui, "Start XYZ (m)", &mut session.initial_draft.position_m);
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Design speed (m/s)");
+        ui.add(
+            egui::DragValue::new(&mut session.initial_draft.reference_speed_mps)
+                .speed(0.1)
+                .max_decimals(12),
+        );
+    });
+    ui.small("Design-speed kinematics; independent of future train dynamics. Orientation quaternion is in Project / Initial conditions.");
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .add_enabled(
+                session.initial_draft != session.editor.project().initial,
+                egui::Button::new("Apply start"),
+            )
+            .clicked()
+        {
+            session.execute(vec![Command::SetInitial(session.initial_draft.clone())]);
+        }
+        if ui.button("Cancel start").clicked() {
+            session.initial_draft = session.editor.project().initial.clone();
+        }
+    });
+}
+pub(super) fn heartline(session: &mut Session, ui: &mut egui::Ui) {
     let settings = &mut session.heartline_draft;
     ui.label("Offsets in metres along +T forward, +N rider up, +L lateral. Negative values are supported. Track visual style has no effect.");
     egui::ComboBox::from_id_salt("authored reference")

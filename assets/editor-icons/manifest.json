@@ -1,0 +1,104 @@
+[
+  {
+    "asset": "carbon-center-to-fit.svg",
+    "source": "assets/icons/carbon/packages/icons/src/svg/32/center-to-fit.svg",
+    "source_sha256": "7e42365322f6a973e0837f7e5ba26ca66383eb2107e6cfaa0b06059425b89150",
+    "mask_sha256": "c1b002283bf2bb3c9fd309543903f0956719575b82f6258951893041cb30b0ad"
+  },
+  {
+    "asset": "carbon-chart--line.svg",
+    "source": "assets/icons/carbon/packages/icons/src/svg/32/chart--line.svg",
+    "source_sha256": "0a2ad4012b4119aa46554eda70249e28446ba256c09746318b822709b1401169",
+    "mask_sha256": "2c476e7edfdd853be066c221408179a7b749a63b5f99c2858dd5c9acc03f5086"
+  },
+  {
+    "asset": "carbon-cube.svg",
+    "source": "assets/icons/carbon/packages/icons/src/svg/32/cube.svg",
+    "source_sha256": "6ab9c673ed607f4f9eae999eb9d1e81b22623ceab3f29a33468ea137792e1f7f",
+    "mask_sha256": "7f799e9628f501d7e4e9baf754decda2a58c37363e1969ea67687e4da33b1adf"
+  },
+  {
+    "asset": "carbon-zoom--fit.svg",
+    "source": "assets/icons/carbon/packages/icons/src/svg/32/zoom--fit.svg",
+    "source_sha256": "5ec57409635496426479bcb6f19d86a088c21659a2394872d84060df269559b3",
+    "mask_sha256": "c203fa37aabba4be2a3602a50690b5eab5b098a1cfbbfaaa441a6b6fb9e3de13"
+  },
+  {
+    "asset": "lucide-arrow-down.svg",
+    "source": "assets/icons/lucide/icons/arrow-down.svg",
+    "source_sha256": "6db5d7a3265255abd4817274d558fef0f87607aa2f22b09b1bf6b2952657363e",
+    "mask_sha256": "f0716e73daf5151789abab269d0e77aee93064c94aafe58e38453e12097fdae5"
+  },
+  {
+    "asset": "lucide-arrow-up.svg",
+    "source": "assets/icons/lucide/icons/arrow-up.svg",
+    "source_sha256": "2736a678677bce07b3dea606e4ff75ad7de4d9eaed031f649f1d946a970eeda8",
+    "mask_sha256": "4b0f9874bb44871e365650bf38cac130437c033df748e29e194e1a717a7c5017"
+  },
+  {
+    "asset": "lucide-check.svg",
+    "source": "assets/icons/lucide/icons/check.svg",
+    "source_sha256": "68901c2e732dad8a92dae26f109f3de4ce95812029b50432a899cd96ff768360",
+    "mask_sha256": "eae95de7ad10949b3352cf6113e006224c9e8f388b02d37d2a0a80e4029853e8"
+  },
+  {
+    "asset": "lucide-file-plus.svg",
+    "source": "assets/icons/lucide/icons/file-plus.svg",
+    "source_sha256": "3341a5268198e2718e99c71dc6fedceb5f2cdecfd210e5a2b043f8010b1e578f",
+    "mask_sha256": "63cc04a26fb1bf1315448148a63224413f7f46182cc352243dad1d8ba3d14089"
+  },
+  {
+    "asset": "lucide-folder-open.svg",
+    "source": "assets/icons/lucide/icons/folder-open.svg",
+    "source_sha256": "5bf197d963fcc382548e42564462ade47cdc0979257edd2ca2fc654621b0aecf",
+    "mask_sha256": "ff4a05f7c0e9a570908c06736c95b4aa756bc970ed3914ba7f947cf41993fbd7"
+  },
+  {
+    "asset": "lucide-plus.svg",
+    "source": "assets/icons/lucide/icons/plus.svg",
+    "source_sha256": "f50294735c162595ea59e425a098d4e3679a89b82f1efd06779425a5922720c2",
+    "mask_sha256": "6b1bed10139a845deb100d44e7b6084684be6af45aa0c3d2b710e617176f306e"
+  },
+  {
+    "asset": "lucide-redo-2.svg",
+    "source": "assets/icons/lucide/icons/redo-2.svg",
+    "source_sha256": "b2232634910f7c35c289f2125f93758778ea336e45d2bccbd2e80d29678aa76e",
+    "mask_sha256": "0f669fc329919fd31134ad5d9af490c56b68cd41b4e308b1e29d462e089ec31d"
+  },
+  {
+    "asset": "lucide-save-pen.svg",
+    "source": "assets/icons/lucide/icons/save-pen.svg",
+    "source_sha256": "bbb79dd2d02b33ba1bff7717929d9fde035f5c4078e3acbccb05d9624005c15b",
+    "mask_sha256": "0db9854eb09ca7f8825a609f25ea82ece4b13dd5c3e4b8cdf100dc591c8e7d01"
+  },
+  {
+    "asset": "lucide-save.svg",
+    "source": "assets/icons/lucide/icons/save.svg",
+    "source_sha256": "929d465e19c9dcebb4b3510693c678513246162c2079819bd90c18c1bf8d99f6",
+    "mask_sha256": "dea5159b219edbb69ca4ed6d5f4490c41b827057b80f83b5ecd126a027151bf6"
+  },
+  {
+    "asset": "lucide-settings-2.svg",
+    "source": "assets/icons/lucide/icons/settings-2.svg",
+    "source_sha256": "61105d342d20b49c222d263801ea7c1e3e8bb9d16003213118737a0e45126c15",
+    "mask_sha256": "bfd54df30b511ef46ad2eba290405b9b59809559e80b9e60b0c801135f5fa003"
+  },
+  {
+    "asset": "lucide-trash.svg",
+    "source": "assets/icons/lucide/icons/trash.svg",
+    "source_sha256": "893e0f5c6bda2007d81f8fa3cc968406ea5286eb050167cd025f5cc3dd353614",
+    "mask_sha256": "b494a97aced07ada9fef264f17771482772d12a8798a40580a9a44c934f5edc0"
+  },
+  {
+    "asset": "lucide-undo-2.svg",
+    "source": "assets/icons/lucide/icons/undo-2.svg",
+    "source_sha256": "9b085917c5000838749056afbc20e673193e6c8a8dab40795967692a3aa2a3d8",
+    "mask_sha256": "ecd5a96fb3846263d144d7077198153df9c446b20fdd32198a5c58460fc5b5d3"
+  },
+  {
+    "asset": "lucide-x.svg",
+    "source": "assets/icons/lucide/icons/x.svg",
+    "source_sha256": "5b4165ae1f49b53694ba06340e7580d81dedadd1e17b286e3a0147cf957b97f3",
+    "mask_sha256": "5061bcaf57edc27c2d93cc554970a33c8cd29f9abe9f590ddf80cf46c803e54a"
+  }
+]

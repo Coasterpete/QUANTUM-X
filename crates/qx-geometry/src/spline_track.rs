@@ -180,13 +180,16 @@ pub(crate) fn append(
             end_sample: result.samples.len() - 1,
         });
     }
+    let frame = result.samples.last().expect("spline endpoint").frame;
+    let end_omega = omega_at(u1, 1.0, frame, Side::Left)?;
     result.sections.push(SectionRange {
         id: section.id,
         start_sample: start_index,
         end_sample: result.samples.len() - 1,
         start_distance_m: start.distance_m,
         end_distance_m: start.distance_m + length,
+        end_angular_rate_rad_per_m: end_omega,
+        reference_speed_mps: speed,
     });
-    let frame = result.samples.last().expect("spline endpoint").frame;
-    Ok((omega_at(u1, 1.0, frame, Side::Left)?, speed))
+    Ok((end_omega, speed))
 }

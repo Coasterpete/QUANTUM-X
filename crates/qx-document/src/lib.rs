@@ -1,6 +1,7 @@
 //! Versioned authoring documents and shared transactional editing commands.
 pub mod command;
 pub mod editing;
+pub mod insertion;
 pub mod persistence;
 pub mod sample;
 

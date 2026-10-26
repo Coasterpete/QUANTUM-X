@@ -10,10 +10,13 @@ pub(crate) struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    grid_pipeline: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     bind: wgpu::BindGroup,
+    grid_bind: wgpu::BindGroup,
     vertices: wgpu::Buffer,
     count: u32,
+    grid_count: u32,
     depth: wgpu::TextureView,
     size: PhysicalSize<u32>,
     errors: mpsc::Receiver<String>,
@@ -63,7 +66,8 @@ impl Gpu {
             config.format = *format;
         }
         surface.configure(&device, &config);
-        let pipeline = line_pipeline(&device, config.format);
+        let pipeline = line_pipeline(&device, config.format, true);
+        let grid_pipeline = line_pipeline(&device, config.format, false);
         let uniform = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("camera matrix"),
             size: 64,
@@ -73,6 +77,14 @@ impl Gpu {
         let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &pipeline.get_bind_group_layout(0),
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: uniform.as_entire_binding(),
+            }],
+        });
+        let grid_bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("grid camera"),
+            layout: &grid_pipeline.get_bind_group_layout(0),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
                 resource: uniform.as_entire_binding(),
@@ -93,10 +105,13 @@ impl Gpu {
             queue,
             config,
             pipeline,
+            grid_pipeline,
             uniform,
             bind,
+            grid_bind,
             vertices,
             count: 0,
+            grid_count: 0,
             depth,
             size,
             errors,
@@ -131,7 +146,10 @@ impl Gpu {
             self.depth = Self::depth(&self.device, &self.config);
         }
     }
-    pub fn upload(&mut self, vertices: &[Vertex]) -> Result<(), String> {
+    pub fn upload(&mut self, vertices: &[Vertex], grid_count: u32) -> Result<(), String> {
+        if grid_count as usize > vertices.len() || !grid_count.is_multiple_of(2) {
+            return Err("invalid grid line prefix".into());
+        }
         let bytes = bytemuck::cast_slice(vertices);
         if bytes.len() as u64 > self.device.limits().max_buffer_size {
             return Err("inspection lines exceed graphics buffer limit".into());
@@ -148,6 +166,7 @@ impl Gpu {
                 });
         }
         self.count = vertices.len() as u32;
+        self.grid_count = grid_count;
         Ok(())
     }
     pub fn draw(
@@ -211,7 +230,10 @@ impl Gpu {
                 );
             }
         };
-        let viewport = ui.as_ref().map_or(
+        let viewport_visible = ui.as_ref().is_none_or(|u| {
+            u.viewport.is_finite() && u.viewport.width() > 0. && u.viewport.height() > 0.
+        });
+        let viewport = ui.as_ref().filter(|_| viewport_visible).map_or(
             [0., 0., self.size.width as f32, self.size.height as f32],
             |u| {
                 let p = u.pixels_per_point;
@@ -267,16 +289,21 @@ impl Gpu {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.pipeline);
             let x = viewport[0].clamp(0., self.size.width.saturating_sub(1) as f32);
             let y = viewport[1].clamp(0., self.size.height.saturating_sub(1) as f32);
             let width = viewport[2].min(self.size.width as f32 - x).max(1.);
             let height = viewport[3].min(self.size.height as f32 - y).max(1.);
             pass.set_viewport(x, y, width, height, 0., 1.);
             pass.set_scissor_rect(x as u32, y as u32, width as u32, height as u32);
-            pass.set_bind_group(0, &self.bind, &[]);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
-            pass.draw(0..self.count, 0..1);
+            if viewport_visible {
+                pass.set_pipeline(&self.grid_pipeline);
+                pass.set_bind_group(0, &self.grid_bind, &[]);
+                pass.draw(0..self.grid_count, 0..1);
+                pass.set_pipeline(&self.pipeline);
+                pass.set_bind_group(0, &self.bind, &[]);
+                pass.draw(self.grid_count..self.count, 0..1);
+            }
         }
         if let Some(ui) = &ui {
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -318,6 +345,7 @@ pub(crate) struct GuiFrame {
 pub(crate) fn line_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
+    write_depth: bool,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("debug centerlines"),
@@ -342,7 +370,7 @@ pub(crate) fn line_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: Some(true),
+            depth_write_enabled: Some(write_depth),
             depth_compare: Some(wgpu::CompareFunction::LessEqual),
             stencil: Default::default(),
             bias: Default::default(),

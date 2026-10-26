@@ -1,284 +1,253 @@
+use super::plot::Plot;
 use super::session::Session;
 use egui::{Color32, Pos2, Sense, Stroke};
 use qx_geometry::transition::Function;
 use qx_rendering::InspectionScene;
 
 pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionScene) {
-    ui.strong("Transition Editor — development controls");
-    egui::ScrollArea::horizontal()
-        .id_salt("section timeline")
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let sections = session.editor.project().sections.clone();
-                for section in sections {
-                    let text = format!(
-                        "{}: {}  {:.3} {:?}",
-                        section.id.0, section.name, section.extent, section.domain
-                    );
-                    if ui
-                        .selectable_label(session.selected == section.id, text)
-                        .clicked()
-                    {
-                        session.select(section.id);
+    super::graph_gesture::update(session, ui.ctx());
+    ui.spacing_mut().item_spacing.y = 3.;
+    super::graph_canvas::route_scroll_tail(session, ui);
+    super::graph_view::sync(session);
+    super::timeline::sequence(session, ui);
+    // Context, commit controls and navigation are outside every scrolling region.
+    let narrow_header = ui.available_width() < 650.;
+    ui.horizontal_wrapped(|ui| {
+        let channel = session.draft.channel_mut(session.channel).unwrap().clone();
+        session.transition = session.transition.min(channel.transitions.len() - 1);
+        let selected = &channel.transitions[session.transition];
+        let context = format!(
+            "Section {} · {} · {}",
+            session.selected.0,
+            session.draft.name,
+            super::timeline::extent(&session.draft)
+        );
+        ui.add_sized(
+            [
+                if narrow_header {
+                    ui.available_width()
+                } else {
+                    (ui.available_width() - 430.).max(60.)
+                },
+                26.,
+            ],
+            egui::Label::new(context.clone()).truncate(),
+        )
+        .on_hover_text(context);
+        ui.add_enabled_ui(session.graph_drag.is_none(), |ui| {
+            egui::ComboBox::from_id_salt("selected transition")
+                .width(148.)
+                .selected_text(format!(
+                    "Transition {} / {}",
+                    session.transition + 1,
+                    channel.transitions.len()
+                ))
+                .show_ui(ui, |ui| {
+                    for (index, t) in channel.transitions.iter().enumerate() {
+                        ui.selectable_value(
+                            &mut session.transition,
+                            index,
+                            format!(
+                                "{} · {} (ID {})",
+                                index + 1,
+                                function_name(&t.function),
+                                t.id
+                            ),
+                        );
+                    }
+                })
+                .response
+                .on_hover_text(format!(
+                    "{} · {:.10} -> {:.10}",
+                    function_name(&selected.function),
+                    selected.start,
+                    selected.end
+                ));
+            ui.label(if session.draft_dirty() {
+                "Draft"
+            } else {
+                "Committed"
+            });
+            if super::icons::button(
+                ui,
+                super::icons::Icon::Apply,
+                "Apply",
+                session.draft_dirty(),
+                "Commit section draft · Ctrl+Enter",
+            )
+            .clicked()
+            {
+                session.apply_draft();
+            }
+            if super::icons::button(
+                ui,
+                super::icons::Icon::Cancel,
+                "Cancel",
+                session.draft_dirty(),
+                "Discard section draft · Esc",
+            )
+            .clicked()
+            {
+                session.cancel_section();
+            }
+        });
+    });
+    let compact = ui.available_width() < 1100.;
+    let narrow = ui.available_width() < 800.;
+    ui.add_enabled_ui(session.graph_drag.is_none(), |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for key in qx_document::editing::channel_keys(&session.draft) {
+                let (label, color) = super::graph_canvas::channel_style(key);
+                if ui.selectable_label(session.channel == key, egui::RichText::new(label).color(color)).clicked() {
+                    session.select_channel(key);
+                }
+            }
+            if !narrow && super::icons::button(ui, super::icons::Icon::Transitions, "Fit Graph", true,
+                "Fit full section and sampled curve. Constant profiles keep a useful unit-specific range. F over graph.").clicked() {
+                super::graph_canvas::fit(session);
+            }
+            if !narrow && ui.button("Reset View").on_hover_text("Full section domain; Y: force -1..3 g, distance rates ±0.05 rad/m, other rates ±1. Display only.").clicked() {
+                let view = super::graph_view::View::reset(session.draft.channel_mut(session.channel).unwrap());
+                session.graph_view.set(view);
+            }
+            let range_menu = super::panels::input_menu(ui, if narrow { "Graph view" } else { "View range" }, |ui| {
+                if narrow {
+                    if ui.button("Fit Graph").clicked() { super::graph_canvas::fit(session); }
+                    if ui.button("Reset View").clicked() {
+                        let view=super::graph_view::View::reset(session.draft.channel_mut(session.channel).unwrap());
+                        session.graph_view.set(view);
                     }
                 }
+                ui.label("Exact display bounds · authored values stay unchanged");
+                let state = &mut session.graph_view;
+                egui::Grid::new("exact graph bounds").show(ui, |ui| {
+                    for (i, label) in ["X from", "X to", "Y from", "Y to"].iter().enumerate() {
+                        ui.label(*label);
+                        ui.add(egui::DragValue::new(&mut state.range_edit[i]).speed(0.001).max_decimals(15));
+                        ui.end_row();
+                    }
+                });
+                if let Some(error) = state.error { ui.colored_label(Color32::YELLOW, error); }
+                if ui.button("Apply range").clicked() {
+                    state.apply_range(session.draft.channel_mut(session.channel).unwrap().length());
+                }
+                ui.small("Each section/channel remembers its view. First visit fits; unit/domain conversion fits again.");
             });
+            if range_menu.inner.is_none() {
+                session.graph_view.range_edit = session.graph_view.view.bounds();
+                session.graph_view.error = None;
+            }
+            super::panels::input_menu(ui, "Edit values", |ui| {
+                ui.label("Authored values - Apply commits the section");
+                transition_values(session, ui, "graph quick values");
+            });
+            if compact {
+                super::panels::input_menu(ui, "More", |ui| {
+                    transition_tools(session, ui);
+                    ui.separator();
+                    super::timeline::ordering(session, ui);
+                    super::panels::insertion(session, ui);
+                });
+            } else {
+                super::panels::input_menu(ui, "Transitions", |ui| transition_tools(session, ui));
+                super::panels::input_menu(ui, "Section actions", |ui| {
+                    super::timeline::ordering(session, ui);
+                    super::panels::insertion(session, ui);
+                });
+            }
+            ui.label("?").on_hover_text("Square: drag value vertically\nDiamond: drag boundary horizontally\nCtrl+wheel over graph: zoom about pointer\nMiddle drag: pan\nF: Fit Graph · Esc: cancel drag\nPlain wheel over timeline scrolls sections; over precision tools scrolls tools. It never zooms the graph.");
         });
-    ui.horizontal(|ui| {
-        for key in qx_document::editing::channel_keys(&session.draft) {
-            if ui
-                .selectable_label(session.channel == key, format!("{key:?}"))
-                .clicked()
-            {
-                session.channel = key;
-                session.transition = 0;
-            }
-        }
-        ui.label("Y range");
-        ui.add(egui::DragValue::new(&mut session.graph_min).speed(0.01));
-        ui.add(egui::DragValue::new(&mut session.graph_max).speed(0.01));
-        if ui.button("Fit values").clicked() {
-            let channel = session.draft.channel_mut(session.channel).unwrap();
-            let values = channel.transitions.iter().flat_map(|t| {
-                (0..=32).filter_map(|i| t.evaluate(t.length * i as f64 / 32.).ok().map(|e| e.value))
-            });
-            let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
-            for value in values {
-                min = min.min(value);
-                max = max.max(value);
-            }
-            let margin = ((max - min) * 0.15).max(0.01);
-            session.graph_min = min - margin;
-            session.graph_max = max + margin;
-        }
     });
-    if let Err(error) = session
+    let valid = session
         .draft
         .channel_mut(session.channel)
         .unwrap()
-        .validate()
-    {
-        ui.colored_label(
-            Color32::YELLOW,
-            format!("Invalid draft graph: {error}. Fix numeric inputs or Cancel."),
-        );
-        numeric_transition(session, ui);
-        derived(session, ui, scene);
-        return;
-    }
-    let (rect, response) =
-        ui.allocate_exact_size(egui::vec2(ui.available_width(), 110.), Sense::click());
-    let plot = rect.shrink2(egui::vec2(45., 10.));
-    let domain = session.draft.domain;
-    let channel = session.draft.channel_mut(session.channel).unwrap();
-    let extent = channel.length();
-    let min = if session.graph_min.is_finite() {
-        session.graph_min
-    } else {
-        -1.
-    };
-    let max = if session.graph_max.is_finite() {
-        session.graph_max.max(min + 1e-9)
-    } else {
-        min + 4.
-    };
-    let map = |x: f64, y: f64| {
-        egui::pos2(
-            plot.left() + (x / extent) as f32 * plot.width(),
-            plot.bottom() - ((y - min) / (max - min)) as f32 * plot.height(),
-        )
-    };
-    let painter = ui.painter().with_clip_rect(rect);
-    painter.rect_filled(plot, 0., Color32::from_gray(22));
-    painter.line_segment(
-        [map(0., 0.), map(extent, 0.)],
-        Stroke::new(1., Color32::GRAY),
-    );
-    painter.text(
-        rect.left_top(),
-        egui::Align2::LEFT_TOP,
-        format!("{max:.3}"),
-        egui::FontId::monospace(10.),
-        Color32::WHITE,
-    );
-    painter.text(
-        rect.left_bottom(),
-        egui::Align2::LEFT_BOTTOM,
-        format!("{min:.3}"),
-        egui::FontId::monospace(10.),
-        Color32::WHITE,
-    );
-    painter.text(
-        rect.right_bottom(),
-        egui::Align2::RIGHT_BOTTOM,
-        format!("{extent:.5} {:?}  /  {:?}", domain, channel.unit),
-        egui::FontId::monospace(10.),
-        Color32::WHITE,
-    );
-    let mut cursor = 0.;
-    let mut commit = false;
-    for (index, t) in channel.transitions.iter_mut().enumerate() {
-        let color = if session.transition == index {
-            Color32::WHITE
+        .validate();
+    // Only optional precision/derived content scrolls; it cannot displace the header.
+    let details_height = (ui.available_height() * 0.28).clamp(ui.spacing().interact_size.y, 160.);
+    let canvas_height =
+        (ui.available_height() - details_height - ui.spacing().item_spacing.y).max(66.);
+    ui.allocate_ui(egui::vec2(ui.available_width(), canvas_height), |ui| {
+        if let Err(error) = valid {
+            ui.colored_label(
+                Color32::from_rgb(240, 195, 100),
+                format!("Invalid draft graph: {error}. Correct precision inputs or Cancel."),
+            );
         } else {
-            Color32::from_rgb(120, 185, 205)
-        };
-        let points: Vec<_> = (0..=64)
-            .filter_map(|i| {
-                let x = t.length * i as f64 / 64.;
-                t.evaluate(x).ok().map(|e| map(cursor + x, e.value))
-            })
-            .collect();
-        if points.len() > 1 {
-            painter.add(egui::Shape::line(points, Stroke::new(1.5, color)));
+            super::graph_canvas::show(session, ui);
         }
-        for end in [false, true] {
-            let value = if end { t.end } else { t.start };
-            let position = map(cursor + if end { t.length } else { 0. }, value);
-            let handle_id =
-                ui.scope_id()
-                    .with((session.selected.0, session.channel as u8, t.id, end));
-            let handle = ui.interact(
-                egui::Rect::from_center_size(position, egui::vec2(12., 12.)),
-                handle_id,
-                Sense::drag(),
-            );
-            painter.rect_filled(
-                egui::Rect::from_center_size(position, egui::vec2(6., 6.)),
-                0.,
-                color,
-            );
-            if handle.drag_started() {
-                ui.ctx().data_mut(|d| d.insert_temp(handle_id, value));
-                session.transition = index;
-            }
-            if handle.dragged() {
-                let base = ui
-                    .ctx()
-                    .data(|d| d.get_temp::<f64>(handle_id))
-                    .unwrap_or(value);
-                let next = base - handle.drag_delta().y as f64 * (max - min) / plot.height() as f64;
-                if end {
-                    t.end = next;
-                } else {
-                    t.start = next;
-                }
-                if matches!(t.function, Function::Constant {}) {
-                    t.start = next;
-                    t.end = next;
-                }
-            }
-            if handle.drag_stopped() {
-                commit = true;
-            }
-        }
-        if response.clicked()
-            && let Some(pos) = response.interact_pointer_pos()
-        {
-            let x = (pos.x - plot.left()) as f64 / plot.width() as f64 * extent;
-            if (cursor..=cursor + t.length).contains(&x) {
-                session.transition = index;
-            }
-        }
-        cursor += t.length;
-    }
-    ui.label("Drag square endpoints to edit values; release commits one undo step. Click a region to select. Numeric edits below are staged until Apply.");
-    if commit {
-        session.apply_draft();
-    }
-    numeric_transition(session, ui);
-    derived(session, ui, scene);
+    });
+    egui::ScrollArea::vertical()
+        .id_salt("graph precision scroll")
+        .auto_shrink([false, false])
+        .max_height(ui.available_height().max(24.))
+        .show(ui, |ui| {
+            egui::CollapsingHeader::new(
+                "Precision editor · values, boundaries and transition tools",
+            )
+            .id_salt("transition precision")
+            .show(ui, |ui| numeric_transition(session, ui));
+            ui.collapsing("Derived measurements · design-speed diagnostics", |ui| {
+                derived(session, ui, scene)
+            });
+        });
 }
-fn numeric_transition(session: &mut Session, ui: &mut egui::Ui) {
+
+pub(super) fn numeric_transition(session: &mut Session, ui: &mut egui::Ui) {
+    let channel = session.draft.channel_mut(session.channel).unwrap();
+    let id = channel.transitions[session.transition.min(channel.transitions.len() - 1)].id;
+    ui.push_id(
+        (
+            "precise transition",
+            session.selected.0,
+            session.channel as u8,
+            id,
+        ),
+        |ui| numeric_transition_inner(session, ui),
+    );
+}
+fn numeric_transition_inner(session: &mut Session, ui: &mut egui::Ui) {
+    let key = session.channel;
+    let channel = session.draft.channel_mut(key).unwrap().clone();
+    let index = session.transition.min(channel.transitions.len() - 1);
+    let before: f64 = channel.transitions[..index].iter().map(|t| t.length).sum();
+    let mut boundary = before + channel.transitions[index].length;
+    ui.horizontal_wrapped(|ui| {
+        ui.monospace(format!(
+            "Start boundary: {before:.8} {:?}",
+            session.draft.domain
+        ));
+        ui.label("End boundary");
+        if ui
+            .add_enabled(
+                index + 1 < channel.transitions.len(),
+                egui::DragValue::new(&mut boundary)
+                    .speed(0.01)
+                    .max_decimals(12),
+            )
+            .changed()
+        {
+            match super::graph_canvas::boundary(&session.draft, key, index, boundary - before) {
+                Ok(next) => session.draft = next,
+                Err(error) => session.status = error,
+            }
+        }
+    });
+    ui.collapsing("Individual transition length · advanced timing", |ui| {
+        ui.small("Edit lengths precisely; every channel must still sum to the section extent. Use End boundary above to transfer duration between neighbors.");
+        let t = &mut session.draft.channel_mut(key).unwrap().transitions[index];
+        ui.add(egui::DragValue::new(&mut t.length).speed(0.01).max_decimals(12));
+    });
+    transition_values(session, ui, "precision values");
+    transition_tools(session, ui);
+}
+pub(super) fn transition_tools(session: &mut Session, ui: &mut egui::Ui) {
     let key = session.channel;
     let channel = session.draft.channel_mut(key).unwrap();
-    session.transition = session.transition.min(channel.transitions.len() - 1);
-    let index = session.transition;
+    let index = session.transition.min(channel.transitions.len() - 1);
     let t = &mut channel.transitions[index];
-    ui.horizontal(|ui| {
-        ui.label(format!("Transition {}", t.id));
-        ui.label("Length");
-        ui.add(
-            egui::DragValue::new(&mut t.length)
-                .speed(0.01)
-                .max_decimals(10),
-        );
-        ui.label("Start");
-        ui.add(
-            egui::DragValue::new(&mut t.start)
-                .speed(0.01)
-                .max_decimals(10),
-        );
-        if matches!(t.function, Function::Constant {}) {
-            t.end = t.start;
-        }
-        ui.label("End");
-        ui.add_enabled(
-            !matches!(t.function, Function::Constant {}),
-            egui::DragValue::new(&mut t.end)
-                .speed(0.01)
-                .max_decimals(10),
-        );
-        ui.label("Amplitude");
-        ui.add_enabled(
-            !matches!(t.function, Function::Constant {}),
-            egui::DragValue::new(&mut t.amplitude)
-                .speed(0.01)
-                .max_decimals(10),
-        );
-        egui::ComboBox::from_id_salt("transition function")
-            .selected_text(function_name(&t.function))
-            .show_ui(ui, |ui| {
-                for function in [
-                    Function::Constant {},
-                    Function::Linear {},
-                    Function::Quadratic {},
-                    Function::CubicSmoothstep {},
-                    Function::QuinticSmoothstep {},
-                    Function::Cosine {},
-                    Function::Hermite {
-                        start_slope: 0.,
-                        end_slope: 0.,
-                    },
-                ] {
-                    if ui
-                        .selectable_label(
-                            std::mem::discriminant(&t.function)
-                                == std::mem::discriminant(&function),
-                            function_name(&function),
-                        )
-                        .clicked()
-                    {
-                        t.function = function;
-                        if matches!(t.function, Function::Constant {}) {
-                            t.end = t.start;
-                            t.amplitude = 0.;
-                        }
-                    }
-                }
-            });
-    });
-    if let Function::Hermite {
-        start_slope,
-        end_slope,
-    } = &mut t.function
-    {
-        ui.horizontal(|ui| {
-            ui.label("Endpoint derivatives (output / input)");
-            ui.add(
-                egui::DragValue::new(start_slope)
-                    .speed(0.001)
-                    .max_decimals(10),
-            );
-            ui.add(
-                egui::DragValue::new(end_slope)
-                    .speed(0.001)
-                    .max_decimals(10),
-            );
-        });
-    }
     let id = t.id;
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(index > 0, egui::Button::new("Transition earlier"))
             .clicked()
@@ -297,7 +266,7 @@ fn numeric_transition(session: &mut Session, ui: &mut egui::Ui) {
             session.transition += 1;
         }
     });
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Insert fraction"); ui.add(egui::DragValue::new(&mut session.split_fraction).range(0.001..=0.999).speed(0.01));
         if ui.button("Split into two Hermite regions").on_hover_text("Explicit reshape: retains endpoint values/slopes and section extent; non-cubic source functions can change between endpoints. Apply to commit; Cancel discards.").clicked() {
             match qx_document::editing::split_hermite(&session.draft, key, id, session.split_fraction) { Ok(section) => session.draft = section, Err(e) => session.status = e.to_string() }
@@ -306,9 +275,106 @@ fn numeric_transition(session: &mut Session, ui: &mut egui::Ui) {
             match qx_document::editing::remove_transition(&session.draft, key, id) { Ok(section) => { session.draft = section; session.transition = 0; }, Err(e) => session.status = e.to_string() }
         }
         if ui.button("Apply section (Ctrl+Enter)").clicked() { session.apply_draft(); }
-        if ui.button("Cancel section draft (Esc)").clicked() { session.sync_draft(); }
+        if ui.button("Cancel section draft (Esc)").clicked() { session.cancel_section(); }
     });
 }
+pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: &str) {
+    let key = session.channel;
+    let channel = session.draft.channel_mut(key).unwrap();
+    let id = channel.transitions[session.transition.min(channel.transitions.len() - 1)].id;
+    ui.push_id((salt, session.selected.0, key as u8, id), |ui| {
+        let channel = session.draft.channel_mut(key).unwrap();
+        session.transition = session.transition.min(channel.transitions.len() - 1);
+        let index = session.transition;
+        let t = &mut channel.transitions[index];
+        ui.horizontal_wrapped(|ui| {
+            ui.label(format!("Transition {}", t.id));
+            ui.label("Start");
+            let start_changed = ui
+                .add(
+                    egui::DragValue::new(&mut t.start)
+                        .speed(0.01)
+                        .max_decimals(10),
+                )
+                .changed();
+            if start_changed && matches!(t.function, Function::Constant {}) {
+                t.end = t.start;
+            }
+            ui.label("End");
+            ui.add_enabled(
+                !matches!(t.function, Function::Constant {}),
+                egui::DragValue::new(&mut t.end)
+                    .speed(0.01)
+                    .max_decimals(10),
+            );
+            ui.label("Amplitude");
+            ui.add_enabled(
+                !matches!(t.function, Function::Constant {}),
+                egui::DragValue::new(&mut t.amplitude)
+                    .speed(0.01)
+                    .max_decimals(10),
+            );
+            super::panels::choice_menu(
+                ui,
+                "transition function",
+                function_name(&t.function),
+                |ui| {
+                    for function in [
+                        Function::Constant {},
+                        Function::Linear {},
+                        Function::Quadratic {},
+                        Function::CubicSmoothstep {},
+                        Function::QuinticSmoothstep {},
+                        Function::Cosine {},
+                        Function::Hermite {
+                            start_slope: 0.,
+                            end_slope: 0.,
+                        },
+                    ] {
+                        if ui
+                            .selectable_label(
+                                std::mem::discriminant(&t.function)
+                                    == std::mem::discriminant(&function),
+                                function_name(&function),
+                            )
+                            .clicked()
+                            && std::mem::discriminant(&t.function)
+                                != std::mem::discriminant(&function)
+                        {
+                            t.function = function;
+                            if matches!(t.function, Function::Constant {}) {
+                                t.end = t.start;
+                                t.amplitude = 0.;
+                            }
+                        }
+                    }
+                },
+            );
+        });
+        if let Function::Hermite {
+            start_slope,
+            end_slope,
+        } = &mut t.function
+        {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("Slopes (output / input)");
+                ui.label("Start slope");
+                ui.add(
+                    egui::DragValue::new(start_slope)
+                        .speed(0.001)
+                        .max_decimals(10),
+                );
+                ui.label("End slope");
+                ui.add(
+                    egui::DragValue::new(end_slope)
+                        .speed(0.001)
+                        .max_decimals(10),
+                );
+            });
+        }
+    });
+}
+
 fn function_name(function: &Function) -> &'static str {
     match function {
         Function::Constant {} => "Constant",
@@ -320,6 +386,7 @@ fn function_name(function: &Function) -> &'static str {
         Function::Hermite { .. } => "Hermite",
     }
 }
+
 fn derived(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionScene) {
     const NAMES: [&str; 8] = [
         "Normal g",
@@ -331,7 +398,7 @@ fn derived(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionScene) {
         "Calculated path normal g",
         "Calculated path lateral g",
     ];
-    ui.horizontal(|ui| {
+    ui.horizontal_wrapped(|ui| {
         ui.label("Derived design-speed diagnostics (view revision)");
         egui::ComboBox::from_id_salt("derived graph")
             .selected_text(NAMES[session.derived_graph])
@@ -379,43 +446,35 @@ fn derived(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionScene) {
             })
             .collect()
     };
-    let (rect, _) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 60.), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width().max(120.), 140.),
+        Sense::hover(),
+    );
     if values.len() < 2 {
         return;
     }
     let (min_x, max_x) = (values[0].0, values.last().unwrap().0);
     let min_y = values.iter().map(|v| v.1).fold(f64::INFINITY, f64::min);
-    let max_y = values
-        .iter()
-        .map(|v| v.1)
-        .fold(f64::NEG_INFINITY, f64::max)
-        .max(min_y + 0.01);
-    let plot = rect.shrink2(egui::vec2(45., 5.));
-    let points: Vec<Pos2> = values
-        .into_iter()
-        .map(|(x, y)| {
-            egui::pos2(
-                plot.left() + ((x - min_x) / (max_x - min_x).max(1e-9)) as f32 * plot.width(),
-                plot.bottom() - ((y - min_y) / (max_y - min_y)) as f32 * plot.height(),
-            )
-        })
-        .collect();
-    ui.painter().add(egui::Shape::line(
-        points,
-        Stroke::new(1., Color32::from_rgb(230, 185, 95)),
-    ));
-    ui.painter().text(
-        rect.left_top(),
-        egui::Align2::LEFT_TOP,
-        format!("{max_y:.3}"),
-        egui::FontId::monospace(10.),
-        Color32::WHITE,
+    let max_y = values.iter().map(|v| v.1).fold(f64::NEG_INFINITY, f64::max);
+    let margin = ((max_y - min_y) * 0.1).max(0.005);
+    let plot = egui::Rect::from_min_max(
+        rect.min + egui::vec2(70., 17.),
+        rect.max - egui::vec2(22., 24.),
     );
-    ui.painter().text(
-        rect.left_bottom(),
-        egui::Align2::LEFT_BOTTOM,
-        format!("{min_y:.3}"),
-        egui::FontId::monospace(10.),
-        Color32::WHITE,
-    );
+    let Some(mapping) = Plot::new(plot, [min_x, max_x], [min_y - margin, max_y + margin]) else {
+        return;
+    };
+    let unit = match session.derived_graph {
+        0 | 1 | 6 | 7 => "g",
+        2..=4 => "rad",
+        _ => "1/m",
+    };
+    mapping.paint_grid(ui, rect, "m (global)", unit);
+    let points: Vec<Pos2> = values.into_iter().map(|(x, y)| mapping.map(x, y)).collect();
+    ui.painter()
+        .with_clip_rect(plot.intersect(ui.clip_rect()))
+        .add(egui::Shape::line(
+            points,
+            Stroke::new(1.5, Color32::from_rgb(230, 185, 95)),
+        ));
 }

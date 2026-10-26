@@ -4,6 +4,10 @@ Pass 3 builds on the completed Pass 2 representations and shared generator.
 `qx-physics` is unchanged; its future 1/240 s rigid-body timestep remains separate
 from spatial geometry sampling and design-speed calculations.
 
+[Integrated Workbench M4](workbench-m4.md) supersedes this pass's provisional
+panel/window presentation and ordinary spline insertion menu. Its workspace
+profiles retain the editing, document and generation behavior described below.
+
 ## Run
 
 ```powershell
@@ -16,7 +20,8 @@ cargo run -p quantum-x -- render-editor examples/heartline-reference.qx.json tar
 ```
 
 `edit` without a file creates an untitled document with one editable 10 m straight,
-not a generated coaster layout. Enter a project path to save. `inspect` retains the
+not a generated coaster layout. M5 adds native Open/Save As dialogs; Save prompts
+for an untitled project. See [M5](editor-m5.md) for current commands. `inspect` retains the
 Pass 2 development inspector. `render-editor` renders the actual workspace and
 shared line shader to a PNG using an offscreen GPU target; it creates no desktop
 window and never injects native input. It requires a compatible GPU adapter.
