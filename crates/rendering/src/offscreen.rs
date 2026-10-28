@@ -337,6 +337,9 @@ async fn render(
     // This reads actual GPU pixels, so it catches depth fighting that a finite
     // camera matrix or numerical geometry test cannot detect.
     if display.centerline
+        // Train-focused captures intentionally let opaque bodies occlude the
+        // reference centerline. This grid-depth check applies to track inspection.
+        && display.train_bounds.is_none()
         && display.mode != crate::DisplayMode::Rendered
         && display.selected == Some(0)
         && scene.track.sections.len() == 1

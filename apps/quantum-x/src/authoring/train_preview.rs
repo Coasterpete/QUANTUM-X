@@ -30,7 +30,7 @@ pub(super) fn populate(
                 train
                     .cars
                     .iter()
-                    .find(|car| car.body_id == *id || car.bogie_ids.contains(id))
+                    .find(|car| train.car_contains_component(car, id))
             })
             .or_else(|| train.cars.first())
     };
@@ -83,10 +83,10 @@ pub(super) fn populate(
         }
         state.errors.remove(&format!("Transform {}", c.id));
         extend_bounds(&mut all, bounds);
-        if selected.is_some_and(|car| car.body_id == c.id || car.bogie_ids.contains(&c.id)) {
+        if selected.is_some_and(|car| train.car_contains_component(car, &c.id)) {
             extend_bounds(&mut focused, bounds);
         }
-        if c.kind != ComponentKind::Bogie || state.bogies {
+        if !c.kind.is_running_gear() || state.bogies {
             display.asset_instances.push(instance);
         }
     }
@@ -119,7 +119,7 @@ pub(super) fn lines(
         })
     };
     for (component, evaluated) in train.components.iter().zip(&inspection.components) {
-        if component.kind == ComponentKind::Bogie && !visibility.bogies {
+        if component.kind.is_running_gear() && !visibility.bogies {
             continue;
         }
         // Inspection emits components in definition order. These boxes are only
@@ -211,7 +211,9 @@ pub(super) fn lines(
             .collect();
         let coupler = kinds.iter().all(|k| *k == ComponentKind::CarBody);
         if (coupler && !visibility.couplers)
-            || (!coupler && (!visibility.joints || !visibility.bogies))
+            || (!coupler
+                && (!visibility.joints
+                    || (kinds.iter().any(|k| k.is_running_gear()) && !visibility.bogies)))
         {
             continue;
         }

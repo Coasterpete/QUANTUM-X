@@ -156,6 +156,7 @@ pub(super) struct Session {
     pub hovered: Option<SectionId>,
     pub viewport_inspection: Option<(SectionId, f64)>,
     pub train_station_m: Option<f64>,
+    pub playback: super::train_playback::State,
     pub assets: super::train_assets::State,
     pub keyboard_owned_last_frame: bool,
     pub apply_section_requested: bool,
@@ -265,6 +266,7 @@ impl Session {
             hovered: None,
             viewport_inspection: None,
             train_station_m: None,
+            playback: Default::default(),
             assets: Default::default(),
             keyboard_owned_last_frame: false,
             apply_section_requested: false,
@@ -657,6 +659,7 @@ impl Session {
                 self.hovered = None;
                 self.viewport_inspection = None;
                 self.train_station_m = None;
+                self.playback = Default::default();
                 self.assets = Default::default();
                 self.last_job = None;
                 self.draft_request = None;

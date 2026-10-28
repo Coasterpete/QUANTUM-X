@@ -17,11 +17,14 @@ fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() || (args.len() == 1 && (args[0] == "--help" || args[0] == "-h")) {
         println!(
-            "{USAGE}\nM8.1 acceptance: quantum-x train-asset-scenario <authored.qx.json> <output-directory>"
+            "{USAGE}\nM8.1 acceptance: quantum-x train-asset-scenario <authored.qx.json> <output-directory>\nM8.2 acceptance: quantum-x train-playback-scenario <output-directory>"
         );
         return Ok(());
     }
     let catalog = Catalog::built_in()?;
+    if args[0] == "train-playback-scenario" && args.len() == 2 {
+        return authoring::train_playback_scenario(PathBuf::from(&args[1]));
+    }
     if args[0] == "train-asset-scenario" && args.len() == 3 {
         return authoring::train_asset_scenario(PathBuf::from(&args[1]), PathBuf::from(&args[2]));
     }

@@ -16,6 +16,7 @@ fn body(mass: f64, position: Vec3) -> Body {
 }
 fn world(bodies: Vec<Body>) -> World {
     World {
+        angular_joints: vec![],
         bodies,
         joints: vec![],
         guides: vec![],

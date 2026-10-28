@@ -134,6 +134,7 @@ impl PaneUi<'_> {
             Pane::Configuration => {
                 super::train_asset_ui::controls(self.session, ui, self.display);
                 train_controls(self.session, ui);
+                super::vehicle_ui::controls(self.session, ui);
                 ui.separator();
                 ui.heading("Nominal train configuration");
                 ui.small("Reference geometry settings; legacy IDs may be unresolved.");
@@ -142,10 +143,18 @@ impl PaneUi<'_> {
                 ui.collapsing("Reference preview controls", |ui| self.view(ui));
             }
             Pane::Summary => {
+                super::train_playback_ui::controls(self.session, ui, self.scene);
                 super::train_asset_ui::diagnostics(self.session, ui);
                 let project = self.session.editor.project();
                 ui.heading("Committed configuration");
-                train_summary(project, self.scene, &mut self.session.train_station_m, ui);
+                train_summary(
+                    project,
+                    self.scene,
+                    &mut self.session.train_station_m,
+                    self.session.playback.snapshot.as_ref().map(|s| &s.poses),
+                    self.session.playback.active(),
+                    ui,
+                );
                 ui.label(format!("Project: {}", project.metadata.name));
                 ui.monospace(format!(
                     "Nominal train ID: {}",
@@ -190,7 +199,11 @@ impl PaneUi<'_> {
                 ui.horizontal_wrapped(|ui| {
                     if !compact {
                         ui.small(if pane == Pane::Preview {
-                            "Train assets · kinematic inspection"
+                            if self.session.playback.active() {
+                                "Train assets · rigid-body playback"
+                            } else {
+                                "Train assets · kinematic inspection"
+                            }
                         } else {
                             self.display.mode.label()
                         });
@@ -557,6 +570,39 @@ fn train_controls(session: &mut Session, ui: &mut egui::Ui) {
     use qx_document::{command::Command, train::Train};
     ui.heading("Train definitions · development controls");
     let mut trains = session.editor.project().trains.clone();
+    ui.horizontal_wrapped(|ui| {
+        ui.add(
+            egui::DragValue::new(&mut session.playback.fixture_count)
+                .range(1..=256)
+                .prefix("Cars "),
+        );
+        egui::ComboBox::from_id_salt("development arrangement")
+            .selected_text(format!("{:?}", session.playback.arrangement))
+            .show_ui(ui, |ui| {
+                use qx_document::train::DevelopmentArrangement::*;
+                for a in [Conventional, BelowTrack, RotatingSeats] {
+                    ui.selectable_value(&mut session.playback.arrangement, a, format!("{a:?}"));
+                }
+            });
+    });
+    if ui.button("Add configurable development consist").clicked() {
+        let mut n = 1;
+        while trains.iter().any(|t| t.id == format!("train-{n}")) {
+            n += 1;
+        }
+        match Train::development_consist(
+            format!("train-{n}"),
+            session.playback.fixture_count,
+            session.playback.arrangement,
+        ) {
+            Ok(t) => {
+                trains.push(t);
+                session.execute(vec![Command::SetTrains(trains)]);
+            }
+            Err(e) => session.status = e.to_string(),
+        }
+        return;
+    }
     if ui.button("Add two-car development fixture").clicked() {
         let mut n = 1;
         while trains.iter().any(|t| t.id == format!("train-{n}")) {
@@ -651,6 +697,8 @@ fn train_summary(
     project: &qx_document::Project,
     scene: &InspectionScene,
     train_station_m: &mut Option<f64>,
+    dynamic: Option<&qx_physics::consist::ConsistInspection>,
+    playback_active: bool,
     ui: &mut egui::Ui,
 ) {
     let Some(id) = project.heartline.train_configuration_id.as_deref() else {
@@ -675,37 +723,47 @@ fn train_summary(
     let mut station = train_station_m
         .unwrap_or(scene.track.length_m() * 0.5)
         .clamp(0., scene.track.length_m());
-    if ui
-        .add(
-            egui::Slider::new(&mut station, 0.0..=scene.track.length_m())
-                .text("Inspection station (m)"),
-        )
-        .changed()
-    {
-        *train_station_m = Some(station);
-    }
-    ui.horizontal_wrapped(|ui| {
-        ui.label("Exact station (m)");
+    ui.add_enabled_ui(!playback_active, |ui| {
         if ui
             .add(
-                egui::DragValue::new(&mut station)
-                    .speed(0.001)
-                    .max_decimals(9)
-                    .range(0.0..=scene.track.length_m()),
+                egui::Slider::new(&mut station, 0.0..=scene.track.length_m())
+                    .text("Inspection station (m)"),
             )
             .changed()
         {
             *train_station_m = Some(station);
         }
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Exact station (m)");
+            if ui
+                .add(
+                    egui::DragValue::new(&mut station)
+                        .speed(0.001)
+                        .max_decimals(9)
+                        .range(0.0..=scene.track.length_m()),
+                )
+                .changed()
+            {
+                *train_station_m = Some(station);
+            }
+        });
     });
-    ui.label("Kinematic inspection · geometry approximation, no vehicle motion");
+    ui.label(if dynamic.is_some() {
+        "Simulated rigid-body poses · initial station retained for Reset"
+    } else {
+        "Kinematic inspection · geometry approximation, no vehicle motion"
+    });
     if project.heartline.authored_reference
         == qx_geometry::heartline::AuthoredReference::RiderReference
     {
         ui.colored_label(egui::Color32::LIGHT_YELLOW, "Inspection is unavailable for rider-authored geometry until the physical track reference is connected.");
         return;
     }
-    match qx_physics::consist::inspect(train, &scene.track, station) {
+    match dynamic
+        .cloned()
+        .map(Ok)
+        .unwrap_or_else(|| qx_physics::consist::inspect(train, &scene.track, station))
+    {
         Ok(result) => {
             for joint in &result.joints {
                 ui.monospace(format!("{} residual: {:.6} m", joint.id, joint.error_m));

@@ -101,6 +101,7 @@ impl TrainDefinition {
             });
         }
         let world = World {
+            angular_joints: vec![],
             bodies,
             joints,
             guides,

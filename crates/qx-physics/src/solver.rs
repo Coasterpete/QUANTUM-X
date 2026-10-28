@@ -33,6 +33,9 @@ pub struct TrackGuide {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostics {
+    pub max_angular_error_rad: f64,
+    /// Average angular constraint + motor torque on body B, in angular-joint order.
+    pub angular_torque_on_b_nm: Vec<Vec3>,
     pub max_joint_error_m: f64,
     pub max_guide_error_m: f64,
     /// Average world-space constraint force on body B over the outer step.
@@ -45,6 +48,7 @@ pub struct Diagnostics {
 pub struct World {
     pub bodies: Vec<Body>,
     pub joints: Vec<BallJoint>,
+    pub angular_joints: Vec<crate::AngularJoint>,
     pub guides: Vec<Guide>,
     pub gravity_mps2: Vec3,
     /// Deterministic sequential impulse iterations per substep, 1..=128.
@@ -58,6 +62,7 @@ impl World {
         if self.bodies.is_empty()
             || self.bodies.len() > 1024
             || self.joints.len() > 4096
+            || self.angular_joints.len() > 4096
             || self.guides.len() > 4096
             || !(1..=128).contains(&self.iterations)
             || !(1..=32).contains(&self.substeps)
@@ -67,6 +72,9 @@ impl World {
         }
         for b in &self.bodies {
             b.validate()?;
+        }
+        for j in &self.angular_joints {
+            j.validate(self.bodies.len())?;
         }
         for j in &self.joints {
             if j.body_a >= self.bodies.len()
@@ -152,12 +160,17 @@ impl World {
     ) -> Result<Diagnostics> {
         let dt = FIXED_STEP_SECONDS / f64::from(self.substeps);
         let mut joint_impulse = vec![Vec3::ZERO; self.joints.len()];
+        let mut angular_impulse = vec![Vec3::ZERO; self.angular_joints.len()];
         let track_count = track_guidance.as_ref().map_or(0, |(_, g)| g.len());
         let mut guide_impulse = vec![Vec3::ZERO; self.guides.len() + track_count];
         for _ in 0..self.substeps {
             for b in &mut self.bodies {
                 b.integrate_forces(self.gravity_mps2, dt);
                 b.validate()?;
+            }
+            let mut limit_impulses = vec![0.; self.angular_joints.len()];
+            for (i, j) in self.angular_joints.iter().enumerate() {
+                angular_impulse[i] = angular_impulse[i] + j.motor(&mut self.bodies, dt)?;
             }
             // Project from the previous station to avoid jumping between nearby
             // branches of a loop. Each body remains independently integrated.
@@ -168,6 +181,10 @@ impl World {
                 }
             }
             for _ in 0..self.iterations {
+                for (i, j) in self.angular_joints.iter().enumerate() {
+                    angular_impulse[i] = angular_impulse[i]
+                        + j.solve(&mut self.bodies, dt, &mut limit_impulses[i])?;
+                }
                 for (index, j) in self.joints.iter().enumerate() {
                     let (a, b) = pair_mut(&mut self.bodies, j.body_a, j.body_b);
                     let ra = a.frame().local_to_world(j.anchor_a_m);
@@ -243,6 +260,10 @@ impl World {
             }
         }
         let mut max_joint_error_m: f64 = 0.0;
+        let mut max_angular_error_rad: f64 = 0.;
+        for j in &self.angular_joints {
+            max_angular_error_rad = max_angular_error_rad.max(j.error(&self.bodies)?);
+        }
         for j in &self.joints {
             max_joint_error_m = max_joint_error_m.max(
                 (self.bodies[j.body_b].world_point(j.anchor_b_m)?
@@ -275,6 +296,8 @@ impl World {
             }
         }
         if !max_joint_error_m.is_finite()
+            || !max_angular_error_rad.is_finite()
+            || angular_impulse.iter().any(|v| !v.is_finite())
             || !max_guide_error_m.is_finite()
             || joint_impulse
                 .iter()
@@ -284,6 +307,11 @@ impl World {
             return Err("constraint diagnostics overflow".into());
         }
         Ok(Diagnostics {
+            max_angular_error_rad,
+            angular_torque_on_b_nm: angular_impulse
+                .into_iter()
+                .map(|p| p / FIXED_STEP_SECONDS)
+                .collect(),
             max_joint_error_m,
             max_guide_error_m,
             joint_force_on_b_n: joint_impulse
@@ -300,7 +328,7 @@ impl World {
 
 // Baumgarte stabilization corrects 20% of the current error per substep;
 // it introduces artificial energy and is not a rigid contact model.
-fn scalar_impulse(velocity: f64, error: f64, denominator: f64, dt: f64) -> Result<f64> {
+pub(crate) fn scalar_impulse(velocity: f64, error: f64, denominator: f64, dt: f64) -> Result<f64> {
     let value = -(velocity + 0.2 * error / dt) / denominator;
     if !denominator.is_finite() || denominator <= 1e-15 || !value.is_finite() {
         return Err("constraint solve failed: singular or nonfinite impulse".into());
@@ -319,7 +347,7 @@ fn pair_mut(bodies: &mut [Body], a: usize, b: usize) -> (&mut Body, &mut Body) {
 
 // Local tangent projection retains branch identity at self-intersections. The
 // finite iteration and displacement bounds deliberately reject lost tracking.
-fn project_station(track: &GeneratedTrack, point: Vec3, hint: f64) -> Result<f64> {
+pub(crate) fn project_station(track: &GeneratedTrack, point: Vec3, hint: f64) -> Result<f64> {
     let mut s = hint;
     for _ in 0..12 {
         let sample = track.sample_at_distance(s).map_err(|e| e.to_string())?;

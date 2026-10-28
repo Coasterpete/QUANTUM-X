@@ -1,5 +1,6 @@
 //! Data-only visual catalog. It never depends on the geometry solver.
 use serde::{Deserialize, Serialize};
+pub mod compatibility;
 pub mod construction;
 use std::{collections::HashSet, fmt};
 
@@ -37,6 +38,8 @@ pub struct Family {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vehicle_features: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub geometry: Option<construction::TrackConstruction>,
     pub id: String,
@@ -119,6 +122,7 @@ impl Catalog {
         let mut ids = HashSet::new();
         let mut numbers = HashSet::new();
         for s in &self.styles {
+            compatibility::validate_tags(&s.vehicle_features).map_err(CatalogError)?;
             if let Some(geometry) = &s.geometry {
                 geometry.validate()?;
             }

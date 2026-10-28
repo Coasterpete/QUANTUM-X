@@ -219,7 +219,7 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
             s.assets.errors.clear();
         }
     });
-    ui.small("Kinematic inspection; physics playback is not implemented.");
+    ui.small("Visual assets are independent of mechanics. Playback controls are in Summary.");
     ui.separator();
 }
 pub(super) fn diagnostics(s: &Session, ui: &mut egui::Ui) {

@@ -41,6 +41,7 @@ fn world(track: &GeneratedTrack) -> (World, Vec<TrackGuide>) {
     let half = (b.position_m - a.position_m) * 0.5;
     (
         World {
+            angular_joints: vec![],
             bodies: vec![make(a.position_m, 400.), make(b.position_m, 600.)],
             joints: vec![BallJoint {
                 body_a: 0,
@@ -159,6 +160,7 @@ fn inverted_loop_reports_centripetal_reaction_and_bounded_energy_drift() {
         torque_nm: Vec3::ZERO,
     };
     let mut w = World {
+        angular_joints: vec![],
         bodies: vec![body],
         joints: vec![],
         guides: vec![],

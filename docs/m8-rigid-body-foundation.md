@@ -1,5 +1,9 @@
 # M8 investigation and experimental rigid-body foundation
 
+**M8.2 supersedes historical playback limitations below:** see
+[universal vehicle definitions and playback](m82-universal-vehicle-playback.md)
+for the compatible extensions, integration, numerical boundaries and acceptance commands.
+
 The current asset workflow is described in **M8.1: GLB assets and focused train
 inspection (2026-10-28)** at the end of this document. Earlier sections are
 historical implementation reports; their statements that GLB import, rendering

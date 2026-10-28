@@ -8,13 +8,14 @@ transactional editing/undo/redo, versioned projects, numerical exports, and a na
 wgpu 3D inspector and an **interactive development authoring workspace**. The
 workspace edits actual section/transition graphs, previews human edits in 3D,
 and calculates distinct rider-reference geometry and design-speed loads.
-Final production UX and rigid-body train simulation remain future work.
+Final production UX and fully validated vehicle/contact dynamics remain future work.
 
 The M4 workbench adds Track/Train profiles on one document, saved resizable/tabbed
 layouts, internal floating authoring panes, configurable logical window sizing and
 UI scale, and adaptive dotted transition plots. Support Settings and Support
 Appearance stay in the right Support Workspace; support construction and train
-geometry/dynamics remain unavailable. Ordinary section creation presents coaster
+geometry/dynamics were unavailable in M4; M8.1/M8.2 add the experimental train
+capabilities described below. Ordinary section creation presents coaster
 concepts, with spline creation in an explicit advanced disclosure.
 
 M5 builds on that workbench with a desktop command shell and Windows Open/Save As
@@ -51,7 +52,7 @@ python tools/verify-m6-exports.py target/m6/scenario
 
 The original five-section foundation and new spline-comparison, mixed-authoring,
 and analytic-reference examples all save/reopen with identical regeneration.
-Version-1, version-2 and version-3 projects migrate explicitly to version 4; their fixtures
+Version-1 through version-4 projects migrate explicitly to Schema 5; their fixtures
 are preserved. Heartline configuration, train configuration association and authored
 reference intent persist without changing the existing section equations.
 Exports include centerline/measurement/transition/reference-point CSV, spline and
@@ -111,3 +112,30 @@ python tools/verify-m7-exports.py target/m7-review/final
 ```
 
 See [the M7 architecture, evidence, limitations and Windows checklist](docs/m7-procedural-track-engine.md).
+
+### M8.2 vehicle architecture and playback
+
+Train Workspace now shares persisted multi-car definitions, static GLB assets,
+kinematic inspection and experimental rigid-body playback. Components have
+independent mass centers and mounting frames; passenger assemblies can rotate
+through physical hinges, limits and bounded torque motors. Fixed and ball joints
+use the same solver. Car/bogie/rail counts and passenger placement are not fixed
+to a conventional train. Schema 5 extensions preserve existing definitions.
+
+Summary offers Initialize, Play/Pause, single-step and Reset with 240 Hz physics
+on a worker thread. Preview renders the resulting body poses. Configuration's
+explicit development fixtures support variable car counts with conventional,
+below-track or rotating-seat arrangements. Visual model changes stay separate
+from mechanics. Mechanical 4D profiles have distinct stored definitions; their
+transmission dynamics are future work and playback rejects them explicitly.
+
+```powershell
+cargo run --release -p quantum-x -- train-playback-scenario target/m82-verification
+python tools/verify-m82-exports.py target/m82-verification
+cargo run --release -p quantum-x -- edit target/m82-verification/rotating-seats/playback.qx.json
+```
+
+See [M8.2 architecture, configuration support, verification and manual checks](docs/m82-universal-vehicle-playback.md)
+and [M8/M8.1 foundation and asset pipeline](docs/m8-rigid-body-foundation.md).
+The controls/assets remain development presentation. Centerline guides are an
+idealized captive constraint, not wheel/rail contact or family-specific validation.

@@ -74,6 +74,7 @@ pub(super) fn workspace(
         ));
     }
     session.poll_file_dialog(ctx);
+    super::train_playback::update(session, ctx);
     if let Some(message) = session.assets.poll(session.editor.project(), &session.path) {
         session.status = message;
     }
@@ -93,6 +94,7 @@ pub(super) fn workspace(
     }
     // File/history actions run after numeric widgets consume this input batch.
     session.run_ui_action();
+    super::train_playback::update(session, ctx);
     if session.file_dialog.is_some() {
         egui::Modal::new(egui::Id::unique("native file dialog pending")).show(ctx, |ui| {
             ui.heading("File dialog");
@@ -153,7 +155,12 @@ pub(super) fn workspace(
                 .unwrap_or(scene.track.length_m() * 0.5)
                 .clamp(0., scene.track.length_m());
             display.inspection_distance_m = Some(station);
-            if let Ok(inspection) = qx_physics::consist::inspect(train, &scene.track, station) {
+            let inspection = if let Some(snapshot) = &session.playback.snapshot {
+                Ok(snapshot.poses.clone())
+            } else {
+                qx_physics::consist::inspect(train, &scene.track, station)
+            };
+            if let Ok(inspection) = inspection {
                 super::train_preview::populate(
                     train,
                     &scene.track,

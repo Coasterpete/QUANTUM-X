@@ -4,6 +4,10 @@ use crate::{Result, require};
 use qx_geometry::math::{Quaternion, Vec3};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
+mod fixtures;
+pub mod mechanism;
+pub use fixtures::DevelopmentArrangement;
+use mechanism::{JointModel, Placement};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -23,6 +27,14 @@ pub struct Asset {
 pub enum ComponentKind {
     CarBody,
     Bogie,
+    PassengerAssembly,
+    RunningGear,
+    Auxiliary,
+}
+impl ComponentKind {
+    pub fn is_running_gear(self) -> bool {
+        matches!(self, Self::Bogie | Self::RunningGear)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -32,6 +44,12 @@ pub struct Component {
     pub dimensions_m: Vec3,
     pub mass_kg: f64,
     pub inertia_kg_m2: Vec3,
+    /// Inertia is about this mass center, with principal axes parallel to the component axes.
+    #[serde(default)]
+    pub center_of_mass_m: Vec3,
+    /// Initial assembly only; never a prescribed pose during dynamics.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placement: Option<Placement>,
     pub asset: Option<Asset>,
     /// References in this component's local frame. They do not imply wheel contact.
     pub wheel_references_m: Vec<Vec3>,
@@ -54,6 +72,8 @@ pub struct Connection {
     pub component_b: String,
     pub anchor_a_m: Vec3,
     pub anchor_b_m: Vec3,
+    #[serde(default)]
+    pub model: JointModel,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -63,6 +83,8 @@ pub struct Train {
     pub components: Vec<Component>,
     pub cars: Vec<Car>,
     pub connections: Vec<Connection>,
+    #[serde(default)]
+    pub compatibility: qx_style::compatibility::VehicleCompatibility,
 }
 fn valid_id(id: &str) -> bool {
     !id.trim().is_empty() && id.len() <= 128
@@ -96,6 +118,24 @@ impl Asset {
     }
 }
 impl Train {
+    /// Inspector grouping only; physical relationships always come from connections.
+    pub fn car_contains_component(&self, car: &Car, id: &str) -> bool {
+        let mut current = id;
+        for _ in 0..=self.components.len() {
+            if car.body_id == current || car.bogie_ids.iter().any(|g| g == current) {
+                return true;
+            }
+            let Some(Component {
+                placement: Some(Placement::Mounted { parent, .. }),
+                ..
+            }) = self.components.iter().find(|c| c.id == current)
+            else {
+                return false;
+            };
+            current = parent;
+        }
+        false
+    }
     pub fn validate(&self) -> Result<()> {
         require(
             valid_id(&self.id) && !self.name.trim().is_empty() && self.name.len() <= 1024,
@@ -109,12 +149,19 @@ impl Train {
             "invalid train size",
         )?;
         let mut ids = HashSet::new();
+        self.compatibility
+            .validate()
+            .map_err(crate::DocumentError)?;
         for c in &self.components {
             require(
                 valid_id(&c.id) && ids.insert(c.id.as_str()),
                 "invalid or duplicate component ID",
             )?;
             let i = c.inertia_kg_m2;
+            require(c.center_of_mass_m.is_finite(), "nonfinite mass center")?;
+            if let Some(p) = &c.placement {
+                p.validate()?;
+            }
             require(
                 positive(c.dimensions_m)
                     && c.mass_kg.is_finite()
@@ -161,16 +208,37 @@ impl Train {
             for id in &car.bogie_ids {
                 require(
                     bogies.insert(id)
-                        && self
-                            .components
-                            .iter()
-                            .any(|c| c.id == *id && c.kind == ComponentKind::Bogie),
+                        && self.components.iter().any(|c| {
+                            c.id == *id
+                                && matches!(
+                                    c.kind,
+                                    ComponentKind::Bogie | ComponentKind::RunningGear
+                                )
+                        }),
                     "invalid or duplicate bogie reference",
                 )?;
             }
         }
         let mut joints = HashSet::new();
+        // Mounts form an initialization graph, independent of the physical joint graph.
+        // Walking iteratively bounds stack use even for malicious long chains.
+        let by_id: std::collections::HashMap<_, _> =
+            self.components.iter().map(|c| (c.id.as_str(), c)).collect();
+        for c in &self.components {
+            let mut visited = HashSet::new();
+            let mut current = c;
+            while let Some(Placement::Mounted { parent, .. }) = &current.placement {
+                require(
+                    visited.insert(current.id.as_str()),
+                    "cyclic component mounts",
+                )?;
+                current = by_id.get(parent.as_str()).copied().ok_or_else(|| {
+                    crate::DocumentError(format!("unknown mount parent {parent}"))
+                })?;
+            }
+        }
         for joint in &self.connections {
+            joint.model.validate()?;
             require(
                 valid_id(&joint.id)
                     && joints.insert(joint.id.as_str())
@@ -200,6 +268,8 @@ impl Train {
                     mass_kg * (d.x * d.x + d.z * d.z) / 12.,
                     mass_kg * (d.x * d.x + d.y * d.y) / 12.,
                 ),
+                center_of_mass_m: Vec3::ZERO,
+                placement: None,
                 asset: None,
                 wheel_references_m: if kind == ComponentKind::Bogie {
                     vec![Vec3::new(0., 0., -d.z * 0.5), Vec3::new(0., 0., d.z * 0.5)]
@@ -234,6 +304,7 @@ impl Train {
                     100.,
                 ));
                 connections.push(Connection {
+                    model: JointModel::Ball,
                     id: format!("joint-{}-{}", n + 1, k + 1),
                     component_a: body.clone(),
                     component_b: bogie.clone(),
@@ -249,6 +320,7 @@ impl Train {
             });
         }
         connections.push(Connection {
+            model: JointModel::Ball,
             id: "coupler-1".into(),
             component_a: "car-1".into(),
             component_b: "car-2".into(),
@@ -261,6 +333,7 @@ impl Train {
             components,
             cars,
             connections,
+            compatibility: Default::default(),
         }
     }
 }
