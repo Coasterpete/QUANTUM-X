@@ -24,6 +24,8 @@ use winit::{
 pub enum ViewCommand {
     FitAll,
     FitSelected,
+    FitTrain,
+    FocusSelectedCar,
     Perspective,
     Top,
     Side,
@@ -104,6 +106,17 @@ struct Workspace {
 }
 impl Workspace {
     fn fit(&mut self, selected: bool) {
+        if !selected
+            && self.profile == 1
+            && let Some((min, max)) = self.display.train_bounds
+        {
+            self.camera.fit(
+                min,
+                max,
+                (self.viewport.width() / self.viewport.height().max(1.)).max(0.1) as f64,
+            );
+            return;
+        }
         let (min, max) = self.scene.display_bounds(
             if selected {
                 self.display.selected
@@ -158,8 +171,14 @@ impl Workspace {
             .unwrap()
             .handle_platform_output(&window, output.platform_output);
         if profile != self.profile {
+            let instances = std::mem::take(&mut self.display.asset_instances);
+            let overlays = std::mem::take(&mut self.display.overlay_lines);
+            let bounds = (self.display.train_bounds, self.display.selected_car_bounds);
             self.navigation[self.profile] = (self.camera.clone(), before.clone());
             (self.camera, self.display) = self.navigation[profile].clone();
+            self.display.asset_instances = instances;
+            self.display.overlay_lines = overlays;
+            (self.display.train_bounds, self.display.selected_car_bounds) = bounds;
             self.profile = profile;
             self.drag = None;
         }
@@ -185,6 +204,20 @@ impl Workspace {
             match command {
                 ViewCommand::FitAll => self.fit(false),
                 ViewCommand::FitSelected => self.fit(true),
+                ViewCommand::FitTrain | ViewCommand::FocusSelectedCar => {
+                    let bounds = if matches!(command, ViewCommand::FitTrain) {
+                        self.display.train_bounds
+                    } else {
+                        self.display.selected_car_bounds
+                    };
+                    if let Some((min, max)) = bounds {
+                        self.camera.fit(
+                            min,
+                            max,
+                            self.viewport.width() as f64 / self.viewport.height().max(1.) as f64,
+                        );
+                    }
+                }
                 ViewCommand::Perspective => {
                     self.camera.yaw = 0.8;
                     self.camera.pitch = 0.5;

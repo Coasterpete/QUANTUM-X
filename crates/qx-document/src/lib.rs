@@ -4,6 +4,7 @@ pub mod editing;
 pub mod insertion;
 pub mod persistence;
 pub mod sample;
+pub mod train;
 
 use qx_geometry::{
     authoring::{InitialConditions, Section, validate_track},
@@ -13,7 +14,7 @@ use qx_style::{Catalog, StyleSelection};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 #[derive(Debug)]
 pub struct DocumentError(pub String);
 impl fmt::Display for DocumentError {
@@ -71,6 +72,8 @@ pub struct Project {
     pub sections: Vec<Section>,
     #[serde(default)]
     pub heartline: HeartlineSettings,
+    #[serde(default)]
+    pub trains: Vec<train::Train>,
 }
 /// Nominal configuration, independent of visual track styles and future seat assets.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -112,6 +115,15 @@ impl Project {
         catalog.validate_selection(&self.style)?;
         validate_track(&self.initial, &self.sections)?;
         self.heartline.validate()?;
+        require(self.trains.len() <= 256, "too many train configurations")?;
+        let mut train_ids = std::collections::HashSet::new();
+        for train in &self.trains {
+            train.validate()?;
+            require(
+                train_ids.insert(&train.id),
+                "duplicate train configuration ID",
+            )?;
+        }
         self.construction.validate()?;
         Ok(())
     }

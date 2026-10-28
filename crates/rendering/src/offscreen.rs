@@ -109,7 +109,9 @@ async fn render(
         return Err("editor has no visible 3D viewport at this size".into());
     }
     let paint = ctx.tessellate(output.shapes, output.pixels_per_point);
-    let (min, max) = scene.display_bounds(None, &display);
+    let (min, max) = display
+        .train_bounds
+        .unwrap_or_else(|| scene.display_bounds(None, &display));
     let origin = (min + max) * 0.5;
     let mut camera = Camera::default();
     camera.fit(min, max, viewport.width() as f64 / viewport.height() as f64);
@@ -150,6 +152,29 @@ async fn render(
             .and_then(|i| scene.track.sections.get(i))
             .map(|r| (r.start_distance_m, r.end_distance_m)),
         &display,
+        origin,
+        viewport.width() as f64 / viewport.height() as f64,
+    );
+    let mut assets = crate::asset_gpu::AssetGpu::new(&device, format);
+    assets.upload(&device, &queue, &display.asset_instances, origin)?;
+    let asset_upload_ms = assets.upload_ms;
+    assets.upload(&device, &queue, &display.asset_instances, origin)?;
+    let unique = display
+        .asset_instances
+        .iter()
+        .enumerate()
+        .filter(|(i, a)| {
+            !display.asset_instances[..*i]
+                .iter()
+                .any(|b| Arc::ptr_eq(&a.model, &b.model))
+        })
+        .count();
+    if assets.uploads != unique {
+        return Err("Repeated train assets duplicated GPU resources".into());
+    }
+    assets.camera(
+        &queue,
+        &camera,
         origin,
         viewport.width() as f64 / viewport.height() as f64,
     );
@@ -212,6 +237,7 @@ async fn render(
         pass.set_bind_group(0, &grid_bind, &[]);
         pass.draw(0..grid_count, 0..1);
         mesh.draw(&mut pass, &display);
+        assets.draw(&mut pass);
         pass.set_vertex_buffer(0, buffer.slice(..));
         pass.set_pipeline(if display.mode == crate::DisplayMode::Technical {
             &pipeline
@@ -358,8 +384,33 @@ async fn render(
         .map_err(|e| e.to_string())?
         .write_image_data(&pixels)
         .map_err(|e| e.to_string())?;
+    let projected: Vec<_> = display
+        .asset_instances
+        .iter()
+        .map(|a| {
+            let (min, max) = a.bounds();
+            let projection = camera.projection(origin, viewport);
+            let mut points = Vec::new();
+            for x in [min.x, max.x] {
+                for y in [min.y, max.y] {
+                    for z in [min.z, max.z] {
+                        if let Some(p) = projection.project(qx_geometry::math::Vec3::new(x, y, z)) {
+                            points.push([p.x, p.y]);
+                        }
+                    }
+                }
+            }
+            serde_json::json!({"component":a.component_id,"corners":points})
+        })
+        .collect();
+    let metadata = serde_json::json!({"viewport":[viewport.left(),viewport.top(),viewport.width(),viewport.height()],"size":[width,height],"train_fit":display.train_bounds.is_some(),"camera_target":camera.target.to_array(),"camera_distance":camera.distance,"unique_glb_resources":assets.uploads,"unique_glb_textures":assets.texture_uploads,"asset_upload_ms":asset_upload_ms,"primitive_instances":assets.instance_count,"projected_bounds":projected});
+    std::fs::write(
+        path.with_extension("capture.json"),
+        serde_json::to_vec_pretty(&metadata).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())?;
     Ok(format!(
-        "{} {:?} / {}; {} line vertices, {} visible pixels; {}x{}; GPU upload {:.3} ms, {} bytes, {} uploads (second unchanged upload reused)",
+        "{} {:?} / {}; {} line vertices, {} visible pixels; {}x{}; GPU upload {:.3} ms, {} bytes, {} uploads (second unchanged upload reused); GLB {} unique GPU resources / {} primitive instances / {} textures, asset upload {:.3} ms",
         info.name,
         info.backend,
         info.driver_info,
@@ -369,6 +420,10 @@ async fn render(
         height,
         mesh.upload_ms,
         mesh.upload_bytes,
-        mesh.uploads
+        mesh.uploads,
+        assets.uploads,
+        assets.instance_count,
+        assets.texture_uploads,
+        asset_upload_ms
     ))
 }

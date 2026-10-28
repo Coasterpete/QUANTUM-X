@@ -72,6 +72,9 @@ impl Session {
                     .into(),
             );
         }
+        if self.assets.draft_dirty(p) {
+            names.push("Train visual correction (Train Workspace / Configuration)".into());
+        }
         names
     }
 
@@ -79,7 +82,10 @@ impl Session {
         let pending = match pane {
             Pane::Track => self.has_drafts(),
             Pane::Transition => self.draft_dirty(),
-            Pane::Configuration => self.heartline_draft != self.editor.project().heartline,
+            Pane::Configuration => {
+                self.heartline_draft != self.editor.project().heartline
+                    || self.assets.draft_dirty(self.editor.project())
+            }
             _ => false,
         };
         format!(
@@ -115,6 +121,13 @@ impl Session {
             return true;
         }
         let mut candidate = self.preview_project();
+        if self.assets.draft_dirty(self.editor.project())
+            && let Some(a) = &self.assets.draft
+            && (!super::train_assets::renderable(a) || !self.assets.library.contains_key(&a.path))
+        {
+            self.resolution_error=Some("Train visual correction exceeds renderer limits or its GLB is not loaded. Revise it or import the missing asset. No drafts applied.".into());
+            return false;
+        }
         candidate.metadata = self.metadata_draft.clone();
         let validation = candidate
             .validate(&self.catalog)
@@ -147,16 +160,21 @@ impl Session {
         if candidate.heartline != p.heartline {
             commands.push(Command::SetHeartline(candidate.heartline));
         }
+        if candidate.trains != p.trains {
+            commands.push(Command::SetTrains(candidate.trains));
+        }
         if !self.execute(commands) {
             self.resolution_error = Some(self.status.clone());
             return false;
         }
         self.pending_action = None;
+        self.assets.draft = None;
         self.resolution_error = None;
         true
     }
 
     pub fn cancel_all_drafts(&mut self) {
+        self.assets.draft = None;
         self.graph_drag = None;
         self.sync_draft();
         self.construction_draft = self.editor.project().construction.clone();

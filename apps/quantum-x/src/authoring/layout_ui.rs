@@ -132,15 +132,20 @@ impl PaneUi<'_> {
             Pane::View => self.view(ui),
             Pane::Diagnostics => self.diagnostics(ui),
             Pane::Configuration => {
+                super::train_asset_ui::controls(self.session, ui, self.display);
+                train_controls(self.session, ui);
+                ui.separator();
                 ui.heading("Nominal train configuration");
-                ui.small("Document settings for reference geometry. Consist, mass, bogies and train assets are not implemented.");
+                ui.small("Reference geometry settings; legacy IDs may be unresolved.");
                 panels::heartline(self.session, ui);
                 ui.separator();
                 ui.collapsing("Reference preview controls", |ui| self.view(ui));
             }
             Pane::Summary => {
+                super::train_asset_ui::diagnostics(self.session, ui);
                 let project = self.session.editor.project();
                 ui.heading("Committed configuration");
+                train_summary(project, self.scene, &mut self.session.train_station_m, ui);
                 ui.label(format!("Project: {}", project.metadata.name));
                 ui.monospace(format!(
                     "Nominal train ID: {}",
@@ -176,32 +181,58 @@ impl PaneUi<'_> {
                     ui.strong("Configuration draft pending Apply / Cancel");
                 }
                 ui.separator();
-                ui.label("Train geometry, articulated dynamics and ride systems are unavailable.");
-                ui.label("Preview displays the shared track/rider reference geometry only.");
+                ui.label(
+                    "Development wireframe; ride systems and simulation playback are unavailable.",
+                );
             }
             Pane::Viewport | Pane::Preview => {
                 let compact = ui.available_width() < 600. || ui.available_height() < 220.;
                 ui.horizontal_wrapped(|ui| {
                     if !compact {
                         ui.small(if pane == Pane::Preview {
-                            "Reference preview · train geometry unavailable"
+                            "Train assets · kinematic inspection"
                         } else {
                             self.display.mode.label()
                         });
                     }
                     for (icon, name, command) in [
-                        (super::icons::Icon::FitAll, "Fit All", ViewCommand::FitAll),
+                        (
+                            super::icons::Icon::FitAll,
+                            if pane == Pane::Preview {
+                                "Fit Train"
+                            } else {
+                                "Fit All"
+                            },
+                            if pane == Pane::Preview {
+                                ViewCommand::FitTrain
+                            } else {
+                                ViewCommand::FitAll
+                            },
+                        ),
                         (
                             super::icons::Icon::FitSelection,
-                            "Fit Selection",
-                            ViewCommand::FitSelected,
+                            if pane == Pane::Preview {
+                                "Focus Car"
+                            } else {
+                                "Fit Selection"
+                            },
+                            if pane == Pane::Preview {
+                                ViewCommand::FocusSelectedCar
+                            } else {
+                                ViewCommand::FitSelected
+                            },
                         ),
                     ] {
                         if super::icons::button(
                             ui,
                             icon,
                             if compact { "" } else { name },
-                            true,
+                            pane != Pane::Preview
+                                || if matches!(command, ViewCommand::FitTrain) {
+                                    self.display.train_bounds.is_some()
+                                } else {
+                                    self.display.selected_car_bounds.is_some()
+                                },
                             name,
                         )
                         .clicked()
@@ -223,7 +254,7 @@ impl PaneUi<'_> {
                     }
                     ui.menu_button(if compact { "View" } else { "Navigate" }, |ui| {
                         ui.small(if pane == Pane::Preview {
-                            "Reference geometry; train model unavailable"
+                            "Rigid train assets and engineering references"
                         } else {
                             "Track references; rail surfaces unavailable"
                         });
@@ -519,4 +550,203 @@ fn display_preferences(
         }
     });
     session.display_dialog &= open;
+}
+
+// Provisional developer controls. Edits are committed document transactions.
+fn train_controls(session: &mut Session, ui: &mut egui::Ui) {
+    use qx_document::{command::Command, train::Train};
+    ui.heading("Train definitions · development controls");
+    let mut trains = session.editor.project().trains.clone();
+    if ui.button("Add two-car development fixture").clicked() {
+        let mut n = 1;
+        while trains.iter().any(|t| t.id == format!("train-{n}")) {
+            n += 1;
+        }
+        trains.push(Train::development_fixture(format!("train-{n}")));
+        session.execute(vec![Command::SetTrains(trains)]);
+        return;
+    }
+    let mut changed = false;
+    for train in &mut trains {
+        ui.collapsing(format!("{} ({})", train.name, train.id), |ui| {
+            changed |= ui.text_edit_singleline(&mut train.name).changed();
+            if ui
+                .button("Associate this train with reference settings")
+                .clicked()
+            {
+                session.heartline_draft.train_configuration_id = Some(train.id.clone());
+            }
+            for (index, car) in train.cars.iter_mut().enumerate() {
+                if index > 0 {
+                    ui.horizontal(|ui| {
+                        ui.label("Distance behind lead center (m)");
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut car.offset_m)
+                                    .speed(0.01)
+                                    .range(0.01..=10000.),
+                            )
+                            .changed();
+                    });
+                }
+                if let Some(c) = train.components.iter_mut().find(|c| c.id == car.body_id) {
+                    ui.label(format!("Body {}", c.id));
+                    ui.horizontal(|ui| {
+                        ui.label("Length / height / width (m)");
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut c.dimensions_m.x)
+                                    .speed(0.01)
+                                    .range(0.01..=100.),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut c.dimensions_m.y)
+                                    .speed(0.01)
+                                    .range(0.01..=100.),
+                            )
+                            .changed();
+                        changed |= ui
+                            .add(
+                                egui::DragValue::new(&mut c.dimensions_m.z)
+                                    .speed(0.01)
+                                    .range(0.01..=100.),
+                            )
+                            .changed();
+                    });
+                    ui.small(format!(
+                        "{} bogie references; mass and inertia remain independently specified",
+                        car.bogie_ids.len()
+                    ));
+                }
+            }
+            ui.collapsing("Joint anchor positions (component-local metres)", |ui| {
+                for joint in &mut train.connections {
+                    ui.label(format!(
+                        "{}: {} / {}",
+                        joint.id, joint.component_a, joint.component_b
+                    ));
+                    for (label, anchor) in
+                        [("A", &mut joint.anchor_a_m), ("B", &mut joint.anchor_b_m)]
+                    {
+                        ui.horizontal(|ui| {
+                            ui.label(label);
+                            for value in [&mut anchor.x, &mut anchor.y, &mut anchor.z] {
+                                changed |=
+                                    ui.add(egui::DragValue::new(value).speed(0.01)).changed();
+                            }
+                        });
+                    }
+                }
+            });
+        });
+    }
+    if changed {
+        session.execute(vec![Command::SetTrains(trains)]);
+    }
+}
+
+fn train_summary(
+    project: &qx_document::Project,
+    scene: &InspectionScene,
+    train_station_m: &mut Option<f64>,
+    ui: &mut egui::Ui,
+) {
+    let Some(id) = project.heartline.train_configuration_id.as_deref() else {
+        ui.small(
+            "No train associated. Associate one in Configuration and apply the reference settings.",
+        );
+        return;
+    };
+    let Some(train) = project.trains.iter().find(|t| t.id == id) else {
+        ui.colored_label(
+            egui::Color32::LIGHT_YELLOW,
+            "Legacy train ID is unresolved; select a saved train definition.",
+        );
+        return;
+    };
+    ui.label(format!(
+        "{} · {} cars · {} components",
+        train.name,
+        train.cars.len(),
+        train.components.len()
+    ));
+    let mut station = train_station_m
+        .unwrap_or(scene.track.length_m() * 0.5)
+        .clamp(0., scene.track.length_m());
+    if ui
+        .add(
+            egui::Slider::new(&mut station, 0.0..=scene.track.length_m())
+                .text("Inspection station (m)"),
+        )
+        .changed()
+    {
+        *train_station_m = Some(station);
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Exact station (m)");
+        if ui
+            .add(
+                egui::DragValue::new(&mut station)
+                    .speed(0.001)
+                    .max_decimals(9)
+                    .range(0.0..=scene.track.length_m()),
+            )
+            .changed()
+        {
+            *train_station_m = Some(station);
+        }
+    });
+    ui.label("Kinematic inspection · geometry approximation, no vehicle motion");
+    if project.heartline.authored_reference
+        == qx_geometry::heartline::AuthoredReference::RiderReference
+    {
+        ui.colored_label(egui::Color32::LIGHT_YELLOW, "Inspection is unavailable for rider-authored geometry until the physical track reference is connected.");
+        return;
+    }
+    match qx_physics::consist::inspect(train, &scene.track, station) {
+        Ok(result) => {
+            for joint in &result.joints {
+                ui.monospace(format!("{} residual: {:.6} m", joint.id, joint.error_m));
+            }
+            for cars in train.cars.windows(2) {
+                let a = result.components.iter().find(|p| p.id == cars[0].body_id);
+                let b = result.components.iter().find(|p| p.id == cars[1].body_id);
+                if let (Some(a), Some(b)) = (a, b) {
+                    let relative = a.pose.orientation.conjugate().compose(b.pose.orientation);
+                    if let Ok(rotation) = relative.rotation_vector() {
+                        ui.monospace(format!(
+                            "{} / {} relative rotation: {:.4} deg",
+                            a.id,
+                            b.id,
+                            rotation.length().to_degrees()
+                        ));
+                    }
+                }
+            }
+            for (component, pose) in train.components.iter().zip(&result.components) {
+                if !component.guide_references_m.is_empty()
+                    && let (Ok(frame), Ok(sample)) = (
+                        qx_geometry::math::Frame::new(pose.pose.orientation),
+                        scene.track.sample_at_distance(pose.station_m),
+                    )
+                {
+                    for (index, guide) in component.guide_references_m.iter().enumerate() {
+                        let world = pose.pose.position_m + frame.local_to_world(*guide);
+                        ui.monospace(format!(
+                            "{} guide {} to station reference: {:.6} m",
+                            component.id,
+                            index + 1,
+                            (world - sample.position_m).length()
+                        ));
+                    }
+                }
+            }
+            ui.small("Guide distance uses the inspection station reference; it is not a wheel contact measurement.");
+        }
+        Err(error) => {
+            ui.colored_label(egui::Color32::LIGHT_YELLOW, format!("Inspection: {error}"));
+        }
+    }
 }

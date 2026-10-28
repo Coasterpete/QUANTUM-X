@@ -195,8 +195,19 @@ impl DisplayMode {
         }
     }
 }
+/// A transient, world-space development overlay; never part of the document.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OverlayLine {
+    pub start_m: Vec3,
+    pub end_m: Vec3,
+    pub color: [f32; 3],
+}
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayOptions {
+    pub asset_instances: Vec<crate::asset::AssetInstance>,
+    pub train_bounds: Option<(Vec3, Vec3)>,
+    pub selected_car_bounds: Option<(Vec3, Vec3)>,
+    pub overlay_lines: Vec<OverlayLine>,
     pub mode: DisplayMode,
     pub running: bool,
     pub structure: bool,
@@ -219,6 +230,10 @@ pub struct DisplayOptions {
 impl Default for DisplayOptions {
     fn default() -> Self {
         Self {
+            asset_instances: vec![],
+            train_bounds: None,
+            selected_car_bounds: None,
+            overlay_lines: Vec::new(),
             mode: DisplayMode::RenderedCenterline,
             running: true,
             structure: true,
@@ -255,6 +270,9 @@ pub(crate) fn vertices(
             });
         }
     };
+    for overlay in &display.overlay_lines {
+        line(overlay.start_m, overlay.end_m, overlay.color);
+    }
     let (min, max) = scene.bounds(None);
     let scale = ((max - min).length() * 0.012).clamp(0.1, 10.);
     if display.grid {

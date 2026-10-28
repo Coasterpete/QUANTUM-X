@@ -60,7 +60,9 @@ def png_pixels(path):
 
 for name, fixture in fixtures.items():
     project = json.loads((root / (name+".qx.json")).read_text(encoding="utf-8"))
-    assert project["schema_version"] == 4
+    assert project["schema_version"] in (4, 5)
+    if project["schema_version"] == 5:
+        assert project["trains"] == []
     construction = project["construction"]
     assert construction["version"] == 1
     running = [c for c in construction["continuous"] if c["role"] == "running"]

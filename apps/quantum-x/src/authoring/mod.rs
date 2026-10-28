@@ -20,6 +20,9 @@ mod m7_live;
 mod m7_scenario;
 #[cfg(test)]
 mod m7_tests;
+mod m81_scenario;
+#[cfg(test)]
+mod m81_tests;
 mod panels;
 mod plot;
 #[cfg(test)]
@@ -34,6 +37,9 @@ mod spline;
 mod tests;
 mod theme;
 mod timeline;
+mod train_asset_ui;
+mod train_assets;
+mod train_preview;
 mod workbench;
 mod workflow;
 use qx_geometry::solver::GenerationOptions;
@@ -51,6 +57,9 @@ pub fn inspection_scene(
 }
 pub fn authoring_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
     scenario::run(output)
+}
+pub fn train_asset_scenario(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn Error>> {
+    m81_scenario::run(input, output)
 }
 
 pub fn run(path: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
@@ -76,6 +85,9 @@ pub fn render(
     let project = qx_document::persistence::load(&path, &catalog)?;
     let initial_scene = scene(&project, &catalog, GenerationOptions::default())?;
     let mut session = Session::new(project, Some(&path), catalog)?;
+    session
+        .assets
+        .load_blocking(session.editor.project(), &session.path);
     session.workbench.active = match profile {
         "track" => workbench::Profile::Track,
         "train" => workbench::Profile::Train,

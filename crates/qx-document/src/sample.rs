@@ -51,7 +51,7 @@ pub fn foundation_project() -> Project {
         plane_angle_rad: std::f64::consts::FRAC_PI_2,
     };
     Project{schema_version:SCHEMA_VERSION,construction:Default::default(),metadata:Metadata{project_id:"qx-foundation-example-1".into(),name:"Core foundation diagnostic".into(),author:"QUANTUM-X contributors".into(),description:"Five authored sections exercising force, world/rider-local geometry, both domains, banking, and construction geometry.".into()},
-        initial:InitialConditions::default(),style:StyleSelection{family_id:"hybrid".into(),style_id:"hybrid-100".into()},sections:vec![lead,force,local,geometric,arc],heartline:Default::default()}
+        initial:InitialConditions::default(),style:StyleSelection{family_id:"hybrid".into(),style_id:"hybrid-100".into()},sections:vec![lead,force,local,geometric,arc],heartline:Default::default(),trains:vec![]}
 }
 
 fn controls(values: &[[f64; 3]]) -> Vec<qx_geometry::curve::ControlPoint> {

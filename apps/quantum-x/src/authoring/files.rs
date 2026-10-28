@@ -6,6 +6,7 @@ use std::{path::PathBuf, sync::mpsc};
 pub(super) enum FileAction {
     Open,
     SaveAs,
+    ImportGlb,
 }
 pub(super) struct Dialog {
     pub action: FileAction,
@@ -31,13 +32,20 @@ impl Session {
             let (send, result) = mpsc::channel();
             self.file_dialog = Some(Dialog { action, result });
             std::thread::spawn(move || {
-                let mut dialog = rfd::FileDialog::new()
-                    .add_filter("QUANTUM-X project (*.qx.json)", &["qx.json"])
-                    .add_filter("JSON project (*.json)", &["json"]);
+                let mut dialog = if matches!(action, FileAction::ImportGlb) {
+                    rfd::FileDialog::new().add_filter("Binary glTF 2.0 (*.glb)", &["glb"])
+                } else {
+                    rfd::FileDialog::new()
+                        .add_filter("QUANTUM-X project (*.qx.json)", &["qx.json"])
+                        .add_filter("JSON project (*.json)", &["json"])
+                };
                 if let Some(parent) = current.parent().filter(|p| !p.as_os_str().is_empty()) {
                     dialog = dialog.set_directory(parent);
                 }
                 let path = match action {
+                    FileAction::ImportGlb => {
+                        dialog.set_title("Import static train GLB").pick_file()
+                    }
                     FileAction::Open => dialog.set_title("Open QUANTUM-X project").pick_file(),
                     FileAction::SaveAs => dialog
                         .set_title("Save QUANTUM-X project as")
@@ -67,6 +75,7 @@ impl Session {
                     Some(path) => match action {
                         FileAction::Open => self.open(Some(path), confirmed),
                         FileAction::SaveAs => self.save_to(&path),
+                        FileAction::ImportGlb => self.assets.start_import(path),
                     },
                     None => {
                         self.status =

@@ -74,6 +74,12 @@ pub(super) fn workspace(
         ));
     }
     session.poll_file_dialog(ctx);
+    if let Some(message) = session.assets.poll(session.editor.project(), &session.path) {
+        session.status = message;
+    }
+    if session.assets.busy() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+    }
     if session.file_dialog.is_none() && !session.project_prompt_open() {
         shortcuts(session, ctx);
     }
@@ -89,7 +95,7 @@ pub(super) fn workspace(
     session.run_ui_action();
     if session.file_dialog.is_some() {
         egui::Modal::new(egui::Id::unique("native file dialog pending")).show(ctx, |ui| {
-            ui.heading("Project file dialog");
+            ui.heading("File dialog");
             ui.label("Complete or cancel the Windows file dialog to continue.");
         });
     }
@@ -128,9 +134,45 @@ pub(super) fn workspace(
         display.hovered = scene.track.sections.iter().position(|s| s.id == id);
         display.inspection_distance_m = Some(station);
     }
+    display.overlay_lines.clear();
+    display.asset_instances.clear();
+    display.train_bounds = None;
+    display.selected_car_bounds = None;
+    if session.workbench.active == super::workbench::Profile::Train {
+        let project = session.editor.project();
+        if project.heartline.authored_reference
+            == qx_geometry::heartline::AuthoredReference::TrackCenterline
+            && let Some(train) = project
+                .heartline
+                .train_configuration_id
+                .as_ref()
+                .and_then(|id| project.trains.iter().find(|t| &t.id == id))
+        {
+            let station = session
+                .train_station_m
+                .unwrap_or(scene.track.length_m() * 0.5)
+                .clamp(0., scene.track.length_m());
+            display.inspection_distance_m = Some(station);
+            if let Ok(inspection) = qx_physics::consist::inspect(train, &scene.track, station) {
+                super::train_preview::populate(
+                    train,
+                    &scene.track,
+                    &inspection,
+                    &mut session.assets,
+                    display,
+                );
+            }
+        }
+    }
     let reset_navigation = session.frame_requested;
     if session.frame_requested {
-        view_command = Some(ViewCommand::FitAll);
+        view_command = Some(
+            if session.workbench.active == super::workbench::Profile::Train {
+                ViewCommand::FitTrain
+            } else {
+                ViewCommand::FitAll
+            },
+        );
         session.frame_requested = false;
     }
     if !ctx.egui_wants_keyboard_input()
@@ -138,7 +180,19 @@ pub(super) fn workspace(
         && session.file_dialog.is_none()
         && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F))
     {
-        view_command = Some(ViewCommand::FitAll);
+        view_command = Some(
+            if session.workbench.active == super::workbench::Profile::Train {
+                ViewCommand::FitTrain
+            } else {
+                ViewCommand::FitAll
+            },
+        );
+    }
+    if std::mem::take(&mut session.assets.fit) {
+        view_command = Some(ViewCommand::FitTrain);
+    }
+    if std::mem::take(&mut session.assets.focus) {
+        view_command = Some(ViewCommand::FocusSelectedCar);
     }
     if session.file_dialog.is_none() {
         if session.draft_request.is_some() {

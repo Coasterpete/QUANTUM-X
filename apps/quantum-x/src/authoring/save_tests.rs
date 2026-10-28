@@ -100,7 +100,7 @@ fn saving_graph_construction_or_both_requires_explicit_apply_and_roundtrips_ever
         assert!(!f.s.pending_edits());
         assert_eq!(f.s.save_state(), "Saved");
         let reopened = persistence::load(&f.path, &f.s.catalog).unwrap();
-        assert_eq!(reopened.schema_version, 4);
+        assert_eq!(reopened.schema_version, qx_document::SCHEMA_VERSION);
         assert_eq!(reopened, intended);
         let actual = scene(&reopened, &f.s.catalog, f.s.options).unwrap();
         assert_eq!(actual.track, expected.track);
