@@ -399,3 +399,35 @@ fn keyboard_workspace_switch_and_single_pane_floating_are_recoverable() {
     assert_eq!(session.revision, 0);
     assert!(!session.editor.can_undo());
 }
+
+#[test]
+fn train_transaction_preserves_existing_draft_and_association_is_staged() {
+    let mut session = session();
+    session.draft.name = "Pending section".into();
+    let draft = session.draft.clone();
+    let train = qx_document::train::Train::development_fixture("train-test".into());
+    assert!(session.execute(vec![Command::SetTrains(vec![train.clone()])]));
+    assert_eq!(session.draft, draft);
+    session.heartline_draft.train_configuration_id = Some(train.id.clone());
+    assert_eq!(
+        session.editor.project().heartline.train_configuration_id,
+        None
+    );
+    assert!(session.apply_all_drafts());
+    assert_eq!(
+        session
+            .editor
+            .project()
+            .heartline
+            .train_configuration_id
+            .as_deref(),
+        Some("train-test")
+    );
+    assert_eq!(session.editor.project().sections[0].name, "Pending section");
+    session.undo(false);
+    assert_eq!(
+        session.editor.project().heartline.train_configuration_id,
+        None
+    );
+    assert_eq!(session.editor.project().trains, vec![train]);
+}

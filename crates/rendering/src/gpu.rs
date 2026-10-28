@@ -5,6 +5,7 @@ use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 pub(crate) struct Gpu {
     mesh: crate::mesh_gpu::MeshGpu,
+    assets: crate::asset_gpu::AssetGpu,
     mesh_display: crate::DisplayOptions,
     mesh_range: Option<(f64, f64)>,
     instance: wgpu::Instance,
@@ -102,8 +103,10 @@ impl Gpu {
         let depth = Self::depth(&device, &config);
         let egui = egui_wgpu::Renderer::new(&device, config.format, Default::default());
         let mesh = crate::mesh_gpu::MeshGpu::new(&device, config.format);
+        let assets = crate::asset_gpu::AssetGpu::new(&device, config.format);
         Ok(Self {
             mesh,
+            assets,
             mesh_display: Default::default(),
             mesh_range: None,
             instance,
@@ -164,7 +167,9 @@ impl Gpu {
             .selected
             .and_then(|i| scene.track.sections.get(i))
             .map(|r| (r.start_distance_m, r.end_distance_m));
-        self.mesh.upload(&self.device, &self.queue, scene, origin)
+        self.mesh.upload(&self.device, &self.queue, scene, origin)?;
+        self.assets
+            .upload(&self.device, &self.queue, &display.asset_instances, origin)
     }
     pub fn upload(&mut self, vertices: &[Vertex], grid_count: u32) -> Result<(), String> {
         if grid_count as usize > vertices.len() || !grid_count.is_multiple_of(2) {
@@ -270,6 +275,12 @@ impl Gpu {
             0,
             bytemuck::cast_slice(&camera.matrix(origin, viewport[2] as f64 / viewport[3] as f64)),
         );
+        self.assets.camera(
+            &self.queue,
+            camera,
+            origin,
+            viewport[2] as f64 / viewport[3] as f64,
+        );
         self.mesh.camera(
             &self.queue,
             camera,
@@ -329,6 +340,7 @@ impl Gpu {
                 pass.set_bind_group(0, &self.grid_bind, &[]);
                 pass.draw(0..self.grid_count, 0..1);
                 self.mesh.draw(&mut pass, &self.mesh_display);
+                self.assets.draw(&mut pass);
                 pass.set_vertex_buffer(0, self.vertices.slice(..));
                 pass.set_pipeline(if self.mesh_display.mode == crate::DisplayMode::Technical {
                     &self.pipeline

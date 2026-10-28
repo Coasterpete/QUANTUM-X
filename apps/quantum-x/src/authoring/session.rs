@@ -155,6 +155,9 @@ pub(super) struct Session {
     pub inspect_input: Option<(SectionId, f64)>,
     pub hovered: Option<SectionId>,
     pub viewport_inspection: Option<(SectionId, f64)>,
+    pub train_station_m: Option<f64>,
+    pub playback: super::train_playback::State,
+    pub assets: super::train_assets::State,
     pub keyboard_owned_last_frame: bool,
     pub apply_section_requested: bool,
     pub initial_draft: qx_geometry::authoring::InitialConditions,
@@ -262,12 +265,18 @@ impl Session {
             inspect_input: None,
             hovered: None,
             viewport_inspection: None,
+            train_station_m: None,
+            playback: Default::default(),
+            assets: Default::default(),
             keyboard_owned_last_frame: false,
             apply_section_requested: false,
             last_job: None,
             frame_revision: None,
         };
         super::graph_view::sync(&mut session);
+        session
+            .assets
+            .remember(session.editor.project(), &session.path);
         Ok(session)
     }
     pub fn dirty(&self) -> bool {
@@ -283,6 +292,7 @@ impl Session {
     }
     pub fn pending_edits(&self) -> bool {
         self.dirty()
+            || self.assets.draft_dirty(self.editor.project())
             || self.draft_dirty()
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
@@ -363,6 +373,7 @@ impl Session {
                 Command::SetMetadata(_)
                     | Command::SetStyle(_)
                     | Command::SetHeartline(_)
+                    | Command::SetTrains(_)
                     | Command::SetConstruction(_)
             )
         }) {
@@ -450,6 +461,19 @@ impl Session {
         candidate.heartline = self.heartline_draft.clone();
         candidate.initial = self.initial_draft.clone();
         candidate.construction = self.construction_draft.clone();
+        if let (Some((train, component)), Some(draft)) = (&self.assets.selected, &self.assets.draft)
+            && let Some(c) = candidate
+                .trains
+                .iter_mut()
+                .find(|t| &t.id == train)
+                .and_then(|t| t.components.iter_mut().find(|c| &c.id == component))
+        {
+            let mut asset = draft.clone();
+            if let Ok(q) = asset.rotation.normalized() {
+                asset.rotation = q;
+            }
+            c.asset = Some(asset);
+        }
         candidate
     }
     fn queue_generation(&mut self, project: Project, preview: bool) {
@@ -555,6 +579,7 @@ impl Session {
             self.request_drafts(super::draft_workflow::DraftRequest::History { redo });
             return;
         }
+        self.assets.draft = None;
         if if redo {
             self.editor.redo()
         } else {
@@ -587,12 +612,21 @@ impl Session {
             ));
             return;
         }
-        match persistence::save(path, self.editor.project(), &self.catalog) {
+        let mut warnings = Vec::new();
+        let result = self
+            .assets
+            .package(self.editor.project(), &self.path, path)
+            .map_err(qx_document::DocumentError)
+            .and_then(|w| {
+                warnings = w;
+                persistence::save(path, self.editor.project(), &self.catalog)
+            });
+        match result {
             Ok(()) => {
                 self.path = path.to_string_lossy().into_owned();
                 self.saved = Some(self.editor.project().clone());
                 self.save_failure = None;
-                self.status = "Project saved (schema 4).".into();
+                self.status = format!("Project saved (schema 5). {}", warnings.join("; "));
             }
             Err(error) => {
                 self.status = format!(
@@ -624,6 +658,9 @@ impl Session {
                 self.inspect_input = None;
                 self.hovered = None;
                 self.viewport_inspection = None;
+                self.train_station_m = None;
+                self.playback = Default::default();
+                self.assets = Default::default();
                 self.last_job = None;
                 self.draft_request = None;
                 self.resolution_error = None;
@@ -633,6 +670,7 @@ impl Session {
                 self.editor = editor;
                 self.saved = path.as_ref().map(|_| self.editor.project().clone());
                 self.path = path.map_or(String::new(), |p| p.to_string_lossy().into_owned());
+                self.assets.remember(self.editor.project(), &self.path);
                 self.selected = self.editor.project().sections[0].id;
                 self.next_section_id = self
                     .editor
@@ -656,6 +694,7 @@ impl Session {
     }
     pub fn has_drafts(&self) -> bool {
         self.draft_dirty()
+            || self.assets.draft_dirty(self.editor.project())
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.metadata_draft != self.editor.project().metadata

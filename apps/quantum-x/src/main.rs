@@ -2,6 +2,7 @@
 mod authoring;
 mod benchmark;
 mod export;
+mod physics_diagnostic;
 use qx_document::{
     command::{Command, Editor},
     persistence,
@@ -11,14 +12,25 @@ use qx_geometry::solver::GenerationOptions;
 use qx_style::Catalog;
 use std::{error::Error, path::PathBuf};
 
-const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x edit [project.qx.json]\n  quantum-x heartline-demo <output-directory>\n  quantum-x render-editor <project.qx.json> <output.png> [track|train [width height [section-id channel]]]\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x authoring-scenario <output-directory>\n  quantum-x track-scenario <output-directory>\n  quantum-x benchmark\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
+const USAGE: &str = "QUANTUM-X authoring diagnostics (development only)\n\n  quantum-x demo <output-directory>\n  quantum-x examples <output-directory>\n  quantum-x generate <project.qx.json> <output-directory> [max-step-metres]\n  quantum-x inspect <project.qx.json>\n  quantum-x edit [project.qx.json]\n  quantum-x heartline-demo <output-directory>\n  quantum-x render-editor <project.qx.json> <output.png> [track|train [width height [section-id channel]]]\n  quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>\n  quantum-x authoring-scenario <output-directory>\n  quantum-x track-scenario <output-directory>\n  quantum-x benchmark\n  quantum-x physics-diagnostic\n\nExports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.\nThe design reference speed is not a simulated train velocity.";
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     if args.is_empty() || (args.len() == 1 && (args[0] == "--help" || args[0] == "-h")) {
-        println!("{USAGE}");
+        println!(
+            "{USAGE}\nM8.1 acceptance: quantum-x train-asset-scenario <authored.qx.json> <output-directory>\nM8.2 acceptance: quantum-x train-playback-scenario <output-directory>"
+        );
         return Ok(());
     }
     let catalog = Catalog::built_in()?;
+    if args[0] == "train-playback-scenario" && args.len() == 2 {
+        return authoring::train_playback_scenario(PathBuf::from(&args[1]));
+    }
+    if args[0] == "train-asset-scenario" && args.len() == 3 {
+        return authoring::train_asset_scenario(PathBuf::from(&args[1]), PathBuf::from(&args[2]));
+    }
+    if args[0] == "physics-diagnostic" && args.len() == 1 {
+        return physics_diagnostic::run();
+    }
     if args[0] == "track-scenario" && args.len() == 2 {
         return authoring::track_scenario(PathBuf::from(&args[1]));
     }

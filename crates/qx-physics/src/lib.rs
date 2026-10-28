@@ -1,14 +1,18 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+//! Experimental rigid-body foundation. SI units; +Y is up.
+//! This is not yet a complete train or wheel/rail simulation.
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+mod angular;
+mod body;
+pub use angular::AngularJoint;
+pub mod inspection;
+mod playback;
+mod solver;
+pub mod train;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+pub use body::{Body, MassProperties, Pose};
+pub use playback::{Simulation, TrackSimulation};
+pub use solver::{BallJoint, Diagnostics, FIXED_STEP_SECONDS, Guide, TrackGuide, World};
+
+pub type Result<T> = std::result::Result<T, String>;
+
+pub mod consist;

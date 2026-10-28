@@ -22,6 +22,7 @@ pub enum ChannelEdit {
 }
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetTrains(Vec<crate::train::Train>),
     SetConstruction(qx_style::construction::TrackConstruction),
     SetHeartline(crate::HeartlineSettings),
     MoveSection {
@@ -64,6 +65,7 @@ impl Command {
                 .ok_or_else(|| crate::DocumentError(format!("section ID {} not found", id.0)))
         };
         match self {
+            Self::SetTrains(value) => project.trains = value,
             Self::SetConstruction(value) => project.construction = value,
             Self::SetHeartline(settings) => project.heartline = settings,
             Self::MoveSection { id, after } => {

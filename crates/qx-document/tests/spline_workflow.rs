@@ -250,10 +250,12 @@ fn version_one_migration_preserves_pass1_output_and_rejects_new_data() {
         .length()
             < 1e-12
     );
-    let json = persistence::to_json(&spline_comparison_project(), &catalog)
-        .unwrap()
-        .replacen("\"schema_version\": 4", "\"schema_version\": 1", 1);
-    assert!(persistence::from_json(&json, &catalog).is_err());
+    let mut value = serde_json::to_value(spline_comparison_project()).unwrap();
+    value["schema_version"] = 1.into();
+    for field in ["heartline", "construction", "trains"] {
+        value.as_object_mut().unwrap().remove(field);
+    }
+    assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
 }
 #[test]
 fn transported_frames_cross_inflections_and_normalized_roll_survives_length_edits() {

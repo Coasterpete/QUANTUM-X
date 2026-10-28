@@ -11,6 +11,7 @@ fn m6_schema_three_migrates_without_reauthoring_and_m7_roundtrips() {
     let original = foundation_project();
     let mut value = serde_json::to_value(&original).unwrap();
     value["schema_version"] = 3.into();
+    value.as_object_mut().unwrap().remove("trains");
     value.as_object_mut().unwrap().remove("construction");
     let migrated = persistence::from_json(&value.to_string(), &catalog).unwrap();
     assert_eq!(migrated, original);

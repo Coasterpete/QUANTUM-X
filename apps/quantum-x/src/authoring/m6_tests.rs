@@ -926,3 +926,27 @@ fn amplitude_hermite_slopes_transition_order_and_removal_work_through_controls()
     assert_eq!(s.editor.project(), &removed);
     assert!(!s.draft_dirty());
 }
+#[test]
+fn train_preview_station_survives_hover_and_does_not_edit_document() {
+    let mut s = scenario::build().unwrap();
+    let train = qx_document::train::Train::development_fixture("test-train".into());
+    let mut heartline = s.editor.project().heartline.clone();
+    heartline.train_configuration_id = Some(train.id.clone());
+    assert!(s.execute(vec![
+        Command::SetTrains(vec![train]),
+        Command::SetHeartline(heartline)
+    ]));
+    s.workbench.active = super::workbench::Profile::Train;
+    s.train_station_m = Some(30.);
+    s.inspect_station(Some((SectionId(1), 5.)));
+    let original = s.editor.project().clone();
+    let ctx = egui::Context::default();
+    let (_, _, first) = frame(&mut s, &ctx, egui::vec2(1440., 960.), vec![]);
+    assert_eq!(first.inspection_distance_m, Some(30.));
+    assert!(!first.overlay_lines.is_empty());
+    s.train_station_m = Some(40.);
+    let (_, _, second) = frame(&mut s, &ctx, egui::vec2(1440., 960.), vec![]);
+    assert_eq!(second.inspection_distance_m, Some(40.));
+    assert_ne!(first.overlay_lines, second.overlay_lines);
+    assert_eq!(s.editor.project(), &original);
+}
