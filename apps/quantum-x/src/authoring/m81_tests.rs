@@ -333,7 +333,7 @@ fn real_train_workspace_buttons_station_and_visibility_reach_display_and_history
     s.assets.chosen = replacement.clone();
     ui_click(&mut s, &ctx, "Assign / replace");
     assert_eq!(s.assets.draft.as_ref().unwrap().path, replacement);
-    ui_click(&mut s, &ctx, "Apply visual correction");
+    ui_click(&mut s, &ctx, "Apply transform");
     assert_eq!(
         s.editor.project().trains[0].components[0]
             .asset
@@ -366,6 +366,9 @@ fn real_train_workspace_buttons_station_and_visibility_reach_display_and_history
         ],
     );
     assert_eq!(s.train_station_m, Some(42.125));
+    ui_click(&mut s, &ctx, "View");
+    ui_click(&mut s, &ctx, "Development tools");
+    assert!(s.development);
     ui_click(&mut s, &ctx, "Engineering references");
     for label in [
         "Engineering wireframe / axes / guides",

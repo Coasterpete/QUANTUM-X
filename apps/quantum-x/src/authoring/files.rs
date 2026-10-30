@@ -12,6 +12,30 @@ pub(super) struct Dialog {
     pub action: FileAction,
     pub result: mpsc::Receiver<Option<PathBuf>>,
 }
+/// Shared native project picker for the welcome shell and the editor. Only the
+/// caller decides when a validated result may replace a document.
+pub(super) fn project_picker(current: PathBuf) -> Result<mpsc::Receiver<Option<PathBuf>>, String> {
+    #[cfg(windows)]
+    {
+        let (send, result) = mpsc::channel();
+        std::thread::spawn(move || {
+            let mut dialog = rfd::FileDialog::new()
+                .add_filter("QUANTUM Dynamics project (*.qx.json)", &["qx.json"])
+                .add_filter("JSON project (*.json)", &["json"])
+                .set_title("Open QUANTUM Dynamics project");
+            if let Some(parent) = current.parent().filter(|p| !p.as_os_str().is_empty()) {
+                dialog = dialog.set_directory(parent);
+            }
+            let _ = send.send(dialog.pick_file());
+        });
+        Ok(result)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = current;
+        Err("Native project dialogs currently require Windows.".into())
+    }
+}
 impl Session {
     pub fn file_dialog(&mut self, action: FileAction) {
         if self.file_dialog.is_some() {
@@ -26,6 +50,16 @@ impl Session {
             self.open_dialog_requested = true;
             return;
         }
+        if matches!(action, FileAction::Open) {
+            match project_picker(PathBuf::from(&self.path)) {
+                Ok(result) => self.file_dialog = Some(Dialog { action, result }),
+                Err(error) => {
+                    self.open_dialog_confirmed = false;
+                    self.status = error;
+                }
+            }
+            return;
+        }
         #[cfg(windows)]
         {
             let current = PathBuf::from(&self.path);
@@ -36,7 +70,7 @@ impl Session {
                     rfd::FileDialog::new().add_filter("Binary glTF 2.0 (*.glb)", &["glb"])
                 } else {
                     rfd::FileDialog::new()
-                        .add_filter("QUANTUM-X project (*.qx.json)", &["qx.json"])
+                        .add_filter("QUANTUM Dynamics project (*.qx.json)", &["qx.json"])
                         .add_filter("JSON project (*.json)", &["json"])
                 };
                 if let Some(parent) = current.parent().filter(|p| !p.as_os_str().is_empty()) {
@@ -46,9 +80,11 @@ impl Session {
                     FileAction::ImportGlb => {
                         dialog.set_title("Import static train GLB").pick_file()
                     }
-                    FileAction::Open => dialog.set_title("Open QUANTUM-X project").pick_file(),
+                    FileAction::Open => dialog
+                        .set_title("Open QUANTUM Dynamics project")
+                        .pick_file(),
                     FileAction::SaveAs => dialog
-                        .set_title("Save QUANTUM-X project as")
+                        .set_title("Save QUANTUM Dynamics project as")
                         .set_file_name(
                             current
                                 .file_name()
@@ -78,6 +114,7 @@ impl Session {
                         FileAction::ImportGlb => self.assets.start_import(path),
                     },
                     None => {
+                        self.startup_after_save = false;
                         self.status =
                             "File dialog closed without selecting a file; project retained.".into()
                     }
@@ -86,6 +123,7 @@ impl Session {
             Some(Err(mpsc::TryRecvError::Disconnected)) => {
                 self.file_dialog = None;
                 self.open_dialog_confirmed = false;
+                self.startup_after_save = false;
                 self.status =
                     "File dialog stopped; project retained. Try the command again.".into();
             }

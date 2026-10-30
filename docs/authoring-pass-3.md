@@ -57,7 +57,8 @@ input duration and angular values/slopes using the stated constant design speed,
 preserving the section's mathematical shape. Normalized spline domains remain
 normalized physical arc distance, not time or native parameter.
 
-Transition insertion is labeled **Split into two Hermite regions**. It matches
+Historical behavior below is superseded by [shape-preserving NURBS regions](transition-nurbs-regions.md).
+Transition insertion was labeled **Split into two Hermite regions**. It matched
 the source's endpoint and split values/slopes; higher-order, amplitude and cosine
 sources can change between these constraints. It is an explicit reversible reshape,
 not an exact general function subdivision. Removal explicitly extends a neighbor

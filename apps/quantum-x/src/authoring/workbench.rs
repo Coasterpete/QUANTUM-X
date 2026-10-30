@@ -93,7 +93,7 @@ impl Layout {
             }
             let row = tiles.insert_container(row);
             let bottom = tab(&mut tiles, &[Pane::Transition]);
-            tiles.insert_container(Linear::new_binary(LinearDir::Vertical, [row, bottom], 0.60))
+            tiles.insert_container(Linear::new_binary(LinearDir::Vertical, [row, bottom], 0.56))
         } else {
             let left = tab(&mut tiles, &[Pane::Configuration]);
             let center = tab(&mut tiles, &[Pane::Preview]);
@@ -418,7 +418,7 @@ impl PreferenceStore {
         }
     }
 }
-fn write_preferences(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
+pub(super) fn write_preferences(path: &std::path::Path, bytes: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
         fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }

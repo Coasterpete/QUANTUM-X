@@ -109,6 +109,9 @@ fn actual_playback_buttons_drive_worker_and_render_the_same_physical_snapshots()
     for _ in 0..4 {
         frame(&mut s, &ctx, vec![]);
     }
+    click(&mut s, &ctx, "View");
+    click(&mut s, &ctx, "Development tools");
+    assert!(s.development);
     click(&mut s, &ctx, "Initialize playback");
     wait(&mut s, |p| p.ticks == 0);
     let first = s.playback.snapshot.as_ref().unwrap().poses.clone();
@@ -185,10 +188,38 @@ fn fixture_controls_accept_more_than_two_cars_and_below_track_arrangement() {
     for _ in 0..4 {
         frame(&mut s, &ctx, vec![]);
     }
+    click(&mut s, &ctx, "View");
+    click(&mut s, &ctx, "Development tools");
+    assert!(s.development);
     click(&mut s, &ctx, "Add configurable development consist");
     let new = s.editor.project().trains.last().unwrap();
     assert_eq!(new.cars.len(), 4);
     assert!(new.components.iter().filter(|c|c.kind==qx_document::train::ComponentKind::CarBody).all(|c|matches!(&c.placement,Some(qx_document::train::mechanism::Placement::Track {frame,..}) if frame.translation_m.y<0.)));
     s.undo(false);
     assert_eq!(s.editor.project().trains.len(), 1);
+}
+
+#[test]
+fn development_views_are_opt_in_and_do_not_change_the_project() {
+    let mut s = session();
+    let original = s.editor.project().clone();
+    let ctx = egui::Context::default();
+    for _ in 0..4 {
+        frame(&mut s, &ctx, vec![]);
+    }
+    let (normal, display) = frame(&mut s, &ctx, vec![]);
+    assert!(!s.development);
+    assert!(display.overlay_lines.is_empty());
+    assert!(!normal.iter().any(|(t, _)| t == "Initialize playback" || t == "Add configurable development consist"));
+    click(&mut s, &ctx, "View");
+    click(&mut s, &ctx, "Development tools");
+    let (development, display) = frame(&mut s, &ctx, vec![]);
+    assert!(s.development);
+    assert!(development.iter().any(|(t, _)| t == "Initialize playback"));
+    assert!(!display.overlay_lines.is_empty());
+    click(&mut s, &ctx, "View");
+    click(&mut s, &ctx, "Development tools");
+    assert!(!s.development);
+    assert_eq!(s.editor.project(), &original);
+    assert!(!s.editor.can_undo());
 }

@@ -40,9 +40,9 @@ fn card_sized(
         if compact {
             24.
         } else if timeline {
-            36.
+            44.
         } else {
-            48.
+            58.
         },
     ));
     let id = egui::Id::unique(("section navigator", timeline, section.id.0));
@@ -89,10 +89,10 @@ fn card_sized(
     );
     if !compact {
         painter.text(
-            rect.left_top() + egui::vec2(8., if timeline { 20. } else { 28. }),
+            rect.left_top() + egui::vec2(8., if timeline { 24. } else { 32. }),
             egui::Align2::LEFT_TOP,
             format!("{} · {}", method(section), extent(section)),
-            egui::FontId::monospace(11.),
+            egui::FontId::monospace(13.),
             visuals.text_color(),
         );
     }

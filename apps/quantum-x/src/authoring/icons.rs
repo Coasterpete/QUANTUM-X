@@ -28,12 +28,19 @@ registry! {
 }
 pub(super) fn button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, help: &str) -> Response {
     let (uri, bytes) = icon.asset();
+    let color = match icon {
+        Icon::New | Icon::Apply => super::theme::GREEN,
+        Icon::Save | Icon::SaveAs => super::theme::BLUE,
+        Icon::Remove | Icon::Cancel => super::theme::RED,
+        Icon::Undo | Icon::Redo => super::theme::VIOLET,
+        _ => super::theme::TRACK,
+    };
     let response = ui
         .add_enabled(
             enabled,
             Button::image_and_text(
                 Image::from_bytes(uri, bytes).fit_to_exact_size(egui::Vec2::splat(16.)),
-                label,
+                egui::RichText::new(label).color(color),
             )
             .image_tint_follows_text_color(true),
         )

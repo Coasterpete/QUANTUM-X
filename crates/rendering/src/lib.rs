@@ -3,6 +3,7 @@ pub mod asset;
 mod asset_gpu;
 mod camera;
 mod gpu;
+pub mod identity;
 mod inspector;
 mod mesh_gpu;
 mod offscreen;

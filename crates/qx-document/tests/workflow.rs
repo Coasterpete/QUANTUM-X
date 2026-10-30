@@ -199,3 +199,46 @@ fn version_one_fixture_remains_compatible() {
         true.into();
     assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
 }
+
+#[test]
+fn unassigned_style_uses_existing_schema_and_preserves_geometry_and_history() {
+    let catalog = Catalog::built_in().unwrap();
+    let original = foundation_project();
+    let mut editor = Editor::new(original.clone(), catalog.clone(), 8).unwrap();
+    editor
+        .execute([Command::SetStyle(StyleSelection::default())])
+        .unwrap();
+    let unassigned = editor.project().clone();
+    let json = persistence::to_json(&unassigned, &catalog).unwrap();
+    assert_eq!(persistence::from_json(&json, &catalog).unwrap(), unassigned);
+    assert_eq!(unassigned.schema_version, qx_document::SCHEMA_VERSION);
+    assert_eq!(unassigned.sections, original.sections);
+    assert_eq!(unassigned.construction, original.construction);
+    assert_eq!(unassigned.trains, original.trains);
+    assert_eq!(
+        unassigned.generate(&catalog, Default::default()).unwrap(),
+        original.generate(&catalog, Default::default()).unwrap()
+    );
+    assert!(editor.undo());
+    assert_eq!(editor.project(), &original);
+    for selection in [
+        StyleSelection {
+            family_id: "hybrid".into(),
+            style_id: String::new(),
+        },
+        StyleSelection {
+            family_id: String::new(),
+            style_id: "hybrid-100".into(),
+        },
+        StyleSelection {
+            family_id: "unknown".into(),
+            style_id: "unknown-100".into(),
+        },
+    ] {
+        assert!(editor.execute([Command::SetStyle(selection)]).is_err());
+        assert_eq!(editor.project(), &original);
+        assert!(editor.can_redo());
+    }
+    assert!(editor.redo());
+    assert_eq!(editor.project(), &unassigned);
+}

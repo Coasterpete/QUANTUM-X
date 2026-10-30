@@ -159,9 +159,14 @@ fn both_strategies_follow_hill_banking_and_inversion_at_every_source_ring() {
     for fixture in 0..3 {
         let mut project = session.editor.project().clone();
         if fixture == 1 {
-            let roll = project.sections[1].channel_mut(ChannelKey::Roll).unwrap();
-            roll.transitions[0].end = 0.04;
-            roll.transitions[1].start = 0.04;
+            project.sections[1] = qx_document::region_edit::endpoint(
+                &project.sections[1],
+                ChannelKey::Roll,
+                0,
+                true,
+                0.04,
+            )
+            .unwrap();
         } else if fixture == 2 {
             let mut section =
                 Section::straight(1, "inversion fixture", std::f64::consts::TAU * 10.);

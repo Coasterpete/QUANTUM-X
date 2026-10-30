@@ -122,9 +122,14 @@ pub(super) struct Session {
     pub workbench: super::workbench::Workbench,
     pub preferences: super::workbench::PreferenceStore,
     pub display_dialog: bool,
+    /// Session-only opt-in; never changes the project or saved docking layout.
+    pub development: bool,
+    pub generation_details: String,
     pub window_draft: qx_rendering::WindowPreferences,
     pub editor: Editor,
     pub catalog: Catalog,
+    pub library: qx_style::library::Library,
+    pub library_error: Option<String>,
     pub path: String,
     pub file_dialog: Option<super::files::Dialog>,
     pub selected: SectionId,
@@ -162,6 +167,9 @@ pub(super) struct Session {
     pub apply_section_requested: bool,
     pub initial_draft: qx_geometry::authoring::InitialConditions,
     pub metadata_draft: qx_document::Metadata,
+    pub style_draft: qx_style::StyleSelection,
+    pub style_family: String,
+    pub previews: super::previews::State,
     pub construction_draft: qx_style::construction::TrackConstruction,
     pub draft_request: Option<super::draft_workflow::DraftRequest>,
     pub resolution_error: Option<String>,
@@ -169,6 +177,10 @@ pub(super) struct Session {
     pub open_dialog_requested: bool,
     pub open_dialog_confirmed: bool,
     pub ui_action: Option<super::draft_workflow::UiAction>,
+    pub startup_request: Option<super::startup::Destination>,
+    pub startup_approved: Option<super::startup::Destination>,
+    pub startup_after_save: bool,
+    pub recent_project: Option<PathBuf>,
     saved: Option<Project>,
     jobs: mpsc::SyncSender<Job>,
     queued_job: Option<Job>,
@@ -182,6 +194,8 @@ impl Session {
         path: Option<&Path>,
         catalog: Catalog,
     ) -> qx_document::Result<Self> {
+        let (library_root, library_error) = super::library_ui::assets_root_and_error();
+        let library = qx_style::library::Library::from_catalog(catalog.clone(), &library_root)?;
         let editor = Editor::new(project.clone(), catalog.clone(), 64)?;
         let (jobs, work) = mpsc::sync_channel::<Job>(1);
         let (send, results) = mpsc::channel();
@@ -213,6 +227,8 @@ impl Session {
             workbench: Default::default(),
             preferences: Default::default(),
             display_dialog: false,
+            development: false,
+            generation_details: String::new(),
             window_draft: Default::default(),
             selected: project.sections[0].id,
             next_section_id: project
@@ -229,6 +245,9 @@ impl Session {
             heartline_draft: project.heartline.clone(),
             initial_draft: project.initial.clone(),
             metadata_draft: project.metadata.clone(),
+            style_draft: project.style.clone(),
+            style_family: project.style.family_id.clone(),
+            previews: Default::default(),
             construction_draft: project.construction.clone(),
             draft_request: None,
             resolution_error: None,
@@ -236,12 +255,18 @@ impl Session {
             open_dialog_requested: false,
             open_dialog_confirmed: false,
             ui_action: None,
+            startup_request: None,
+            startup_approved: None,
+            startup_after_save: false,
+            recent_project: None,
             status: "Ready. Select a section to author its transitions.".into(),
             path: path.map_or(String::new(), |p| p.to_string_lossy().into_owned()),
             file_dialog: None,
             saved: path.map(|_| project),
             editor,
             catalog,
+            library,
+            library_error,
             jobs,
             queued_job: None,
             results,
@@ -297,6 +322,7 @@ impl Session {
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.metadata_draft != self.editor.project().metadata
+            || self.style_draft != self.editor.project().style
             || self.construction_draft != self.editor.project().construction
     }
     pub fn sync_draft(&mut self) {
@@ -362,6 +388,7 @@ impl Session {
         let previous_initial = self.editor.project().initial.clone();
         let previous_construction = self.editor.project().construction.clone();
         let previous_metadata = self.editor.project().metadata.clone();
+        let previous_style = self.editor.project().style.clone();
         let draft = self.draft.clone();
         // Explicit acceptance validates the complete candidate, including strict
         // downstream boundaries, before publishing either document or history.
@@ -402,6 +429,10 @@ impl Session {
                 }
                 if self.editor.project().metadata != previous_metadata {
                     self.metadata_draft = self.editor.project().metadata.clone();
+                }
+                if self.editor.project().style != previous_style {
+                    self.style_draft = self.editor.project().style.clone();
+                    self.style_family = self.style_draft.family_id.clone();
                 }
                 if self.editor.project().construction != previous_construction {
                     self.construction_draft = self.editor.project().construction.clone();
@@ -488,7 +519,13 @@ impl Session {
                 && self.draft_error.is_none()
             {
                 self.visible_preview = preview;
-                self.status = self.status.replace(
+                self.status = if preview {
+                    "Draft preview ready · Apply to keep your changes."
+                } else {
+                    "Document geometry updated."
+                }
+                .into();
+                self.generation_details = self.generation_details.replace(
                     if preview {
                         "Document"
                     } else {
@@ -512,10 +549,10 @@ impl Session {
         }
         self.queued_job = None;
         match self.jobs.try_send((self.revision, project, self.options)) {
-            Ok(()) => self.status = format!("Generating revision {}…", self.revision),
+            Ok(()) => self.status = "Updating track geometry…".into(),
             Err(mpsc::TrySendError::Full(job)) => {
                 self.queued_job = Some(job);
-                self.status = format!("Queued latest revision {}…", self.revision);
+                self.status = "Updating track geometry with the latest edits…".into();
             }
             Err(mpsc::TrySendError::Disconnected(_)) => {
                 self.status = "Generation worker stopped; save and restart.".into()
@@ -549,7 +586,7 @@ impl Session {
                         self.frame_requested = true;
                         self.frame_revision = None;
                     }
-                    self.status = format!(
+                    self.generation_details = format!(
                         "{} revision {} generated in {:.2} ms; {:.3} m, {} samples",
                         if self.visible_preview {
                             "DRAFT PREVIEW (Apply to save)"
@@ -561,6 +598,12 @@ impl Session {
                         scene.track.length_m(),
                         scene.track.samples.len()
                     );
+                    self.status = if self.visible_preview {
+                        "Draft preview ready · Apply to keep your changes."
+                    } else {
+                        "Document geometry updated."
+                    }
+                    .into();
                     latest = Some(scene);
                 }
                 Err(error) => {
@@ -590,6 +633,8 @@ impl Session {
             self.heartline_draft = self.editor.project().heartline.clone();
             self.initial_draft = self.editor.project().initial.clone();
             self.metadata_draft = self.editor.project().metadata.clone();
+            self.style_draft = self.editor.project().style.clone();
+            self.style_family = self.style_draft.family_id.clone();
             self.construction_draft = self.editor.project().construction.clone();
             self.regenerate();
         }
@@ -626,7 +671,16 @@ impl Session {
                 self.path = path.to_string_lossy().into_owned();
                 self.saved = Some(self.editor.project().clone());
                 self.save_failure = None;
-                self.status = format!("Project saved (schema 5). {}", warnings.join("; "));
+                self.status = format!(
+                    "Project saved (schema {}). {}",
+                    qx_document::SCHEMA_VERSION,
+                    warnings.join("; ")
+                );
+                self.recent_project = Some(path.to_path_buf());
+                if self.startup_after_save && !self.pending_edits() {
+                    self.startup_approved = self.startup_request.take();
+                    self.startup_after_save = false;
+                }
             }
             Err(error) => {
                 self.status = format!(
@@ -651,6 +705,7 @@ impl Session {
             Editor::new(p, self.catalog.clone(), 64)
         }) {
             Ok(editor) => {
+                self.recent_project = path.clone();
                 self.graph_view = Default::default();
                 self.graph_drag = None;
                 self.graph_feedback = None;
@@ -661,6 +716,7 @@ impl Session {
                 self.train_station_m = None;
                 self.playback = Default::default();
                 self.assets = Default::default();
+                self.previews = Default::default();
                 self.last_job = None;
                 self.draft_request = None;
                 self.resolution_error = None;
@@ -685,6 +741,8 @@ impl Session {
                 self.heartline_draft = self.editor.project().heartline.clone();
                 self.initial_draft = self.editor.project().initial.clone();
                 self.metadata_draft = self.editor.project().metadata.clone();
+                self.style_draft = self.editor.project().style.clone();
+                self.style_family = self.style_draft.family_id.clone();
                 self.construction_draft = self.editor.project().construction.clone();
                 self.regenerate();
                 self.frame_revision = Some(self.revision);
@@ -698,22 +756,26 @@ impl Session {
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.metadata_draft != self.editor.project().metadata
+            || self.style_draft != self.editor.project().style
             || self.construction_draft != self.editor.project().construction
     }
 }
 pub(super) fn blank_project() -> Project {
     let mut p = qx_document::sample::foundation_project();
-    p.metadata.project_id = format!(
+    p.metadata.project_id = new_project_id();
+    p.metadata.name = "Untitled".into();
+    p.metadata.description.clear();
+    p.metadata.author.clear();
+    p.sections = vec![Section::straight(1, "Section 1", 10.)];
+    p
+}
+pub(super) fn new_project_id() -> String {
+    format!(
         "qx-{}-{}",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
             .as_nanos()
-    );
-    p.metadata.name = "Untitled".into();
-    p.metadata.description.clear();
-    p.metadata.author.clear();
-    p.sections = vec![Section::straight(1, "Section 1", 10.)];
-    p
+    )
 }

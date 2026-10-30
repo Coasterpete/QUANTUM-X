@@ -252,13 +252,12 @@ impl State {
             {
                 continue;
             }
-            if let Some(base) = root(project_path) {
+            if let Some(source) = root(project_path)
+                .map(|base| base.join(&a.path))
+                .or_else(|| self.sources.get(&a.path).cloned())
+            {
                 self.pending.insert(a.path.clone());
-                if self
-                    .jobs
-                    .send((Some(a.path.clone()), base.join(&a.path)))
-                    .is_err()
-                {
+                if self.jobs.send((Some(a.path.clone()), source)).is_err() {
                     self.pending.remove(&a.path);
                     self.errors
                         .insert(a.path.clone(), "Asset worker stopped".into());

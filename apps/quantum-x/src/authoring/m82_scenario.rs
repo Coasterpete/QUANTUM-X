@@ -18,7 +18,7 @@ use qx_geometry::{
 use serde_json::{Value, json};
 use std::{
     error::Error,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 fn wait(s: &mut Session, ticks: u64) -> Result<(), Box<dyn Error>> {
@@ -51,7 +51,7 @@ fn record(s: &Session, p: &Snapshot, display: &qx_rendering::DisplayOptions) -> 
 }
 pub(super) fn run(output: PathBuf) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&output)?;
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/development/train");
+    let fixtures = super::library_ui::assets_root().join("development/train");
     let mut cases = vec![];
     for (name, arrangement) in [
         ("conventional", DevelopmentArrangement::Conventional),

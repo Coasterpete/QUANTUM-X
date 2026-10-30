@@ -110,7 +110,8 @@ including across removal/undo, avoiding collisions with cached section views.
 Opening a document resets those transient caches. Existing schema migrations and
 curve compatibility tests remain applicable.
 
-Split into two Hermite regions remains an explicit **reshape**: it preserves
+Historical splitting below is superseded by [shape-preserving NURBS regions](transition-nurbs-regions.md).
+Split into two Hermite regions was an explicit **reshape**: it preserved
 endpoint values/slopes and extent, but a nonlinear source need not retain its
 interior shape. It is not a silent linearization or a new exact subdivision
 algorithm. Removal explicitly extends a neighbor. Individual lengths, amplitude,

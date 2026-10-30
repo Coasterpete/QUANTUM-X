@@ -126,27 +126,42 @@ struct PaneUi<'a> {
 impl PaneUi<'_> {
     fn content(&mut self, ui: &mut egui::Ui, pane: Pane) {
         match pane {
-            Pane::Track => panels::track(self.session, ui),
+            Pane::Track => {
+                super::theme::heading(ui, "TRACK WORKSPACE", super::theme::RED);
+                panels::track(self.session, ui);
+            }
             Pane::Transition => graph::editor(self.session, ui, self.scene),
             Pane::Support => support(ui),
             Pane::View => self.view(ui),
             Pane::Diagnostics => self.diagnostics(ui),
             Pane::Configuration => {
+                super::theme::heading(ui, "TRAIN WORKSPACE", super::theme::TRAIN);
                 super::train_asset_ui::controls(self.session, ui, self.display);
-                train_controls(self.session, ui);
-                super::vehicle_ui::controls(self.session, ui);
-                ui.separator();
-                ui.heading("Nominal train configuration");
-                ui.small("Reference geometry settings; legacy IDs may be unresolved.");
-                panels::heartline(self.session, ui);
-                ui.separator();
-                ui.collapsing("Reference preview controls", |ui| self.view(ui));
+                ui.collapsing("Rider reference", |ui| panels::heartline(self.session, ui));
+                if self.session.development {
+                    ui.separator();
+                    ui.colored_label(super::theme::YELLOW, "DEVELOPMENT TOOLS");
+                    super::library_ui::trains(self.session, ui);
+                    train_controls(self.session, ui);
+                    super::vehicle_ui::controls(self.session, ui);
+                    ui.collapsing("Reference preview controls", |ui| self.view(ui));
+                }
             }
             Pane::Summary => {
-                super::train_playback_ui::controls(self.session, ui, self.scene);
-                super::train_asset_ui::diagnostics(self.session, ui);
+                super::theme::heading(ui, "TRAIN SUMMARY", super::theme::TRAIN);
+                super::train_asset_ui::errors(self.session, ui);
+                if self.session.development {
+                    super::train_playback_ui::controls(self.session, ui, self.scene);
+                    ui.collapsing("Asset import diagnostics", |ui| {
+                        super::train_asset_ui::diagnostics(self.session, ui)
+                    });
+                } else if self.session.playback.active() {
+                    ui.colored_label(super::theme::YELLOW, "Experimental playback is active.");
+                    if ui.button("Show playback controls").clicked() {
+                        self.session.development = true;
+                    }
+                }
                 let project = self.session.editor.project();
-                ui.heading("Committed configuration");
                 train_summary(
                     project,
                     self.scene,
@@ -155,44 +170,25 @@ impl PaneUi<'_> {
                     self.session.playback.active(),
                     ui,
                 );
-                ui.label(format!("Project: {}", project.metadata.name));
-                ui.monospace(format!(
-                    "Nominal train ID: {}",
-                    project
-                        .heartline
-                        .train_configuration_id
-                        .as_deref()
-                        .unwrap_or("Unassigned")
-                ));
-                ui.label(match project.heartline.authored_reference {
-                    qx_geometry::heartline::AuthoredReference::TrackCenterline => {
-                        "Authored reference: track centerline"
-                    }
-                    qx_geometry::heartline::AuthoredReference::RiderReference => {
-                        "Authored reference: rider reference"
-                    }
-                });
-                match project.heartline.rider_offset {
-                    qx_geometry::heartline::OffsetProfile::Constant { offset_m } => {
-                        offset_summary(ui, "Constant rider offset", offset_m)
-                    }
-                    qx_geometry::heartline::OffsetProfile::Quintic { start_m, end_m } => {
-                        offset_summary(ui, "Quintic start offset", start_m);
-                        offset_summary(ui, "Quintic end offset", end_m);
-                    }
-                }
-                ui.monospace(format!(
-                    "Design speed: {:.6} m/s",
-                    project.initial.reference_speed_mps
-                ));
-                ui.small("Design speed controls track-generation kinematics; it is not simulated vehicle speed.");
                 if self.session.heartline_draft != project.heartline {
-                    ui.strong("Configuration draft pending Apply / Cancel");
+                    ui.colored_label(
+                        super::theme::YELLOW,
+                        "Reference settings have unapplied changes.",
+                    );
                 }
                 ui.separator();
-                ui.label(
-                    "Development wireframe; ride systems and simulation playback are unavailable.",
-                );
+                ui.collapsing("Reference details", |ui| {
+                    ui.label(format!("Project: {}", project.metadata.name));
+                    ui.label(format!("Design speed: {:.6} m/s", project.initial.reference_speed_mps));
+                    ui.small("Design speed controls track generation, independently of simulated vehicle speed.");
+                    match project.heartline.rider_offset {
+                        qx_geometry::heartline::OffsetProfile::Constant { offset_m } => offset_summary(ui, "Constant rider offset", offset_m),
+                        qx_geometry::heartline::OffsetProfile::Quintic { start_m, end_m } => {
+                            offset_summary(ui, "Quintic start offset", start_m);
+                            offset_summary(ui, "Quintic end offset", end_m);
+                        }
+                    }
+                });
             }
             Pane::Viewport | Pane::Preview => {
                 let compact = ui.available_width() < 600. || ui.available_height() < 220.;
@@ -200,9 +196,9 @@ impl PaneUi<'_> {
                     if !compact {
                         ui.small(if pane == Pane::Preview {
                             if self.session.playback.active() {
-                                "Train assets · rigid-body playback"
+                                "Experimental playback"
                             } else {
-                                "Train assets · kinematic inspection"
+                                "Train preview"
                             }
                         } else {
                             self.display.mode.label()
@@ -308,12 +304,13 @@ impl PaneUi<'_> {
                         egui::FontId::monospace(11.),
                         egui::Color32::LIGHT_GRAY,
                     );
-                    if let Some(range) = self
-                        .scene
-                        .track
-                        .sections
-                        .iter()
-                        .find(|r| r.id == self.session.selected)
+                    if self.session.development
+                        && let Some(range) = self
+                            .scene
+                            .track
+                            .sections
+                            .iter()
+                            .find(|r| r.id == self.session.selected)
                     {
                         for (index, label) in
                             [(range.start_sample, "Start"), (range.end_sample, "End")]
@@ -397,7 +394,8 @@ impl PaneUi<'_> {
         .on_hover_text("World-space 3D reference only. Transition plot dots adapt independently.");
     }
     fn diagnostics(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Generation diagnostics");
+        super::theme::heading(ui, "DIAGNOSTICS", super::theme::YELLOW);
+        ui.label(&self.session.generation_details);
         if let Some(mesh) = &self.scene.mesh {
             ui.monospace(format!(
                 "{} vertices · {} stored triangles · {} expanded triangles · {} hardware instances",
@@ -447,13 +445,28 @@ impl PaneUi<'_> {
 }
 impl Behavior<Pane> for PaneUi<'_> {
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        self.session.pane_title(*pane).into()
+        let color = match pane {
+            Pane::Track => super::theme::RED,
+            Pane::Viewport | Pane::View => super::theme::TRACK,
+            Pane::Configuration | Pane::Preview | Pane::Summary => super::theme::TRAIN,
+            Pane::Support => super::theme::RED,
+            Pane::Transition => super::theme::BLUE,
+            Pane::Diagnostics => egui::Color32::from_rgb(255, 219, 102),
+        };
+        egui::RichText::new(self.session.pane_title(*pane))
+            .color(color)
+            .strong()
+            .into()
     }
     fn pane_ui(&mut self, ui: &mut egui::Ui, _: TileId, pane: &mut Pane) -> egui_tiles::UiResponse {
         ui.set_clip_rect(ui.max_rect().intersect(ui.clip_rect()));
         if pane.is_viewport() {
             self.content(ui, *pane);
         } else {
+            // A short/empty pane must still cover its full dock rectangle;
+            // Frame's content-sized fill otherwise exposes the 3D clear color.
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0., ui.visuals().panel_fill);
             egui::Frame::new()
                 .fill(ui.visuals().panel_fill)
                 .inner_margin(8.)
@@ -516,14 +529,21 @@ fn offset_summary(ui: &mut egui::Ui, label: &str, value: qx_geometry::math::Vec3
     });
 }
 fn support(ui: &mut egui::Ui) {
-    ui.heading("Support Settings");
-    ui.label("This document has no support construction model yet.");
-    ui.small("Support-specific settings will live here alongside tools referencing the same coaster document.");
+    super::theme::heading(ui, "SUPPORT WORKSPACE", super::theme::RED);
+    ui.label(
+        egui::RichText::new("Support construction")
+            .strong()
+            .color(super::theme::VIOLET),
+    );
+    ui.label("Not available in this Alpha build.");
+    ui.small(
+        "Support authoring will use the same coaster document. No supports have been generated.",
+    );
     ui.collapsing("Support Appearance", |ui| {
         ui.label("No support structure or material is available to edit.");
         ui.small("Focused support subpanel; separate from application display preferences.");
     });
-    ui.collapsing("Unavailable construction tools", |ui| {
+    ui.collapsing("Planned tools", |ui| {
         for text in [
             "Support prefab tools",
             "Foundation generator",
@@ -723,17 +743,15 @@ fn train_summary(
     let mut station = train_station_m
         .unwrap_or(scene.track.length_m() * 0.5)
         .clamp(0., scene.track.length_m());
+    ui.label("Inspection station (m)");
     ui.add_enabled_ui(!playback_active, |ui| {
         if ui
-            .add(
-                egui::Slider::new(&mut station, 0.0..=scene.track.length_m())
-                    .text("Inspection station (m)"),
-            )
+            .add(egui::Slider::new(&mut station, 0.0..=scene.track.length_m()).show_value(false))
             .changed()
         {
             *train_station_m = Some(station);
         }
-        ui.horizontal_wrapped(|ui| {
+        ui.vertical(|ui| {
             ui.label("Exact station (m)");
             if ui
                 .add(
@@ -759,6 +777,7 @@ fn train_summary(
         ui.colored_label(egui::Color32::LIGHT_YELLOW, "Inspection is unavailable for rider-authored geometry until the physical track reference is connected.");
         return;
     }
+    ui.collapsing("Constraint details", |ui| {
     match dynamic
         .cloned()
         .map(Ok)
@@ -807,4 +826,5 @@ fn train_summary(
             ui.colored_label(egui::Color32::LIGHT_YELLOW, format!("Inspection: {error}"));
         }
     }
+    });
 }

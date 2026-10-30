@@ -265,7 +265,7 @@ fn hill_scenario_is_continuous_reproducible_and_survives_document_roundtrip() {
         vec![22., 18., 20., 20.]
     );
     for t in &normal.transitions {
-        assert!(matches!(t.function, Function::QuinticSmoothstep {}));
+        assert!(matches!(t.function, Function::Nurbs { .. }));
         assert!(t.evaluate(0.).unwrap().derivative.abs() < 1e-14);
     }
     assert!((normal.transitions[0].evaluate(22.).unwrap().value - 2.).abs() < 1e-14);
@@ -559,7 +559,17 @@ fn type_after_label(
         s,
         ctx,
         size,
-        egui::pos2(label.right() + 24., label.center().y),
+        texts
+            .iter()
+            .filter(|(text, rect)| {
+                text.parse::<f64>().is_ok()
+                    && rect.left() > label.right()
+                    && (rect.center().y - label.center().y).abs() < 8.
+            })
+            .min_by(|a, b| a.1.left().total_cmp(&b.1.left()))
+            .unwrap_or_else(|| panic!("no numeric field beside {label:?}"))
+            .1
+            .center(),
     );
     frame(s, ctx, size, vec![Event::Text(text.into())]);
     key(s, ctx, size, egui::Key::Enter, Modifiers::NONE);
@@ -583,16 +593,26 @@ fn select_transition(s: &mut Session, ctx: &egui::Context, size: egui::Vec2, ind
 }
 fn values(s: &mut Session, ctx: &egui::Context, size: egui::Vec2, start: &str, end: &str) {
     click_last(s, ctx, size, "Edit values");
-    click_last(s, ctx, size, "Hermite");
-    click_last(s, ctx, size, "Quintic smoothstep");
+
     type_after_label(s, ctx, size, "Start", start);
     type_after_label(s, ctx, size, "End", end);
+    // Choose the analytic fixture shape explicitly through the real controls.
+    // Endpoint edits alone retain local NURBS shape and boundary jets.
+    click_last(s, ctx, size, "NURBS");
+    click_last(s, ctx, size, "Quintic smoothstep");
+    if !matches!(
+        s.draft.channel_mut(s.channel).unwrap().transitions[s.transition].function,
+        Function::Nurbs { .. }
+    ) {
+        click_last(s, ctx, size, "Quintic smoothstep");
+        click_last(s, ctx, size, "NURBS");
+    }
     let viewport = frame(s, ctx, size, vec![]).0.viewport;
     click_at(s, ctx, size, viewport.center());
 }
 fn split(s: &mut Session, ctx: &egui::Context, size: egui::Vec2) {
     click_last(s, ctx, size, "Transitions");
-    click_last(s, ctx, size, "Split into two Hermite regions");
+    click_last(s, ctx, size, "Split region (preserve shape)");
     let viewport = frame(s, ctx, size, vec![]).0.viewport;
     click_at(s, ctx, size, viewport.center());
 }
@@ -609,6 +629,9 @@ fn complete_hill_can_be_authored_through_real_workbench_widgets_and_saved() {
     type_after_label(&mut s, &ctx, size, "Length (m)", "80");
     assert_eq!(s.draft.extent, 80.);
     split(&mut s, &ctx, size);
+    // Splitting selects its new right region. Deliberately return to the left
+    // half to author the same four equal regions as this reference fixture.
+    select_transition(&mut s, &ctx, size, 0);
     split(&mut s, &ctx, size);
     select_transition(&mut s, &ctx, size, 2);
     split(&mut s, &ctx, size);
@@ -853,7 +876,7 @@ fn amplitude_hermite_slopes_transition_order_and_removal_work_through_controls()
     frame(&mut s, &ctx, size, vec![]);
     let roll = s.draft.roll_rate.clone();
     click_last(&mut s, &ctx, size, "Edit values");
-    click_last(&mut s, &ctx, size, "Quintic smoothstep");
+    click_last(&mut s, &ctx, size, "NURBS");
     click_last(&mut s, &ctx, size, "Hermite");
     type_after_label(&mut s, &ctx, size, "Amplitude", "0.35");
     type_after_label(&mut s, &ctx, size, "Start slope", "0.01");
@@ -874,6 +897,15 @@ fn amplitude_hermite_slopes_transition_order_and_removal_work_through_controls()
     assert!((normal.evaluate(10.).unwrap().derivative + 0.01).abs() < 1e-12);
     assert!(!s.draft_dirty());
     split(&mut s, &ctx, size);
+    select_transition(&mut s, &ctx, size, 0);
+    // This deliberately discontinuous reorder requires the explicit advanced choice.
+    s.draft = qx_document::region_edit::continuity(
+        &s.draft,
+        ChannelKey::Normal,
+        1,
+        qx_geometry::profile::Continuity::Free,
+    )
+    .unwrap();
     let ids = s
         .draft
         .channel_mut(ChannelKey::Normal)
@@ -938,6 +970,7 @@ fn train_preview_station_survives_hover_and_does_not_edit_document() {
     ]));
     s.workbench.active = super::workbench::Profile::Train;
     s.train_station_m = Some(30.);
+    s.development = true; // This test explicitly inspects engineering overlays.
     s.inspect_station(Some((SectionId(1), 5.)));
     let original = s.editor.project().clone();
     let ctx = egui::Context::default();

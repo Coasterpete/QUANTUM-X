@@ -1,7 +1,8 @@
-//! Data-only visual catalog. It never depends on the geometry solver.
+//! Track/train catalog and content discovery, independent of UI, GPU and physics.
 use serde::{Deserialize, Serialize};
 pub mod compatibility;
 pub mod construction;
+pub mod library;
 use std::{collections::HashSet, fmt};
 
 #[derive(Debug)]
@@ -24,9 +25,21 @@ fn require(ok: bool, message: &str) -> Result<()> {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum DevelopmentStatus {
-    Concept,
-    Experimental,
-    Released,
+    #[serde(alias = "concept")]
+    Planned,
+    #[serde(alias = "experimental")]
+    InDevelopment,
+    #[serde(alias = "released")]
+    Available,
+}
+impl DevelopmentStatus {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Planned => "Planned",
+            Self::InDevelopment => "In Development",
+            Self::Available => "Available",
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -34,10 +47,15 @@ pub struct Family {
     pub id: String,
     pub name: String,
     pub description: String,
+    /// Relative to the library's assets root; absent in legacy catalogs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Style {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vehicle_features: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -54,11 +72,25 @@ pub struct Style {
     pub reference_images: Vec<String>,
     pub status: DevelopmentStatus,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct StyleSelection {
     pub family_id: String,
     pub style_id: String,
+}
+impl StyleSelection {
+    /// Both IDs empty means deliberately unassigned. A partial pair is invalid.
+    /// Retains the existing JSON object shape without inventing a catalog style.
+    pub fn is_unassigned(&self) -> bool {
+        self.family_id.is_empty() && self.style_id.is_empty()
+    }
+    pub fn validate(&self, catalog: &Catalog) -> Result<()> {
+        if self.is_unassigned() {
+            Ok(())
+        } else {
+            catalog.validate_selection(self).map(|_| ())
+        }
+    }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -67,10 +99,16 @@ pub struct Catalog {
     pub families: Vec<Family>,
     pub train_ids: Vec<String>,
     pub styles: Vec<Style>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub train_families: Vec<Family>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub train_styles: Vec<library::TrainStyle>,
 }
-fn identifier(s: &str) -> bool {
+pub fn identifier(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= 128
+        && s.as_bytes()[0].is_ascii_alphanumeric()
+        && s.as_bytes()[s.len() - 1].is_ascii_alphanumeric()
         && s.bytes()
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
@@ -80,7 +118,22 @@ fn relative_asset(s: &str) -> bool {
         && !s.starts_with('/')
         && !s.contains('\\')
         && !s.contains(':')
-        && s.split('/').all(|p| !p.is_empty() && p != "." && p != "..")
+        && !s.chars().any(char::is_control)
+        && !s.contains(['*', '?', '"', '<', '>', '|'])
+        && s.split('/').all(|p| {
+            let stem = p.split('.').next().unwrap_or("").to_ascii_uppercase();
+            !p.is_empty()
+                && p != "."
+                && p != ".."
+                && !p.ends_with(['.', ' '])
+                && !matches!(
+                    stem.as_str(),
+                    "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+                )
+                && !(stem.len() == 4
+                    && (stem.starts_with("COM") || stem.starts_with("LPT"))
+                    && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+        })
 }
 impl Catalog {
     pub fn from_json(json: &str) -> Result<Self> {
@@ -93,7 +146,7 @@ impl Catalog {
         Self::from_json(include_str!("../../../assets/catalog/styles.json"))
     }
     pub fn validate(&self) -> Result<()> {
-        require(self.version == 1, "unsupported catalog version")?;
+        require(matches!(self.version, 1 | 2), "unsupported catalog version")?;
         require(
             !self.families.is_empty()
                 && self.families.len() <= 1024
@@ -107,6 +160,7 @@ impl Catalog {
                 identifier(&f.id) && families.insert(&f.id),
                 "invalid or duplicate family ID",
             )?;
+            library::validate_directory(f.directory.as_deref(), "tracks")?;
             require(
                 !f.name.trim().is_empty() && f.name.len() <= 1024 && f.description.len() <= 8192,
                 "invalid family text",
@@ -119,9 +173,20 @@ impl Catalog {
                 "invalid or duplicate train ID",
             )?;
         }
+        library::validate_trains(self, &mut trains)?;
         let mut ids = HashSet::new();
         let mut numbers = HashSet::new();
         for s in &self.styles {
+            library::validate_directory(s.directory.as_deref(), "tracks")?;
+            if let Some(directory) = &s.directory {
+                let family = self.families.iter().find(|f| f.id == s.family_id);
+                require(
+                    family
+                        .and_then(|f| f.directory.as_ref())
+                        .is_some_and(|f| directory.starts_with(&format!("{f}/"))),
+                    "track directory must be within its family directory",
+                )?;
+            }
             compatibility::validate_tags(&s.vehicle_features).map_err(CatalogError)?;
             if let Some(geometry) = &s.geometry {
                 geometry.validate()?;
@@ -163,13 +228,14 @@ impl Catalog {
                     "asset references must be relative paths without traversal",
                 )?;
             }
-            if s.status == DevelopmentStatus::Released {
+            if s.status == DevelopmentStatus::Available && s.directory.is_none() {
                 require(
                     s.track_asset.is_some() && s.thumbnail.is_some() && s.preview.is_some(),
                     "released styles require track asset, thumbnail, and preview references",
                 )?;
             }
         }
+        library::validate_links(self)?;
         Ok(())
     }
     pub fn validate_selection(&self, selection: &StyleSelection) -> Result<&Style> {
@@ -188,12 +254,12 @@ mod tests {
     #[test]
     fn concepts_do_not_promise_assets() {
         let c = Catalog::built_in().unwrap();
-        assert_eq!(c.styles.len(), 3);
+        assert_eq!(c.styles.len(), 17);
         assert_eq!(c.styles_for_family("monorail").count(), 2);
         assert!(
             c.styles
                 .iter()
-                .all(|s| s.status == DevelopmentStatus::Concept
+                .all(|s| s.status == DevelopmentStatus::Planned
                     && s.preview.is_none()
                     && s.track_asset.is_none())
         );
@@ -205,7 +271,8 @@ mod tests {
         c.styles.push(c.styles[0].clone());
         assert!(c.validate().is_err());
         let mut c = base.clone();
-        c.styles[0].status = DevelopmentStatus::Released;
+        c.styles[0].status = DevelopmentStatus::Available;
+        c.styles[0].directory = None;
         assert!(c.validate().is_err());
         let mut c = base.clone();
         c.styles[0].preview = Some("../secret".into());
@@ -214,7 +281,7 @@ mod tests {
         c.styles[0].compatible_train_ids.push("missing".into());
         assert!(c.validate().is_err());
         let mut c = base;
-        c.version = 2;
+        c.version = 99;
         assert!(c.validate().is_err());
     }
 }

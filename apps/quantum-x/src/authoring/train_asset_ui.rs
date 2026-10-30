@@ -2,7 +2,7 @@
 use super::{session::Session, train_assets};
 
 pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_rendering::DisplayOptions) {
-    ui.heading("Train assets · development controls");
+    ui.heading("Train models");
     if ui.add_enabled(!s.assets.importing,egui::Button::new("Import GLB…")).on_hover_text("Static, embedded glTF 2.0 meshes; imported files are packaged beside the project on Save").clicked() {s.file_dialog(super::files::FileAction::ImportGlb);}
     if s.assets.busy() {
         ui.spinner();
@@ -37,6 +37,8 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
     }
     ui.add_enabled_ui(!editing, |ui| {
         egui::ComboBox::from_id_salt("train asset component")
+            .width(ui.available_width().min(260.))
+            .truncate()
             .selected_text(
                 choices
                     .iter()
@@ -53,6 +55,8 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
         s.assets.draft = None;
     }
     egui::ComboBox::from_id_salt("imported GLBs")
+        .width(ui.available_width().min(260.))
+        .truncate()
         .selected_text(if s.assets.chosen.is_empty() {
             "Select imported GLB"
         } else {
@@ -81,9 +85,10 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
         })
         .and_then(|c| c.asset.clone());
     if let Some(a) = &current {
-        ui.small(format!("Assigned: {}", a.path));
+        ui.colored_label(super::theme::GREEN, "Model assigned")
+            .on_hover_text(&a.path);
     } else {
-        ui.small("Development reference geometry (no asset assigned)");
+        ui.small("No model assigned to this component.");
     }
     ui.add_enabled_ui(!editing, |ui| {
         ui.horizontal_wrapped(|ui| {
@@ -134,7 +139,7 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
             s.assets.draft = Some(current);
         }
         let draft = s.assets.draft.as_mut().unwrap();
-        ui.collapsing("Local correction (visual only)", |ui| {
+        ui.collapsing("Model transform", |ui| {
             for (label, v) in [
                 ("Translation (m)", &mut draft.translation_m),
                 ("Pivot in model (m)", &mut draft.pivot_m),
@@ -166,7 +171,11 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
                 "Apply normalizes the quaternion. No mass, inertia, anchors or constraints change.",
             );
         });
-        if ui.button("Apply visual correction").clicked() {
+        if ui
+            .button("Apply transform")
+            .on_hover_text("Apply visual correction; vehicle mechanics stay unchanged")
+            .clicked()
+        {
             let mut a = s.assets.draft.clone().unwrap();
             match a.rotation.normalized() {
                 Ok(q) => {
@@ -181,7 +190,7 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
         }
         if s.assets.draft_dirty(s.editor.project()) {
             ui.small("Unapplied visual correction. Apply or cancel before changing component/assignment.");
-            if ui.button("Cancel visual correction").clicked() {
+            if ui.button("Cancel transform").clicked() {
                 s.assets.draft = None;
             }
         }
@@ -206,26 +215,30 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
             s.assets.focus = true;
         }
     });
-    ui.collapsing("Engineering references", |ui| {
-        ui.checkbox(
-            &mut s.assets.wireframe,
-            "Engineering wireframe / axes / guides",
-        );
-        ui.checkbox(&mut s.assets.bogies, "Bogies and bogie markers");
-        ui.checkbox(&mut s.assets.wheels, "Wheel-reference markers");
-        ui.checkbox(&mut s.assets.joints, "Joint-anchor markers");
-        ui.checkbox(&mut s.assets.couplers, "Coupler markers");
-        if ui.button("Retry missing assets").clicked() {
-            s.assets.errors.clear();
-        }
-    });
-    ui.small("Visual assets are independent of mechanics. Playback controls are in Summary.");
+    if s.development {
+        ui.collapsing("Engineering references", |ui| {
+            ui.checkbox(
+                &mut s.assets.wireframe,
+                "Engineering wireframe / axes / guides",
+            );
+            ui.checkbox(&mut s.assets.bogies, "Bogies and bogie markers");
+            ui.checkbox(&mut s.assets.wheels, "Wheel-reference markers");
+            ui.checkbox(&mut s.assets.joints, "Joint-anchor markers");
+            ui.checkbox(&mut s.assets.couplers, "Coupler markers");
+            if ui.button("Retry missing assets").clicked() {
+                s.assets.errors.clear();
+            }
+        });
+    }
+    ui.small("Model assignments do not change vehicle mechanics.");
     ui.separator();
 }
-pub(super) fn diagnostics(s: &Session, ui: &mut egui::Ui) {
+pub(super) fn errors(s: &Session, ui: &mut egui::Ui) {
     for (path, e) in &s.assets.errors {
         ui.colored_label(egui::Color32::LIGHT_YELLOW, format!("{path}: {e}"));
     }
+}
+pub(super) fn diagnostics(s: &Session, ui: &mut egui::Ui) {
     for (path, e) in &s.assets.library {
         ui.small(format!(
             "{} · {} meshes · {:.3} ms import",

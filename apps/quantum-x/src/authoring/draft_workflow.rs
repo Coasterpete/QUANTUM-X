@@ -18,6 +18,7 @@ pub(super) enum UiAction {
     SaveAs,
     Open,
     New,
+    Welcome,
     History(bool),
 }
 
@@ -28,7 +29,8 @@ impl Session {
                 UiAction::Save => self.save(),
                 UiAction::SaveAs => self.file_dialog(FileAction::SaveAs),
                 UiAction::Open => self.file_dialog(FileAction::Open),
-                UiAction::New => self.open(None, false),
+                UiAction::New => self.request_startup(super::startup::Destination::New),
+                UiAction::Welcome => self.request_startup(super::startup::Destination::Welcome),
                 UiAction::History(redo) => self.undo(redo),
             }
         }
@@ -39,6 +41,7 @@ impl Session {
             || self.confirm_replace.is_some()
             || self.open_dialog_requested
             || self.close_requested
+            || self.startup_request.is_some()
     }
     pub fn request_drafts(&mut self, request: DraftRequest) {
         self.draft_request = Some(request);
@@ -56,15 +59,17 @@ impl Session {
         }
         if self.construction_draft != p.construction {
             names.push(
-                "Track construction — strategy, dimensions, materials (Track Workspace / Coaster)"
-                    .into(),
+                "Track construction — strategy, dimensions, materials (Coaster Properties)".into(),
             );
         }
         if self.initial_draft != p.initial {
             names.push("Initial conditions (Track Workspace / Project)".into());
         }
         if self.metadata_draft != p.metadata {
-            names.push("Project metadata (Track Workspace / Project)".into());
+            names.push("Coaster name, description and project author (Coaster Properties)".into());
+        }
+        if self.style_draft != p.style {
+            names.push("Coaster family / numbered style (Coaster Properties)".into());
         }
         if self.heartline_draft != p.heartline {
             names.push(
@@ -129,6 +134,7 @@ impl Session {
             return false;
         }
         candidate.metadata = self.metadata_draft.clone();
+        candidate.style = self.style_draft.clone();
         let validation = candidate
             .validate(&self.catalog)
             .map_err(|e| e.to_string())
@@ -157,6 +163,9 @@ impl Session {
         if candidate.metadata != p.metadata {
             commands.push(Command::SetMetadata(candidate.metadata));
         }
+        if candidate.style != p.style {
+            commands.push(Command::SetStyle(candidate.style));
+        }
         if candidate.heartline != p.heartline {
             commands.push(Command::SetHeartline(candidate.heartline));
         }
@@ -180,6 +189,8 @@ impl Session {
         self.construction_draft = self.editor.project().construction.clone();
         self.initial_draft = self.editor.project().initial.clone();
         self.metadata_draft = self.editor.project().metadata.clone();
+        self.style_draft = self.editor.project().style.clone();
+        self.style_family = self.style_draft.family_id.clone();
         self.heartline_draft = self.editor.project().heartline.clone();
         self.pending_action = None;
         self.resolution_error = None;
@@ -246,6 +257,10 @@ pub(super) fn dialog(session: &mut Session, ctx: &egui::Context) {
             if ui.button("Keep editing / Cancel").clicked() {
                 session.draft_request = None;
                 session.resolution_error = None;
+                if session.startup_after_save {
+                    session.startup_after_save = false;
+                    session.startup_request = None;
+                }
             }
         });
     });

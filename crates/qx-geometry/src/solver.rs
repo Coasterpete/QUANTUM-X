@@ -375,12 +375,12 @@ pub fn generate(
         for (name, channel) in section.channels() {
             knots.extend(
                 channel
-                    .knots()
+                    .integration_knots()?
                     .into_iter()
                     .filter(|x| *x > 0.0 && *x < section.extent),
             );
             for issue in channel.continuity()? {
-                result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(issue.input),code:"channel_discontinuity",message:format!("{name}: value jump {}, derivative jump {}; one-sided integration preserves pose",issue.value_jump,issue.derivative_jump)});
+                result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(issue.input),code:"channel_discontinuity",message:format!("{name}: value jump {}, derivative jump {}, second derivative jump {}; one-sided integration preserves pose",issue.value_jump,issue.derivative_jump,issue.second_derivative_jump)});
             }
         }
         knots.sort_by(f64::total_cmp);

@@ -22,7 +22,7 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
         .and_then(|v| v.as_u64())
         .ok_or_else(|| crate::DocumentError("missing/integer schema version required".into()))?;
     require(
-        (1..=5).contains(&version),
+        (1..=6).contains(&version),
         "unsupported project schema version",
     )?;
     require(
@@ -70,7 +70,7 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
             )?;
             project.schema_version = crate::SCHEMA_VERSION;
         }
-        2..=4 => project.schema_version = crate::SCHEMA_VERSION,
+        2..=5 => project.schema_version = crate::SCHEMA_VERSION,
         crate::SCHEMA_VERSION => {}
         _ => {
             return Err(crate::DocumentError(
@@ -79,6 +79,26 @@ pub fn from_json(json: &str, catalog: &Catalog) -> Result<Project> {
         }
     }
     project.validate(catalog)?;
+    if version < 6 {
+        use qx_geometry::transition::Function;
+        for section in &mut project.sections {
+            for key in crate::editing::channel_keys(section) {
+                for t in &mut section.channel_mut(key)?.transitions {
+                    require(
+                        !matches!(
+                            t.function,
+                            Function::Nurbs { .. } | Function::CosineSpan { .. }
+                        ),
+                        "NURBS regions require schema version 6",
+                    )?;
+                    if matches!(t.function, Function::Hermite { .. }) {
+                        *t = t.to_nurbs()?;
+                    }
+                }
+            }
+        }
+        project.validate(catalog)?;
+    }
     Ok(project)
 }
 pub fn to_json(project: &Project, catalog: &Catalog) -> Result<String> {
