@@ -17,6 +17,27 @@ pub struct InspectionScene {
     pub authored_reference: qx_geometry::heartline::AuthoredReference,
 }
 impl InspectionScene {
+    /// A non-document surface (welcome/setup) has no authored or generated track.
+    pub fn empty() -> Self {
+        Self {
+            mesh: None,
+            mesh_ms: 0.,
+            solver_ms: 0.,
+            name: String::new(),
+            track: GeneratedTrack {
+                samples: vec![],
+                graphs: vec![],
+                sections: vec![],
+                diagnostics: vec![],
+                connections: vec![],
+                numerical: vec![],
+                smooth_ranges: vec![],
+            },
+            labels: vec![],
+            reference: None,
+            authored_reference: qx_geometry::heartline::AuthoredReference::TrackCenterline,
+        }
+    }
     pub(crate) fn bounds(&self, section: Option<usize>) -> (Vec3, Vec3) {
         self.visible_bounds(section, true)
     }
@@ -45,7 +66,10 @@ impl InspectionScene {
         } else {
             &self.track.samples[..]
         };
-        let mut min = samples[0].position_m;
+        let Some(first) = samples.first() else {
+            return (Vec3::ZERO, Vec3::ZERO);
+        };
+        let mut min = first.position_m;
         let mut max = min;
         for s in samples {
             let p = s.position_m;
@@ -221,6 +245,7 @@ pub struct DisplayOptions {
     pub selected: Option<usize>,
     pub hovered: Option<usize>,
     pub inspection_distance_m: Option<f64>,
+    pub inspection_marker: bool,
     pub centerline: bool,
     pub reference: bool,
     pub offsets: bool,
@@ -247,6 +272,7 @@ impl Default for DisplayOptions {
             selected: None,
             hovered: None,
             inspection_distance_m: None,
+            inspection_marker: true,
             centerline: true,
             reference: false,
             offsets: false,
@@ -365,7 +391,8 @@ pub(crate) fn vertices(
             }
         }
     }
-    if let Some(distance) = display.inspection_distance_m
+    if display.inspection_marker
+        && let Some(distance) = display.inspection_distance_m
         && let Ok(sample) = scene.track.sample_at_distance(distance)
     {
         for axis in [
@@ -450,6 +477,26 @@ pub(crate) fn vertices(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn welcome_scene_has_no_track_and_supports_bounds_and_picking() {
+        let scene = super::InspectionScene::empty();
+        assert!(
+            scene.track.samples.is_empty()
+                && scene.track.sections.is_empty()
+                && scene.mesh.is_none()
+        );
+        assert_eq!(scene.bounds(None), (super::Vec3::ZERO, super::Vec3::ZERO));
+        assert!(
+            scene
+                .pick(
+                    &crate::camera::Camera::default(),
+                    super::Vec3::ZERO,
+                    egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100., 100.)),
+                    egui::pos2(50., 50.)
+                )
+                .is_none()
+        );
+    }
     use super::*;
     use qx_geometry::{
         authoring::{InitialConditions, Section},

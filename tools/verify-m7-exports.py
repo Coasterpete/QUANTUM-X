@@ -60,8 +60,8 @@ def png_pixels(path):
 
 for name, fixture in fixtures.items():
     project = json.loads((root / (name+".qx.json")).read_text(encoding="utf-8"))
-    assert project["schema_version"] in (4, 5)
-    if project["schema_version"] == 5:
+    assert project["schema_version"] in (4, 5, 6)
+    if project["schema_version"] >= 5:
         assert project["trains"] == []
     construction = project["construction"]
     assert construction["version"] == 1
@@ -117,7 +117,12 @@ for live in evidence["live_edit"]:
     for capture in live["captures"]:
         size,_ = png_pixels(root/capture["file"])
         assert size == (capture["width"],capture["height"])
-        assert capture["samples"] == 901 and capture["triangles"] > 0
+        # The unedited quintic needs 901 stations. A local NURBS endpoint edit
+        # introduces genuine internal span breaks, adding three integration
+        # stations at this fixture's requested resolution. Apply must retain
+        # the exact preview sample count rather than reverting to the old grid.
+        expected_samples = 901 if "-before-" in capture["file"] else 904
+        assert capture["samples"] == expected_samples and capture["triangles"] > 0
 for construction in ["dual","single"]:
     before=(root/f"live-{construction}-before.obj").read_bytes()
     draft=(root/f"live-{construction}-draft.obj").read_bytes()

@@ -3,6 +3,7 @@ name = "quantum-x"
 version = "0.1.0"
 edition = "2024"
 description = "Rust-based roller coaster design and simulation application"
+default-run = "quantum-x"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
@@ -14,8 +15,19 @@ qx-rendering = { path = "../../crates/rendering" }
 egui = "0.37"
 egui_tiles = "0.18.0"
 egui_extras = { version = "0.37", default-features = false, features = ["svg"] }
+# Reuse the PNG/JPEG decoder already used by qx-rendering for GLB textures.
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 serde.workspace = true
 serde_json.workspace = true
+
+[build-dependencies]
+serde_json.workspace = true
+embed-resource = "3.0"
+
+[package.metadata.distribution]
+product-name = "QUANTUM Dynamics"
+windows-executable = "QUANTUM Dynamics.exe"
+script = "../../tools/package-windows.ps1"
 
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.17.2", default-features = false }

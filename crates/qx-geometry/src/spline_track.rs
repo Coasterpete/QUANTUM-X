@@ -84,7 +84,7 @@ pub(crate) fn append(
             });
         }
     }
-    let mut boundaries = section.roll_rate.knots();
+    let mut boundaries = section.roll_rate.integration_knots()?;
     for &u in prepared.breaks() {
         boundaries.push(table.distance_at_parameter(&prepared, u)? / length);
     }
@@ -97,8 +97,8 @@ pub(crate) fn append(
             input: Some(issue.input),
             code: "channel_discontinuity",
             message: format!(
-                "roll per normalized distance: value jump {}, derivative jump {}",
-                issue.value_jump, issue.derivative_jump
+                "roll per normalized distance: value jump {}, derivative jump {}, second derivative jump {}",
+                issue.value_jump, issue.derivative_jump,issue.second_derivative_jump
             ),
         });
     }

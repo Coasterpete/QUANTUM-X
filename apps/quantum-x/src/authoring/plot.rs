@@ -130,14 +130,14 @@ impl Plot {
             );
         }
         let labels = ui.painter().with_clip_rect(outer.intersect(ui.clip_rect()));
-        let font = egui::FontId::monospace(11.);
+        let font = egui::FontId::monospace(13.);
         // Label density is independent of the quiet dot lattice density.
         let label_width = xs
             .iter()
             .map(|v| number(*v, self.x).len())
             .max()
             .unwrap_or(1) as f32
-            * 7.
+            * 8.
             + 18.;
         let x_stride = (xs.len() as f32 * label_width / self.rect.width())
             .ceil()
@@ -167,11 +167,18 @@ impl Plot {
         }
         for y in y_labels {
             let point = self.map(self.x.min, y);
+            let text = number(y, self.y);
+            let available = (self.rect.left() - outer.left() - 10.).max(1.);
+            let measured = ui
+                .painter()
+                .layout_no_wrap(text.clone(), font.clone(), Color32::WHITE);
+            let label_font =
+                egui::FontId::monospace(font.size * (available / measured.size().x).min(1.));
             labels.text(
                 point - egui::vec2(5., 0.),
                 egui::Align2::RIGHT_CENTER,
-                number(y, self.y),
-                font.clone(),
+                text,
+                label_font,
                 Color32::from_gray(200),
             );
         }

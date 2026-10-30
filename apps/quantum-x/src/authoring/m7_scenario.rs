@@ -127,9 +127,13 @@ pub(super) fn run(output: PathBuf) -> Result<(), Box<dyn Error>> {
             p.sections = vec![Section::straight(1, "10 m construction detail", 10.)];
         }
         if ["k-banked-dual", "k-banked-single"].contains(&case) {
-            let roll = p.sections[1].channel_mut(qx_geometry::authoring::ChannelKey::Roll)?;
-            roll.transitions[0].end = 0.04;
-            roll.transitions[1].start = 0.04;
+            p.sections[1] = qx_document::region_edit::endpoint(
+                &p.sections[1],
+                qx_geometry::authoring::ChannelKey::Roll,
+                0,
+                true,
+                0.04,
+            )?;
         }
         if ["f-inverted-loop", "f-inverted-single"].contains(&case) {
             let mut section =
@@ -141,14 +145,13 @@ pub(super) fn run(output: PathBuf) -> Result<(), Box<dyn Error>> {
             p.sections = vec![section];
         }
         if case == "g-edited-force-roll" {
-            p.sections[1]
-                .channel_mut(qx_geometry::authoring::ChannelKey::Normal)?
-                .transitions[0]
-                .end = 2.3;
-            p.sections[1]
-                .channel_mut(qx_geometry::authoring::ChannelKey::Roll)?
-                .transitions[0]
-                .end = 0.018;
+            for (key, value) in [
+                (qx_geometry::authoring::ChannelKey::Normal, 2.3),
+                (qx_geometry::authoring::ChannelKey::Roll, 0.018),
+            ] {
+                p.sections[1] =
+                    qx_document::region_edit::endpoint(&p.sections[1], key, 0, true, value)?;
+            }
         }
         qx_document::persistence::save(&output.join(format!("{case}.qx.json")), &p, &catalog)?;
         let capture_scene = scene(&p, &catalog, Default::default())?;

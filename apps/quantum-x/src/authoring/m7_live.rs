@@ -247,7 +247,14 @@ pub(super) fn run(
                 size,
             )?;
             // Cancel another actual staged force edit and await committed geometry.
-            session.draft.channel_mut(ChannelKey::Normal)?.transitions[0].end += 0.1;
+            let value = session.draft.channel_mut(ChannelKey::Normal)?.transitions[0].end + 0.1;
+            session.draft = qx_document::region_edit::endpoint(
+                &session.draft,
+                ChannelKey::Normal,
+                0,
+                true,
+                value,
+            )?;
             session.preview();
             let changed = wait(&mut session)?;
             if changed.mesh == redone.mesh {

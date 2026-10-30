@@ -18,7 +18,7 @@ assert evidence["automated_offscreen"] and not evidence["manual_desktop_tested"]
 assert evidence["history_save_reopen_save_as"]
 project = json.loads((root / evidence["project"]).read_text(encoding="utf-8"))
 relocated = json.loads((root / "save-as/train-inspection.qx.json").read_text(encoding="utf-8"))
-assert project == relocated and project["schema_version"] == 5
+assert project == relocated and project["schema_version"] == 6
 train = next(t for t in project["trains"] if t["id"] == evidence["train_id"])
 mechanical = copy.deepcopy(train)
 for component in mechanical["components"]:

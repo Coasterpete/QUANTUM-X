@@ -2,7 +2,9 @@
 pub mod command;
 pub mod editing;
 pub mod insertion;
+pub mod library;
 pub mod persistence;
+pub mod region_edit;
 pub mod sample;
 pub mod train;
 
@@ -14,7 +16,7 @@ use qx_style::{Catalog, StyleSelection};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 #[derive(Debug)]
 pub struct DocumentError(pub String);
 impl fmt::Display for DocumentError {
@@ -60,6 +62,21 @@ pub struct Metadata {
     pub author: String,
     pub description: String,
 }
+impl Metadata {
+    pub fn validate(&self) -> Result<()> {
+        require(
+            !self.project_id.trim().is_empty() && self.project_id.len() <= 128,
+            "invalid project ID",
+        )?;
+        require(
+            !self.name.trim().is_empty()
+                && self.name.len() <= 1024
+                && self.author.len() <= 1024
+                && self.description.len() <= 16384,
+            "invalid project metadata",
+        )
+    }
+}
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Project {
@@ -100,19 +117,9 @@ impl Project {
             self.schema_version == SCHEMA_VERSION,
             "unsupported in-memory schema version; load older versions through persistence migration",
         )?;
-        require(
-            !self.metadata.project_id.trim().is_empty() && self.metadata.project_id.len() <= 128,
-            "invalid project ID",
-        )?;
-        require(
-            !self.metadata.name.trim().is_empty()
-                && self.metadata.name.len() <= 1024
-                && self.metadata.author.len() <= 1024
-                && self.metadata.description.len() <= 16384,
-            "invalid project metadata",
-        )?;
+        self.metadata.validate()?;
         catalog.validate()?;
-        catalog.validate_selection(&self.style)?;
+        self.style.validate(catalog)?;
         validate_track(&self.initial, &self.sections)?;
         self.heartline.validate()?;
         require(self.trains.len() <= 256, "too many train configurations")?;

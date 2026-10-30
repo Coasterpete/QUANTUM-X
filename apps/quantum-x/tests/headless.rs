@@ -2,6 +2,47 @@ use std::{path::PathBuf, process::Command};
 // These tests share the executable under test. Concurrent CreateProcess/pipe
 // startup stalled on native Windows; serialize workflows without skipping checks.
 static CLI_WORKFLOW: std::sync::Mutex<()> = std::sync::Mutex::new(());
+#[test]
+fn identity_and_library_cli_report_planned_content_and_reject_invalid_indexes() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
+    let binary = env!("CARGO_BIN_EXE_quantum-x");
+    let version = Command::new(binary).arg("--version").output().unwrap();
+    assert!(version.status.success());
+    let version = String::from_utf8(version.stdout).unwrap();
+    assert!(
+        version.contains("QUANTUM Dynamics")
+            && version.contains("QUANTUM-X")
+            && version.contains("quantum-x")
+    );
+    let report = Command::new(binary).arg("--self-check").output().unwrap();
+    assert!(
+        report.status.success(),
+        "{}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let report: serde_json::Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(report["product"], "QUANTUM Dynamics");
+    assert_eq!(report["track_families"], 6);
+    assert_eq!(report["train_families"], 14);
+    let entries = report["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 28);
+    assert!(
+        entries
+            .iter()
+            .all(|e| e["status"] == "planned" && e["content_ready"] == false)
+    );
+    let root = temporary();
+    std::fs::create_dir_all(root.join("catalog")).unwrap();
+    std::fs::write(root.join("catalog/styles.json"), "{\"version\":999}").unwrap();
+    let bad = Command::new(binary)
+        .arg("library")
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!bad.status.success());
+    assert!(String::from_utf8_lossy(&bad.stderr).contains("QUANTUM Dynamics"));
+    std::fs::remove_dir_all(root).unwrap();
+}
 fn temporary() -> PathBuf {
     std::env::temp_dir().join(format!(
         "qx-demo-test-{}-{}",

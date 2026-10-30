@@ -12,11 +12,11 @@ use qx_geometry::{
 
 pub(super) fn channel_style(key: ChannelKey) -> (&'static str, Color32) {
     match key {
-        ChannelKey::Normal => ("Normal force", Color32::from_rgb(130, 202, 232)),
-        ChannelKey::Lateral => ("Lateral force", Color32::from_rgb(231, 185, 107)),
-        ChannelKey::Roll => ("Roll rate", Color32::from_rgb(189, 166, 226)),
-        ChannelKey::Pitch => ("Pitch rate", Color32::from_rgb(151, 209, 157)),
-        ChannelKey::Yaw => ("Yaw rate", Color32::from_rgb(232, 155, 151)),
+        ChannelKey::Normal => ("Normal force", super::theme::BLUE),
+        ChannelKey::Lateral => ("Lateral force", super::theme::GREEN),
+        ChannelKey::Roll => ("Roll rate", super::theme::RED),
+        ChannelKey::Pitch => ("Pitch rate", super::theme::VIOLET),
+        ChannelKey::Yaw => ("Yaw rate", super::theme::YELLOW),
     }
 }
 pub(super) fn fit(session: &mut Session) {
@@ -33,24 +33,7 @@ pub(super) fn boundary(
     index: usize,
     local_end: f64,
 ) -> Result<Section, String> {
-    let mut next = section.clone();
-    let channel = next.channel_mut(key).map_err(|e| e.to_string())?;
-    if index + 1 >= channel.transitions.len() {
-        return Err(
-            "Only internal boundaries can move; use section extent to resize the whole section."
-                .into(),
-        );
-    }
-    let total = channel.transitions[index].length + channel.transitions[index + 1].length;
-    if !local_end.is_finite() || local_end < 1e-8 || total - local_end < 1e-8 {
-        return Err(
-            "Boundary must leave both adjacent transitions at least 1e-8 domain units.".into(),
-        );
-    }
-    channel.transitions[index].length = local_end;
-    channel.transitions[index + 1].length = total - local_end;
-    channel.validate().map_err(|e| e.to_string())?;
-    Ok(next)
+    qx_document::region_edit::boundary(section, key, index, local_end).map_err(|e| e.to_string())
 }
 /// egui smooths wheel notches across frames. A notch over the graph must not later
 /// scroll the timeline/tools merely because the pointer crossed into them.
@@ -84,7 +67,7 @@ pub(super) fn route_scroll_tail(session: &Session, ui: &egui::Ui) {
 pub(super) fn plot_rect(outer: egui::Rect) -> egui::Rect {
     // Reserve scientific labels without moving the plot under a pointer as their
     // precision changes during zoom. Only resizing the pane can change this gutter.
-    let gutter = 148_f32.min(outer.width() * 0.4);
+    let gutter = 190_f32.min(outer.width() * 0.4);
     egui::Rect::from_min_max(
         outer.min + egui::vec2(gutter, 28.),
         outer.max - egui::vec2(32., 18.),
@@ -93,7 +76,7 @@ pub(super) fn plot_rect(outer: egui::Rect) -> egui::Rect {
 pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     super::graph_view::sync(session);
     let extent = session.draft.channel_mut(session.channel).unwrap().length();
-    let height = ui.available_height().clamp(66., 600.);
+    let height = ui.available_height().clamp(54., 600.);
     // Unwrapped precision labels or toolbar minimum widths must never push the
     // mathematical right endpoint past the pane's actual interactive clip.
     let width = ui
@@ -151,6 +134,17 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 0.,
                 color.gamma_multiply(0.09),
             );
+            painter.text(
+                egui::pos2(left + 6., rect.top() + 5.),
+                egui::Align2::LEFT_TOP,
+                format!(
+                    "Region {} · {cursor:.4}–{:.4} {x_unit}",
+                    index + 1,
+                    cursor + t.length
+                ),
+                egui::FontId::monospace(12.),
+                Color32::WHITE,
+            );
         }
         let boundary_x = mapping.map(cursor, 0.).x;
         painter.line_segment(
@@ -185,6 +179,12 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                     },
                 ),
             ));
+        }
+        if active
+            && let Some(text) =
+                super::graph_regions::controls(session, ui, &mapping, t, index, cursor, color)
+        {
+            feedback = Some(text);
         }
         // The upper ruler keeps timing targets separate from value handles at graph peaks.
         if index + 1 < channel.transitions.len() {
@@ -241,10 +241,29 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             handle.on_hover_text(format!("Boundary {} · {:.8} {x_unit}. Drag horizontally to transfer duration between these two transitions; values and other channels stay unchanged. Esc cancels.", index + 1, cursor + t.length));
         }
         for end in [false, true] {
+            let shared = if end && index + 1 < channel.transitions.len() {
+                channel.transitions[index + 1].incoming_continuity()
+            } else if !end && index > 0 {
+                t.incoming_continuity()
+            } else {
+                qx_geometry::profile::Continuity::Free
+            };
+            let scope = if shared != qx_geometry::profile::Continuity::Free {
+                format!("Shared {shared:?} boundary · edits both neighboring regions")
+            } else {
+                "Independent legacy/advanced endpoint".into()
+            };
+            // A constrained seam has one shared value. Independent endpoints
+            // retain separate handles so intentional steps remain editable.
+            if !end && index > 0 && shared != qx_geometry::profile::Continuity::Free {
+                continue;
+            }
             let value = if end { t.end } else { t.start };
             let curve_pos = mapping.map(cursor + if end { t.length } else { 0. }, value);
             // Separate the two independently editable values at an internal join.
-            let offset = if end && index + 1 < channel.transitions.len() {
+            let offset = if shared != qx_geometry::profile::Continuity::Free {
+                0.
+            } else if end && index + 1 < channel.transitions.len() {
                 -14.
             } else if !end && index > 0 {
                 14.
@@ -310,7 +329,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             }
             if handle.hovered() || dragging {
                 feedback = Some(format!(
-                    "{}Transition {} {}: {value:.8} {unit} · drag vertically · Esc cancels",
+                    "{}Transition {} {}: {value:.8} {unit} · {scope} · Esc cancels",
                     if dragging { "Dragging " } else { "" },
                     index + 1,
                     if end { "end" } else { "start" }
@@ -326,8 +345,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 value,
                 if matches!(t.function, Function::Constant {}) {
                     "constant changes both values"
+                } else if shared!=qx_geometry::profile::Continuity::Free {
+                    "constrained shared boundaries edit both adjacent profiles; other regions stay unchanged"
                 } else {
-                    "changes only this endpoint"
+                    "independent legacy/advanced value; continuity diagnostics identify steps"
                 }
             ));
         }
@@ -339,7 +360,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         {
             let input =
                 x.min + (pos.x - rect.left()) as f64 / rect.width() as f64 * (x.max - x.min);
-            if (cursor..=cursor + t.length).contains(&input) {
+            if (cursor..=cursor + t.length).contains(&input) && (index == 0 || input > cursor) {
                 session.transition = index;
             }
         }
@@ -348,6 +369,9 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     // The reserved status line shows this on the next repaint. An overlay would
     // obscure handles in short graphs; allocated text would resize floating UI.
     session.graph_readout = feedback;
+    if session.graph_drag.is_none() {
+        super::graph_regions::context_menu(session, ui, &response, &mapping, x_unit);
+    }
     // Use geometric hover: child handles otherwise hide the canvas hover response.
     if let Some(pos) = ui.ctx().pointer_hover_pos().filter(|p| {
         rect.contains(*p) && ui.clip_rect().contains(*p) && ui.rect_contains_pointer(outer)

@@ -1,13 +1,524 @@
 {
-  "version": 1,
+  "version": 2,
   "families": [
-    {"id":"hybrid","name":"Hybrid","description":"Conceptual hybrid coaster family; original assets pending."},
-    {"id":"monorail","name":"Monorail","description":"Conceptual single-rail coaster family; original assets pending."}
+    {
+      "id": "backboned",
+      "name": "Backboned",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/backboned"
+    },
+    {
+      "id": "box-spined",
+      "name": "Box Spined",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/box-spined"
+    },
+    {
+      "id": "hybrid",
+      "name": "Hybrid",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/hybrid"
+    },
+    {
+      "id": "monorail",
+      "name": "Monorail",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/monorail"
+    },
+    {
+      "id": "traditional-wood",
+      "name": "Traditional Wood",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/traditional-wood"
+    },
+    {
+      "id": "truss",
+      "name": "Truss",
+      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "directory": "tracks/truss"
+    }
   ],
   "train_ids": [],
   "styles": [
-    {"id":"hybrid-100","family_id":"hybrid","number":100,"name":"Hybrid-100","description":"Initial conceptual style; no production geometry or preview assets.","compatible_train_ids":[],"track_asset":null,"thumbnail":null,"preview":null,"reference_images":[],"status":"concept"},
-    {"id":"monorail-100","family_id":"monorail","number":100,"name":"Monorail-100","description":"Initial conceptual style; no production geometry or preview assets.","compatible_train_ids":[],"track_asset":null,"thumbnail":null,"preview":null,"reference_images":[],"status":"concept"},
-    {"id":"monorail-200","family_id":"monorail","number":200,"name":"Monorail-200","description":"Alternative conceptual style; no production geometry or preview assets.","compatible_train_ids":[],"track_asset":null,"thumbnail":null,"preview":null,"reference_images":[],"status":"concept"}
+    {
+      "id": "backboned-100",
+      "family_id": "backboned",
+      "number": 100,
+      "name": "Backboned-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/backboned/100",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "backboned-200",
+      "family_id": "backboned",
+      "number": 200,
+      "name": "Backboned-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/backboned/200",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "backboned-300",
+      "family_id": "backboned",
+      "number": 300,
+      "name": "Backboned-300",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/backboned/300",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "box-spined-100",
+      "family_id": "box-spined",
+      "number": 100,
+      "name": "Box Spined-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/box-spined/100",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "box-spined-200",
+      "family_id": "box-spined",
+      "number": 200,
+      "name": "Box Spined-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/box-spined/200",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "box-spined-300",
+      "family_id": "box-spined",
+      "number": 300,
+      "name": "Box Spined-300",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/box-spined/300",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "hybrid-100",
+      "family_id": "hybrid",
+      "number": 100,
+      "name": "Hybrid-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/hybrid/100(topper-track)",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "hybrid-200",
+      "family_id": "hybrid",
+      "number": 200,
+      "name": "Hybrid-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/hybrid/200(steel-ibeam-track)",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "monorail-100",
+      "family_id": "monorail",
+      "number": 100,
+      "name": "Monorail-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/monorail/100",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "monorail-200",
+      "family_id": "monorail",
+      "number": 200,
+      "name": "Monorail-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/monorail/200",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "traditional-wood-100",
+      "family_id": "traditional-wood",
+      "number": 100,
+      "name": "Traditional Wood-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/traditional-wood/100(prefabricated-track)",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "traditional-wood-200",
+      "family_id": "traditional-wood",
+      "number": 200,
+      "name": "Traditional Wood-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/traditional-wood/200(traditional)",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "truss-100",
+      "family_id": "truss",
+      "number": 100,
+      "name": "Truss-100",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/truss/100",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "truss-200",
+      "family_id": "truss",
+      "number": 200,
+      "name": "Truss-200",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/truss/200",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "truss-300",
+      "family_id": "truss",
+      "number": 300,
+      "name": "Truss-300",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/truss/300",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "truss-400",
+      "family_id": "truss",
+      "number": 400,
+      "name": "Truss-400",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/truss/400",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    },
+    {
+      "id": "truss-500",
+      "family_id": "truss",
+      "number": 500,
+      "name": "Truss-500",
+      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "directory": "tracks/truss/500",
+      "compatible_train_ids": [],
+      "track_asset": null,
+      "thumbnail": null,
+      "preview": null,
+      "reference_images": [],
+      "status": "planned"
+    }
+  ],
+  "train_families": [
+    {
+      "id": "4d",
+      "name": "4D",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/4d"
+    },
+    {
+      "id": "floorless",
+      "name": "Floorless",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/floorless"
+    },
+    {
+      "id": "flying",
+      "name": "Flying",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/flying"
+    },
+    {
+      "id": "free-spin",
+      "name": "Free Spin",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/free-spin"
+    },
+    {
+      "id": "hybrid",
+      "name": "Hybrid",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/hybrid"
+    },
+    {
+      "id": "inverted",
+      "name": "Inverted",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/inverted"
+    },
+    {
+      "id": "monorail",
+      "name": "Monorail",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/monorail"
+    },
+    {
+      "id": "motorcycle",
+      "name": "Motorcycle",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/motorcycle"
+    },
+    {
+      "id": "motorcycle-suspended",
+      "name": "Motorcycle Suspended",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/motorcycle-suspended"
+    },
+    {
+      "id": "sit-down",
+      "name": "Sit Down",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/sit-down"
+    },
+    {
+      "id": "spinning",
+      "name": "Spinning",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/spinning"
+    },
+    {
+      "id": "stand-up",
+      "name": "Stand Up",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/stand-up"
+    },
+    {
+      "id": "suspended",
+      "name": "Suspended",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/suspended"
+    },
+    {
+      "id": "wing",
+      "name": "Wing",
+      "description": "Owner-defined train family. Content and engineering definitions pending.",
+      "directory": "trains/wing"
+    }
+  ],
+  "train_styles": [
+    {
+      "id": "floorless-dive-machine",
+      "family_id": "floorless",
+      "number": null,
+      "name": "Floorless Dive Machine",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/floorless/floorless-dive-machine",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "floorless-dive-machine",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "hybrid-100",
+      "family_id": "hybrid",
+      "number": 100,
+      "name": "Hybrid-100",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/hybrid/100",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "hybrid-100",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "hybrid-200",
+      "family_id": "hybrid",
+      "number": 200,
+      "name": "Hybrid-200",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/hybrid/200",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "hybrid-200",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "hybrid-300",
+      "family_id": "hybrid",
+      "number": 300,
+      "name": "Hybrid-300",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/hybrid/300",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "hybrid-300",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "inverted-100",
+      "family_id": "inverted",
+      "number": 100,
+      "name": "Inverted-100",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/inverted/100",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "inverted-100",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "inverted-200",
+      "family_id": "inverted",
+      "number": 200,
+      "name": "Inverted-200",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/inverted/200",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "inverted-200",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "motorcycle-100",
+      "family_id": "motorcycle",
+      "number": 100,
+      "name": "Motorcycle-100",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/motorcycle/100",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "motorcycle-100",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "motorcycle-200",
+      "family_id": "motorcycle",
+      "number": 200,
+      "name": "Motorcycle-200",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/motorcycle/200",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "motorcycle-200",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "motorcycle-suspended-100",
+      "family_id": "motorcycle-suspended",
+      "number": 100,
+      "name": "Motorcycle Suspended-100",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/motorcycle-suspended/100",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "motorcycle-suspended-100",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "xtreme-spinning",
+      "family_id": "spinning",
+      "number": null,
+      "name": "Xtreme Spinning",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/spinning/xtreme-spinning",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "xtreme-spinning",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    },
+    {
+      "id": "xtreme-spinning-floorless",
+      "family_id": "spinning",
+      "number": null,
+      "name": "Xtreme Spinning Floorless",
+      "description": "Planned owner-defined style. Visual and mechanical definitions pending; no dynamics validation claimed.",
+      "directory": "trains/spinning/xtreme-spinning-floorless",
+      "status": "planned",
+      "compatibility": {
+        "train_style_id": "xtreme-spinning-floorless",
+        "track_style_ids": [],
+        "required_track_features": []
+      }
+    }
   ]
 }

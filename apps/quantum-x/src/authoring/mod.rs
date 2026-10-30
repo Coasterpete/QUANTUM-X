@@ -1,3 +1,4 @@
+mod coaster_properties;
 mod commands;
 mod construction_ui;
 #[cfg(test)]
@@ -9,9 +10,13 @@ mod graph_canvas;
 #[cfg(test)]
 mod graph_drag_tests;
 mod graph_gesture;
+mod graph_regions;
 mod graph_view;
 mod icons;
 mod layout_ui;
+#[cfg(test)]
+mod library_tests;
+pub(crate) mod library_ui;
 #[cfg(test)]
 mod m5_tests;
 #[cfg(test)]
@@ -28,14 +33,22 @@ mod m82_scenario;
 mod m82_tests;
 mod panels;
 mod plot;
+mod previews;
 #[cfg(test)]
 mod save_tests;
 mod scenario;
 pub fn track_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
     m7_scenario::run(output)
 }
+mod project_library;
+mod recent;
 mod session;
 mod spline;
+pub(crate) mod startup;
+mod startup_pages;
+#[cfg(test)]
+mod startup_tests;
+mod startup_ui;
 #[cfg(test)]
 mod tests;
 mod theme;
@@ -45,12 +58,15 @@ mod train_assets;
 mod train_playback;
 mod train_playback_ui;
 mod train_preview;
+pub(crate) mod transition_scenario;
+pub(crate) mod ui_reference_scenario;
 mod vehicle_ui;
 mod workbench;
 mod workflow;
+pub(crate) mod workflow_scenario;
 use qx_geometry::solver::GenerationOptions;
 use qx_rendering::{DisplayOptions, EditorSurface, InspectionScene, SurfaceOutput};
-use session::{Session, blank_project, scene};
+use session::{Session, scene};
 use std::{
     error::Error,
     path::{Path, PathBuf},
@@ -71,17 +87,6 @@ pub fn train_playback_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
     m82_scenario::run(output)
 }
 
-pub fn run(path: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
-    let catalog = qx_style::Catalog::built_in()?;
-    let project = match &path {
-        Some(path) => qx_document::persistence::load(path, &catalog)?,
-        None => blank_project(),
-    };
-    let initial_scene = scene(&project, &catalog, GenerationOptions::default())?;
-    let mut session = Session::new(project, path.as_deref(), catalog)?;
-    (session.workbench, session.preferences) = workbench::PreferenceStore::load();
-    qx_rendering::edit(initial_scene, session).map_err(Into::into)
-}
 pub fn render(
     path: PathBuf,
     output: PathBuf,

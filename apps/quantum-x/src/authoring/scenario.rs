@@ -3,7 +3,7 @@ use super::{
     graph_canvas, panels,
     session::{Session, blank_project},
 };
-use qx_geometry::{authoring::ChannelKey, transition::Function};
+use qx_geometry::authoring::ChannelKey;
 use std::{error::Error, path::PathBuf};
 
 pub(super) fn build() -> Result<Session, Box<dyn Error>> {
@@ -31,29 +31,44 @@ pub(super) fn build() -> Result<Session, Box<dyn Error>> {
         qx_document::editing::split_hermite(&session.draft, ChannelKey::Normal, 1, 0.5)?;
     session.draft =
         qx_document::editing::split_hermite(&session.draft, ChannelKey::Normal, 2, 0.5)?;
-    for (transition, (start, end)) in session
-        .draft
-        .channel_mut(ChannelKey::Normal)?
-        .transitions
-        .iter_mut()
-        .zip([(1., 2.), (2., 0.), (0., 0.), (0., 1.)])
+    for (index, (start, end)) in [(1., 2.), (2., 0.), (0., 0.), (0., 1.)]
+        .into_iter()
+        .enumerate()
     {
-        transition.function = Function::QuinticSmoothstep {};
-        transition.start = start;
-        transition.end = end;
+        session.draft = qx_document::region_edit::endpoint(
+            &session.draft,
+            ChannelKey::Normal,
+            index,
+            false,
+            start,
+        )?;
+        session.draft = qx_document::region_edit::endpoint(
+            &session.draft,
+            ChannelKey::Normal,
+            index,
+            true,
+            end,
+        )?;
     }
     for (key, peak) in [(ChannelKey::Lateral, 0.1), (ChannelKey::Roll, 0.006)] {
-        session.draft = qx_document::editing::split_hermite(&session.draft, key, 1, 0.5)?;
-        for (transition, (start, end)) in session
-            .draft
-            .channel_mut(key)?
-            .transitions
-            .iter_mut()
-            .zip([(0., peak), (peak, 0.)])
-        {
-            transition.function = Function::QuinticSmoothstep {};
-            transition.start = start;
-            transition.end = end;
+        session.draft = qx_document::editing::split_transition(&session.draft, key, 1, 0.5)?;
+        for (index, (start, end)) in [(0., peak), (peak, 0.)].into_iter().enumerate() {
+            session.draft =
+                qx_document::region_edit::endpoint(&session.draft, key, index, false, start)?;
+            session.draft =
+                qx_document::region_edit::endpoint(&session.draft, key, index, true, end)?;
+        }
+    }
+    // Retain this diagnostic's original analytic quintic reference, now stored
+    // exactly as NURBS. Local endpoint edits deliberately preserve outer jets;
+    // they do not promise to produce a full-span quintic. Choose that shape
+    // explicitly for this fixture instead of changing its independent verifier.
+    for key in [ChannelKey::Normal, ChannelKey::Lateral, ChannelKey::Roll] {
+        let transitions = session.draft.channel_mut(key)?.transitions.clone();
+        for (index, mut transition) in transitions.into_iter().enumerate() {
+            transition.function = qx_geometry::transition::Function::QuinticSmoothstep {};
+            let exact = transition.to_nurbs()?;
+            session.draft = qx_document::region_edit::replace(&session.draft, key, index, exact)?;
         }
     }
     if !session.apply_draft() {

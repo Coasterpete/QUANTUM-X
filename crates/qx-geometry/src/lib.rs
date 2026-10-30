@@ -7,6 +7,8 @@ pub mod curve;
 pub mod curve_edit;
 pub mod heartline;
 pub mod math;
+pub mod profile;
+mod profile_transition;
 pub mod solver;
 mod spline_track;
 pub mod transition;

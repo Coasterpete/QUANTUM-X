@@ -140,6 +140,8 @@ pub(super) fn workspace(
     display.asset_instances.clear();
     display.train_bounds = None;
     display.selected_car_bounds = None;
+    display.inspection_marker =
+        session.workbench.active == super::workbench::Profile::Track || session.development;
     if session.workbench.active == super::workbench::Profile::Train {
         let project = session.editor.project();
         if project.heartline.authored_reference
@@ -168,11 +170,21 @@ pub(super) fn workspace(
                     &mut session.assets,
                     display,
                 );
+                if !session.development {
+                    display.overlay_lines.clear();
+                }
             }
         }
     }
-    let reset_navigation = session.frame_requested;
+    let ui_frame = ctx.cumulative_frame_nr();
     if session.frame_requested {
+        ctx.data_mut(|d| d.insert_temp(egui::Id::unique("navigation reset frame"), ui_frame));
+        session.frame_requested = false;
+    }
+    let reset_navigation = ctx
+        .data(|d| d.get_temp::<u64>(egui::Id::unique("navigation reset frame")))
+        == Some(ui_frame);
+    if reset_navigation {
         view_command = Some(
             if session.workbench.active == super::workbench::Profile::Train {
                 ViewCommand::FitTrain
@@ -180,7 +192,6 @@ pub(super) fn workspace(
                 ViewCommand::FitAll
             },
         );
-        session.frame_requested = false;
     }
     if !ctx.egui_wants_keyboard_input()
         && viewport.contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
@@ -204,6 +215,8 @@ pub(super) fn workspace(
     if session.file_dialog.is_none() {
         if session.draft_request.is_some() {
             super::draft_workflow::dialog(session, ctx);
+        } else if session.startup_request.is_some() {
+            super::startup::leave_dialog(session, ctx);
         } else if session.confirm_replace.is_some() || session.open_dialog_requested {
             egui::Modal::new(egui::Id::unique("replace unsaved project")).show(ctx, |ui| {
                 ui.heading("Unsaved edits");
@@ -264,17 +277,36 @@ pub(super) fn workspace(
     }
 }
 pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
-    ui.heading("Section List");
-    ui.push_id("section navigation", |ui| sections(session, ui));
-    ui.separator();
-    ui.horizontal_wrapped(|ui| {
-        for (index, title) in ["Section", "Coaster", "Reference", "Project"]
-            .iter()
-            .enumerate()
-        {
-            ui.selectable_value(&mut session.track_tab, index, *title);
-        }
-    });
+    if session.track_tab != 1 {
+        ui.heading("Section List");
+        ui.push_id("section navigation", |ui| sections(session, ui));
+        ui.separator();
+    }
+    if ui.available_width() < 330. {
+        let titles = ["Section", "Coaster Properties", "Reference", "Project"];
+        egui::ComboBox::from_id_salt("track context")
+            .width(ui.available_width())
+            .selected_text(titles[session.track_tab.min(3)])
+            .show_ui(ui, |ui| {
+                for (index, title) in titles.iter().enumerate() {
+                    ui.selectable_value(&mut session.track_tab, index, *title);
+                }
+            });
+    } else {
+        ui.horizontal_wrapped(|ui| {
+            for (index, title) in ["Section", "Coaster", "Reference", "Project"]
+                .iter()
+                .enumerate()
+            {
+                ui.selectable_value(&mut session.track_tab, index, *title)
+                    .on_hover_text(if index == 1 {
+                        "Coaster Properties"
+                    } else {
+                        title
+                    });
+            }
+        });
+    }
     if session.track_tab == 0 {
         ui.collapsing("Starting pose and design speed", |ui| {
             basic_initial(session, ui)
@@ -294,29 +326,18 @@ pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
     });
     }
     if session.track_tab == 1 {
-        ui.heading("Track Style Properties");
-        super::construction_ui::controls(session, ui);
-        ui.separator();
-        styles(session, ui);
+        super::coaster_properties::show(session, ui);
     }
     if session.track_tab == 2 {
         heartline(session, ui);
     }
     if session.track_tab == 3 {
-        ui.collapsing("Project metadata", |ui| {
-            ui.label("Name");
-            ui.text_edit_singleline(&mut session.metadata_draft.name);
-            ui.label("Author");
-            ui.text_edit_singleline(&mut session.metadata_draft.author);
-            ui.label("Description");
-            ui.text_edit_multiline(&mut session.metadata_draft.description);
-            if ui.button("Apply metadata").clicked() {
-                session.execute(vec![Command::SetMetadata(session.metadata_draft.clone())]);
-            }
-            if ui.button("Cancel metadata draft").clicked() {
-                session.metadata_draft = session.editor.project().metadata.clone();
-            }
-        });
+        if ui
+            .button("Coaster name and description - Coaster Properties")
+            .clicked()
+        {
+            super::coaster_properties::open(session);
+        }
         ui.collapsing("Initial conditions", |ui| {
             let initial = &mut session.initial_draft;
             vector(ui, "Start XYZ m", &mut initial.position_m);
@@ -396,7 +417,9 @@ pub(super) fn shortcuts(session: &mut Session, ctx: &egui::Context) {
 }
 fn sections(session: &mut Session, ui: &mut egui::Ui) {
     let sections = session.editor.project().sections.clone();
-    let list_height = (ui.clip_rect().height() * 0.32).clamp(86., 210.);
+    let selection_id = ui.scope_id().with("section list selection");
+    let reveal = ui.data(|d| d.get_temp::<u64>(selection_id)) != Some(session.selected.0);
+    let list_height = (ui.clip_rect().height() * 0.24).clamp(64., 144.);
     egui::ScrollArea::vertical()
         .id_salt("track section list")
         .max_height(list_height)
@@ -416,26 +439,32 @@ fn sections(session: &mut Session, ui: &mut egui::Ui) {
                 if response.hovered() {
                     session.hovered = Some(section.id);
                 }
+                if reveal && section.id == session.selected {
+                    response.scroll_to_me(Some(egui::Align::Center));
+                }
                 response.on_hover_text(format!(
                     "Stable section ID {}. Selection is shared with the Transition Editor.",
                     section.id.0
                 ));
             }
         });
-    super::timeline::ordering(session, ui);
+    ui.data_mut(|d| d.insert_temp(selection_id, session.selected.0));
     ui.horizontal_wrapped(|ui| {
         input_menu(ui, "Insert section…", |ui| insertion(session, ui));
-        if super::icons::button(
-            ui,
-            super::icons::Icon::Remove,
-            "Remove",
-            sections.len() > 1 && session.graph_drag.is_none(),
-            "Remove selected section. Undo restores it.",
-        )
-        .clicked()
-        {
-            session.remove_selected();
-        }
+        ui.menu_button("Manage", |ui| {
+            super::timeline::ordering(session, ui);
+            if super::icons::button(
+                ui,
+                super::icons::Icon::Remove,
+                "Remove",
+                sections.len() > 1 && session.graph_drag.is_none(),
+                "Remove selected section. Undo restores it.",
+            )
+            .clicked()
+            {
+                session.remove_selected();
+            }
+        });
     });
     if session.draft_dirty() {
         ui.strong(format!("Section {} · unapplied draft", session.selected.0));
@@ -612,13 +641,6 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
         session.selected.0,
         method(&session.draft)
     ));
-    ui.text_edit_singleline(&mut session.draft.name);
-    ui.small(if session.draft_dirty() {
-        "Unapplied draft · viewport previews valid inputs"
-    } else {
-        "Committed · edit values or the graph below"
-    });
-    section_commit(session, ui);
     if session.draft.domain != Domain::Normalized {
         let mut extent = session.draft.extent;
         ui.horizontal(|ui| {
@@ -640,6 +662,13 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
         }
     }
 
+    ui.text_edit_singleline(&mut session.draft.name);
+    ui.small(if session.draft_dirty() {
+        "Unapplied draft · viewport previews valid inputs"
+    } else {
+        "Committed · edit values or the graph below"
+    });
+    section_commit(session, ui);
     if let SectionKind::Arc {
         radius_m,
         plane_angle_rad,
@@ -841,57 +870,6 @@ pub(super) fn heartline(session: &mut Session, ui: &mut egui::Ui) {
     }
     if ui.button("Cancel reference draft").clicked() {
         session.heartline_draft = session.editor.project().heartline.clone();
-    }
-}
-fn styles(session: &mut Session, ui: &mut egui::Ui) {
-    let selection = session.editor.project().style.clone();
-    let mut choose = None;
-    for family in &session.catalog.families {
-        ui.collapsing(&family.name, |ui| {
-            for style in session
-                .catalog
-                .styles
-                .iter()
-                .filter(|s| s.family_id == family.id)
-            {
-                ui.label(format!(
-                    "{} — #{} ({:?})",
-                    style.name, style.number, style.status
-                ));
-                ui.label(&style.description);
-                if style.preview.is_none() {
-                    ui.small("Concept: no production geometry or representative preview. Procedural validation construction remains separate.");
-                }
-                ui.small(format!(
-                    "Compatible trains: {}",
-                    style.compatible_train_ids.join(", ")
-                ));
-                if ui
-                    .add_enabled(
-                        selection.style_id != style.id,
-                        egui::Button::new(if style.geometry.is_some(){"Apply visual style"}else{"Apply concept selection"}),
-                    )
-                    .clicked()
-                {
-                    choose = Some(qx_style::StyleSelection {
-                        family_id: family.id.clone(),
-                        style_id: style.id.clone(),
-                    });
-                }
-            }
-        });
-    }
-    if let Some(selection) = choose {
-        let geometry = session
-            .catalog
-            .validate_selection(&selection)
-            .ok()
-            .and_then(|s| s.geometry.clone());
-        let mut commands = vec![Command::SetStyle(selection)];
-        if let Some(geometry) = geometry {
-            commands.push(Command::SetConstruction(geometry));
-        }
-        session.execute(commands);
     }
 }
 fn vector(ui: &mut egui::Ui, label: &str, v: &mut Vec3) -> bool {

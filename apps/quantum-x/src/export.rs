@@ -213,7 +213,7 @@ pub fn write_all(
     let mut summary = writer(dir, "summary.txt")?;
     writeln!(
         summary,
-        "QUANTUM-X development-only geometry diagnostics\nProject: {}\nSections: {}\nLength: {:.12} m\nCenterline samples: {}\nMax integration step: {} m\nSave/reopen regeneration: identical on this machine/build\n{}\nAll forces are design-speed geometry diagnostics, not train simulation.\nOBJ is a centerline polyline, not a rail mesh.\n",
+        "QUANTUM Dynamics development-only geometry diagnostics\nProject: {}\nSections: {}\nLength: {:.12} m\nCenterline samples: {}\nMax integration step: {} m\nSave/reopen regeneration: identical on this machine/build\n{}\nAll forces are design-speed geometry diagnostics, not train simulation.\nOBJ is a centerline polyline, not a rail mesh.\n",
         project.metadata.name,
         project.sections.len(),
         track.length_m(),
@@ -436,7 +436,7 @@ fn obj(dir: &Path, track: &GeneratedTrack) -> io::Result<()> {
     let mut w = writer(dir, "centerline.obj")?;
     writeln!(
         w,
-        "# QUANTUM-X development centerline polyline; metres, Y up; no rail surface\no centerline"
+        "# QUANTUM Dynamics development centerline polyline; metres, Y up; no rail surface\no centerline"
     )?;
     for s in &track.samples {
         writeln!(
@@ -680,7 +680,7 @@ fn plots(dir: &Path, project: &Project, track: &GeneratedTrack) -> io::Result<()
     svg(
         dir,
         "measurements.svg",
-        "QUANTUM-X generated measurements",
+        "QUANTUM Dynamics generated measurements",
         "Arc distance (m)",
         std::mem::take(&mut panels),
     )?;
@@ -718,14 +718,14 @@ fn plots(dir: &Path, project: &Project, track: &GeneratedTrack) -> io::Result<()
     svg(
         dir,
         "transitions.svg",
-        "QUANTUM-X authored transition channels",
+        "QUANTUM Dynamics authored transition channels",
         "Local section input (units shown above)",
         time_panels,
     )?;
     svg(
         dir,
         "trajectory.svg",
-        "QUANTUM-X centerline projections",
+        "QUANTUM Dynamics centerline projections",
         "World X (m)",
         vec![
             (

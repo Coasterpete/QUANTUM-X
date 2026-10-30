@@ -77,22 +77,20 @@ async fn render(
     let mut output = None;
     let mut pending_free = vec![];
     // Font installation, nested command rows and dock sizing settle on successive passes.
-    for frame in 0..4 {
+    for _ in 0..4 {
         let mut next = ctx.run_pass(
             egui::RawInput {
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
-                    egui::vec2(width as f32, height as f32),
+                    // The target is physical pixels; egui consumes logical points.
+                    // Re-evaluate after the surface installs its UI zoom on pass 1.
+                    egui::vec2(width as f32, height as f32) / ctx.pixels_per_point(),
                 )),
                 ..Default::default()
             },
             |ctx| {
                 let result = surface.ui(ctx, scene, &mut display);
                 viewport = result.viewport;
-                if frame == 0 && result.profile == 1 {
-                    display.reference = true;
-                    display.offsets = true;
-                }
             },
         );
         for (id, deltas) in &next.textures_delta.set {
@@ -105,7 +103,16 @@ async fn render(
         output = Some(next);
     }
     let output = output.unwrap();
-    if viewport.width() < 1. || viewport.height() < 1. {
+    // GPU viewports, readback and capture metadata use physical pixels too.
+    viewport = egui::Rect::from_min_max(
+        viewport.min * output.pixels_per_point,
+        viewport.max * output.pixels_per_point,
+    );
+    let has_geometry = !scene.track.samples.is_empty();
+    if !has_geometry {
+        viewport =
+            egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(width as f32, height as f32));
+    } else if viewport.width() < 1. || viewport.height() < 1. {
         return Err("editor has no visible 3D viewport at this size".into());
     }
     let paint = ctx.tessellate(output.shapes, output.pixels_per_point);
@@ -217,43 +224,45 @@ async fn render(
             }),
             ..Default::default()
         });
-        pass.set_vertex_buffer(0, buffer.slice(..));
-        pass.set_viewport(
-            viewport.left(),
-            viewport.top(),
-            viewport.width(),
-            viewport.height(),
-            0.,
-            1.,
-        );
-        pass.set_scissor_rect(
-            viewport.left() as u32,
-            viewport.top() as u32,
-            viewport.width() as u32,
-            viewport.height() as u32,
-        );
-        let grid_count = crate::scene::grid_vertex_count(&display);
-        pass.set_pipeline(&grid_pipeline);
-        pass.set_bind_group(0, &grid_bind, &[]);
-        pass.draw(0..grid_count, 0..1);
-        mesh.draw(&mut pass, &display);
-        assets.draw(&mut pass);
-        pass.set_vertex_buffer(0, buffer.slice(..));
-        pass.set_pipeline(if display.mode == crate::DisplayMode::Technical {
-            &pipeline
-        } else {
-            &grid_pipeline
-        });
-        pass.set_bind_group(
-            0,
-            if display.mode == crate::DisplayMode::Technical {
-                &bind
+        if has_geometry {
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.set_viewport(
+                viewport.left(),
+                viewport.top(),
+                viewport.width(),
+                viewport.height(),
+                0.,
+                1.,
+            );
+            pass.set_scissor_rect(
+                viewport.left() as u32,
+                viewport.top() as u32,
+                viewport.width() as u32,
+                viewport.height() as u32,
+            );
+            let grid_count = crate::scene::grid_vertex_count(&display);
+            pass.set_pipeline(&grid_pipeline);
+            pass.set_bind_group(0, &grid_bind, &[]);
+            pass.draw(0..grid_count, 0..1);
+            mesh.draw(&mut pass, &display);
+            assets.draw(&mut pass);
+            pass.set_vertex_buffer(0, buffer.slice(..));
+            pass.set_pipeline(if display.mode == crate::DisplayMode::Technical {
+                &pipeline
             } else {
-                &grid_bind
-            },
-            &[],
-        );
-        pass.draw(grid_count..lines.len() as u32, 0..1);
+                &grid_pipeline
+            });
+            pass.set_bind_group(
+                0,
+                if display.mode == crate::DisplayMode::Technical {
+                    &bind
+                } else {
+                    &grid_bind
+                },
+                &[],
+            );
+            pass.draw(grid_count..lines.len() as u32, 0..1);
+        }
     }
     {
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

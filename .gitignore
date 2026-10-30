@@ -1,1 +1,30 @@
-/target
+# Build products, local packages, captures and caches
+target/
+/dist/
+/captures/
+*.log
+*.pdb
+*.exe
+*.dll
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+
+# Local settings and credentials (source examples may be committed explicitly)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+/.idea/
+/.vs/
+
+# Owner's upstream icon research checkouts are not application dependencies.
+# Curated runtime SVGs and their licenses live in assets/editor-icons/.
+/assets/icons/carbon/
+/assets/icons/lucide/
+
+# Keep original icon sources; exclude Blender recovery files and render output.
+*.blend[0-9]
+/assets/icons/quantum-dynamics/renders/

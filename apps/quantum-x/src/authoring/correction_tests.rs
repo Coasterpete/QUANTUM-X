@@ -428,7 +428,17 @@ fn precise_numeric_entry_and_split_remain_drafts_and_apply_as_single_undo_steps(
     precision_frame(&mut s, &ctx, vec![]);
     let texts = precision_frame(&mut s, &ctx, vec![]);
     let label = texts.iter().find(|(text, _)| text == "Start").unwrap().1;
-    let pos = egui::pos2(label.right() + 24., label.center().y);
+    let pos = texts
+        .iter()
+        .filter(|(text, rect)| {
+            text.parse::<f64>().is_ok()
+                && rect.left() > label.right()
+                && (rect.center().y - label.center().y).abs() < 8.
+        })
+        .min_by(|a, b| a.1.left().total_cmp(&b.1.left()))
+        .unwrap()
+        .1
+        .center();
     precision_frame(
         &mut s,
         &ctx,
@@ -468,7 +478,7 @@ fn precise_numeric_entry_and_split_remain_drafts_and_apply_as_single_undo_steps(
     let texts = precision_frame(&mut s, &ctx, vec![]);
     let pos = texts
         .iter()
-        .find(|(text, _)| text == "Split into two Hermite regions")
+        .find(|(text, _)| text == "Split region (preserve shape)")
         .unwrap()
         .1
         .center();

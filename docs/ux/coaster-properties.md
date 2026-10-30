@@ -59,3 +59,12 @@ This document establishes intended functionality, not final visual styling.
 Final placement, typography, colors, iconography, and interaction refinements remain subject to human UX review.
 
 **Core principle:** Visual style selection supports the coaster-authoring experience; it does not replace QUANTUM-X's graph/timeline editor.
+
+## Later owner direction — 2026-10-29
+
+The owner's Editor Workflow refinement places coaster name, description, family
+and numbered style **inside the Editor**, after name-only project creation.
+Unassigned style is a valid editable state. Preserve one coaster per Alpha project;
+multiple-coaster authoring follows Alpha 1 or Alpha 2. Planned selections record
+design intent and must not imply complete production assets or change geometry.
+See [the implementation mapping, verification and review items](../editor-workflow-refinement.md).

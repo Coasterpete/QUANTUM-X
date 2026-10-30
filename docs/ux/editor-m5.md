@@ -1,5 +1,16 @@
 # M5 editor UX direction and implementation interpretation
 
+The original Inkscape mockups have now been supplied and their implementation
+approved. [Owner mockup implementation](owner-mockups.md) records the current
+Welcome/Editor composition, colors, responsive controls and optional development
+views. Historical M5 verification below remains historical evidence.
+
+The owner's 2026-10-29 direction supersedes the muted/restrained palette below:
+near-black foundations and vivid functional colors are intentional. The environment
+is **Editor**, with Coaster Properties configured after New Project. This is a later
+owner decision, not retroactive visual approval of M5 implementation choices.
+See [the current refinement mapping](../editor-workflow-refinement.md).
+
 The owner's 2026-10-25 M5 brief and subsequent M5 correction are the authority.
 The initial pass had only the text brief; its referenced Inkscape image was not supplied.
 The correction's screen recording was supplied and reviewed.

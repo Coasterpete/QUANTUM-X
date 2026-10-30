@@ -20,7 +20,21 @@ pub enum Function {
     CubicSmoothstep {},
     QuinticSmoothstep {},
     Cosine {},
-    Hermite { start_slope: f64, end_slope: f64 },
+    Hermite {
+        start_slope: f64,
+        end_slope: f64,
+    },
+    Nurbs {
+        profile: crate::profile::NurbsProfile,
+    },
+    /// Exact legacy cosine restriction; cosine is not a rational polynomial.
+    CosineSpan {
+        offset: f64,
+        scale: f64,
+        phase_start: f64,
+        phase_end: f64,
+        polynomial: [f64; 5],
+    },
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -37,6 +51,7 @@ pub struct Transition {
 pub struct Evaluation {
     pub value: f64,
     pub derivative: f64,
+    pub second_derivative: f64,
 }
 impl Transition {
     pub fn constant(id: u64, length: f64, value: f64) -> Self {
@@ -80,6 +95,42 @@ impl Transition {
                 "constant transition requires equal endpoints and zero amplitude",
             )?;
         }
+        match &self.function {
+            Function::Nurbs { profile } => {
+                profile.validate()?;
+                ensure(
+                    self.amplitude == 0.
+                        && self.start == profile.values[0]
+                        && self.end == *profile.values.last().unwrap(),
+                    "NURBS endpoint mirrors/amplitude are inconsistent; use profile editing commands",
+                )?;
+            }
+            Function::CosineSpan {
+                offset,
+                scale,
+                phase_start,
+                phase_end,
+                polynomial,
+            } => {
+                ensure(
+                    [*offset, *scale, *phase_start, *phase_end]
+                        .iter()
+                        .chain(polynomial)
+                        .all(|v| v.is_finite() && v.abs() <= 1e20)
+                        && phase_end > phase_start
+                        && self.amplitude == 0.,
+                    "invalid legacy cosine span",
+                )?;
+                let a = self.evaluate_validated(0.)?;
+                let b = self.evaluate_validated(self.length)?;
+                ensure(
+                    approximately_equal(self.start, a.value, 1e-10, 1e-12)
+                        && approximately_equal(self.end, b.value, 1e-10, 1e-12),
+                    "legacy cosine endpoint mirrors are inconsistent",
+                )?;
+            }
+            _ => {}
+        }
         Ok(())
     }
     pub fn evaluate(&self, x: f64) -> Result<Evaluation> {
@@ -92,8 +143,15 @@ impl Transition {
     }
     pub(crate) fn evaluate_validated(&self, x: f64) -> Result<Evaluation> {
         let u = (x / self.length).clamp(0.0, 1.0);
+        if let Function::Nurbs { profile } = &self.function {
+            return profile.evaluate_validated(
+                profile.parameter(x, self.length),
+                self.length,
+                Side::Right,
+            );
+        }
         let d = self.end - self.start;
-        let (value, derivative) = match self.function {
+        let (value, derivative) = match &self.function {
             Function::Constant {} => (self.start, 0.0),
             Function::Linear {} => (self.start + d * u, d / self.length),
             Function::Quadratic {} => (self.start + d * u * u, 2.0 * d * u / self.length),
@@ -128,15 +186,70 @@ impl Transition {
                     / h;
                 (v, dv)
             }
+            Function::CosineSpan {
+                offset,
+                scale,
+                phase_start,
+                phase_end,
+                polynomial: p,
+            } => {
+                let rate = phase_end - phase_start;
+                let phase = phase_start + rate * u;
+                let v = p.iter().rev().fold(0., |s, c| s * u + c);
+                let dv = (1..5).rev().fold(0., |s, i| s * u + i as f64 * p[i]);
+                (
+                    offset + scale * phase.cos() + v,
+                    (-scale * rate * phase.sin() + dv) / self.length,
+                )
+            }
+            Function::Nurbs { .. } => unreachable!("handled above"),
         };
         let value = value + self.amplitude * 16.0 * u * u * (1.0 - u) * (1.0 - u);
         let derivative =
             derivative + self.amplitude * 32.0 * u * (1.0 - u) * (1.0 - 2.0 * u) / self.length;
+        let second = match &self.function {
+            Function::Constant {} | Function::Linear {} => 0.,
+            Function::Quadratic {} => 2. * d,
+            Function::CubicSmoothstep {} => 6. * d * (1. - 2. * u),
+            Function::QuinticSmoothstep {} => 60. * d * u * (1. - u) * (1. - 2. * u),
+            Function::Cosine {} => {
+                0.5 * d * std::f64::consts::PI.powi(2) * (std::f64::consts::PI * u).cos()
+            }
+            Function::Hermite {
+                start_slope: a,
+                end_slope: b,
+            } => {
+                (12. * u - 6.) * self.start
+                    + (6. * u - 4.) * self.length * a
+                    + (-12. * u + 6.) * self.end
+                    + (6. * u - 2.) * self.length * b
+            }
+            Function::CosineSpan {
+                scale,
+                phase_start,
+                phase_end,
+                polynomial: p,
+                ..
+            } => {
+                let rate = phase_end - phase_start;
+                -scale * rate * rate * (phase_start + rate * u).cos()
+                    + (2..5)
+                        .rev()
+                        .fold(0., |s, i| s * u + (i * (i - 1)) as f64 * p[i])
+            }
+            Function::Nurbs { .. } => unreachable!(),
+        };
+        let second_derivative = (second + self.amplitude * 32. * (1. - 6. * u + 6. * u * u))
+            / (self.length * self.length);
         ensure(
-            value.is_finite() && derivative.is_finite(),
+            value.is_finite() && derivative.is_finite() && second_derivative.is_finite(),
             "transition evaluation overflow",
         )?;
-        Ok(Evaluation { value, derivative })
+        Ok(Evaluation {
+            value,
+            derivative,
+            second_derivative,
+        })
     }
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -155,6 +268,7 @@ pub struct ContinuityIssue {
     pub input: f64,
     pub value_jump: f64,
     pub derivative_jump: f64,
+    pub second_derivative_jump: f64,
 }
 impl Channel {
     pub fn constant(unit: Unit, length: f64, value: f64) -> Self {
@@ -185,6 +299,29 @@ impl Channel {
             )?;
             cursor = next;
         }
+        for pair in self.transitions.windows(2) {
+            use crate::profile::Continuity;
+            let rule = pair[1].incoming_continuity();
+            if rule == Continuity::Free {
+                continue;
+            }
+            let a = pair[0].evaluate_validated(pair[0].length)?;
+            let b = pair[1].evaluate_validated(0.)?;
+            let equal = |a, b| approximately_equal(a, b, 1e-8, 1e-9);
+            ensure(
+                equal(a.value, b.value)
+                    && (rule == Continuity::C0 || equal(a.derivative, b.derivative))
+                    && (rule != Continuity::C2 || equal(a.second_derivative, b.second_derivative)),
+                format!(
+                    "regions {} / {} violate {rule:?}: value jump {:.12e}, derivative jump {:.12e}, second derivative jump {:.12e}; edit the shared boundary or explicitly relax continuity in advanced controls",
+                    pair[0].id,
+                    pair[1].id,
+                    b.value - a.value,
+                    b.derivative - a.derivative,
+                    b.second_derivative - a.second_derivative
+                ),
+            )?;
+        }
         Ok(())
     }
     /// Right-continuous internally; the final endpoint uses the final transition.
@@ -206,7 +343,19 @@ impl Channel {
                 || (at_end && side == Side::Left)
                 || i + 1 == self.transitions.len()
             {
-                return t.evaluate_validated(if at_end { t.length } else { x - start });
+                let local = if at_end {
+                    t.length
+                } else {
+                    (x - start).clamp(0., t.length)
+                };
+                if let Function::Nurbs { profile } = &t.function {
+                    return profile.evaluate_validated(
+                        profile.parameter(local, t.length),
+                        t.length,
+                        side,
+                    );
+                }
+                return t.evaluate_validated(local);
             }
             start = end;
         }
@@ -216,6 +365,8 @@ impl Channel {
         let mut sum = crate::InputSum::default();
         let mut knots = vec![0.0];
         for t in &self.transitions {
+            let start = *knots.last().unwrap();
+            knots.extend(t.internal_knots().into_iter().map(|x| start + x));
             knots.push(sum.add(t.length));
         }
         knots
@@ -230,15 +381,90 @@ impl Channel {
             let b = pair[1].evaluate(0.0)?;
             if !approximately_equal(a.value, b.value, 1e-10, 1e-10)
                 || !approximately_equal(a.derivative, b.derivative, 1e-10, 1e-10)
+                || !approximately_equal(a.second_derivative, b.second_derivative, 1e-8, 1e-10)
             {
                 result.push(ContinuityIssue {
                     input: x,
                     value_jump: b.value - a.value,
                     derivative_jump: b.derivative - a.derivative,
+                    second_derivative_jump: b.second_derivative - a.second_derivative,
                 });
             }
         }
+        let mut cursor = 0.;
+        for t in &self.transitions {
+            for x in t.internal_knots() {
+                let a = t.evaluate_limit(x, Side::Left)?;
+                let b = t.evaluate_limit(x, Side::Right)?;
+                if !approximately_equal(a.value, b.value, 1e-10, 1e-10)
+                    || !approximately_equal(a.derivative, b.derivative, 1e-10, 1e-10)
+                    || !approximately_equal(a.second_derivative, b.second_derivative, 1e-8, 1e-10)
+                {
+                    result.push(ContinuityIssue {
+                        input: cursor + x,
+                        value_jump: b.value - a.value,
+                        derivative_jump: b.derivative - a.derivative,
+                        second_derivative_jump: b.second_derivative - a.second_derivative,
+                    });
+                }
+            }
+            cursor += t.length;
+        }
+        result.sort_by(|a, b| a.input.total_cmp(&b.input));
         Ok(result)
+    }
+    /// Keep real short features while redundant inserted split knots do not
+    /// repartition integration. Jets through 2p detect rational span changes.
+    pub fn integration_knots(&self) -> Result<Vec<f64>> {
+        self.validate()?;
+        let changes = |a: &Transition, x: f64, b: &Transition, y: f64| -> Result<bool> {
+            let a_jet = a.derivatives(x, Side::Left, 10)?;
+            let b_jet = b.derivatives(y, Side::Right, 10)?;
+            let scale = a
+                .start
+                .abs()
+                .max(a.end.abs())
+                .max(b.start.abs())
+                .max(b.end.abs())
+                .max(a.amplitude.abs())
+                .max(b.amplitude.abs())
+                .max(1e-12);
+            let scale = [a, b].iter().fold(scale, |scale, t| {
+                if let Function::Nurbs { profile } = &t.function {
+                    profile
+                        .values
+                        .iter()
+                        .fold(scale, |scale, v| scale.max(v.abs()))
+                } else {
+                    scale
+                }
+            });
+            Ok(a_jet.iter().zip(b_jet).enumerate().any(|(k, (u, v))| {
+                let conditioning = 512.
+                    * f64::EPSILON
+                    * scale
+                    * (a.length.powi(-(k as i32)) + b.length.powi(-(k as i32)));
+                !approximately_equal(*u, v, 1e-9 + conditioning, 1e-8)
+            }))
+        };
+        let mut knots = vec![0.];
+        let mut sum = crate::InputSum::default();
+        let mut cursor = 0.;
+        for (i, t) in self.transitions.iter().enumerate() {
+            for x in t.internal_knots() {
+                if changes(t, x, t, x)? {
+                    knots.push(cursor + x);
+                }
+            }
+            cursor = sum.add(t.length);
+            if let Some(next) = self.transitions.get(i + 1)
+                && changes(t, t.length, next, 0.)?
+            {
+                knots.push(cursor);
+            }
+        }
+        knots.push(self.length());
+        Ok(knots)
     }
     pub fn insert(&mut self, index: usize, transition: Transition) -> Result<()> {
         ensure(

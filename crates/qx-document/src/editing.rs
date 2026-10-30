@@ -3,7 +3,7 @@
 use crate::{Result, require};
 use qx_geometry::{
     authoring::{ChannelKey, Domain, Section},
-    transition::{Function, Transition},
+    transition::Function,
 };
 
 /// Explicitly scale every channel's domain; endpoint slopes scale inversely.
@@ -65,35 +65,23 @@ pub fn convert_domain(section: &Section, target: Domain, speed_mps: f64) -> Resu
         if key != ChannelKey::Normal && key != ChannelKey::Lateral {
             channel.unit = target.rate_unit();
             for t in &mut channel.transitions {
-                t.start /= ratio;
-                t.end /= ratio;
-                t.amplitude /= ratio;
-                if let Function::Hermite {
-                    start_slope,
-                    end_slope,
-                } = &mut t.function
-                {
-                    *start_slope /= ratio;
-                    *end_slope /= ratio;
-                }
+                t.scale_values(1. / ratio);
             }
         }
     }
     result.validate()?;
     Ok(result)
 }
-/// Explicit insertion/reshape: split into two endpoint/slope-matched Hermite
-/// transitions. Exact for cubic polynomials with zero amplitude; other functions
-/// are deliberately reauthored, never advertised as shape-preserving.
-pub fn split_hermite(
+/// Shape-preserving subdivision. First ID and all other authored regions survive.
+pub fn split_transition(
     section: &Section,
     key: ChannelKey,
     id: u64,
     fraction: f64,
 ) -> Result<Section> {
     require(
-        fraction.is_finite() && (0.001..=0.999).contains(&fraction),
-        "split fraction must be in [0.001,0.999]",
+        fraction.is_finite() && fraction > 0. && fraction < 1.,
+        "split fraction must be inside (0,1)",
     )?;
     let mut result = section.clone();
     let channel = result.channel_mut(key)?;
@@ -111,35 +99,19 @@ pub fn split_hermite(
         .unwrap_or(0)
         .checked_add(1)
         .ok_or_else(|| crate::DocumentError("transition ID exhausted".into()))?;
-    let x = t.length * fraction;
-    let a = t.evaluate(0.)?;
-    let m = t.evaluate(x)?;
-    let b = t.evaluate(t.length)?;
-    let first = Transition {
-        id: t.id,
-        length: x,
-        start: a.value,
-        end: m.value,
-        amplitude: 0.,
-        function: Function::Hermite {
-            start_slope: a.derivative,
-            end_slope: m.derivative,
-        },
-    };
-    let second = Transition {
-        id: new_id,
-        length: t.length - x,
-        start: m.value,
-        end: b.value,
-        amplitude: 0.,
-        function: Function::Hermite {
-            start_slope: m.derivative,
-            end_slope: b.derivative,
-        },
-    };
+    let (first, second) = t.split(fraction, new_id)?;
     channel.transitions.splice(i..=i, [first, second]);
     result.validate()?;
     Ok(result)
+}
+/// Compatibility API; now performs exact subdivision rather than Hermite fitting.
+pub fn split_hermite(
+    section: &Section,
+    key: ChannelKey,
+    id: u64,
+    fraction: f64,
+) -> Result<Section> {
+    split_transition(section, key, id, fraction)
 }
 /// Remove a transition by extending its explicit neighbor into the vacated
 /// interval. This is a visible, reversible reshape; section duration is retained.
@@ -158,6 +130,26 @@ pub fn remove_transition(section: &Section, key: ChannelKey, id: u64) -> Result<
     let removed = channel.transitions.remove(i);
     let neighbor = if i == 0 { 0 } else { i - 1 };
     let t = &mut channel.transitions[neighbor];
+    if matches!(t.function, Function::Nurbs { .. }) {
+        // Removal is an explicit reshape. Keep the two surviving outer jets,
+        // including the removed region's far boundary, so another constrained
+        // neighbor is not disconnected by simply stretching the control net.
+        let a = if i == 0 {
+            removed.evaluate(0.)?
+        } else {
+            t.evaluate(0.)?
+        };
+        let b = if i == 0 {
+            t.evaluate(t.length)?
+        } else {
+            removed.evaluate(removed.length)?
+        };
+        t.length += removed.length;
+        t.set_endpoint_jet(false, a, 2)?;
+        t.set_endpoint_jet(true, b, 2)?;
+        result.validate()?;
+        return Ok(result);
+    }
     let ratio = (t.length + removed.length) / t.length;
     t.length += removed.length;
     if let Function::Hermite {

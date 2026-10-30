@@ -2,15 +2,13 @@
 //! of its moving/clipped hit rectangle. Coordinates and scale are frozen at press.
 use super::{plot::Plot, session::Session};
 use egui::{Context, PointerButton, Pos2};
-use qx_geometry::{
-    authoring::{ChannelKey, Section, SectionId},
-    transition::Function,
-};
+use qx_geometry::authoring::{ChannelKey, Section, SectionId};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
     Endpoint { end: bool },
     Boundary,
+    Control { index: usize },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -36,11 +34,18 @@ impl Target {
                 self.channel as u8,
                 self.transition,
             )),
+            Kind::Control { index } => egui::Id::unique((
+                "graph shape control",
+                self.section.0,
+                self.channel as u8,
+                self.transition,
+                index,
+            )),
         }
     }
     pub fn cursor(self) -> egui::CursorIcon {
         match self.kind {
-            Kind::Endpoint { .. } => egui::CursorIcon::ResizeVertical,
+            Kind::Endpoint { .. } | Kind::Control { .. } => egui::CursorIcon::ResizeVertical,
             Kind::Boundary => egui::CursorIcon::ResizeHorizontal,
         }
     }
@@ -54,6 +59,7 @@ pub(super) struct Drag {
     auto_apply: bool,
     origin: Pos2,
     last_position: Pos2,
+    displacement: egui::Vec2,
     started: bool,
     value_per_point: f64,
     domain_per_point: f64,
@@ -82,6 +88,7 @@ pub(super) fn capture(
             auto_apply: !session.has_drafts(),
             origin,
             last_position: origin,
+            displacement: egui::Vec2::ZERO,
             started: false,
             value_per_point: mapping.y.span() / mapping.rect.height() as f64,
             domain_per_point: mapping.x.span() / mapping.rect.width() as f64,
@@ -134,7 +141,16 @@ pub(super) fn update(session: &mut Session, ctx: &Context) {
         let delta = pos - drag.origin;
         drag.started |= decided || delta.length() > ctx.options(|o| o.input_options.max_click_dist);
         if drag.started && pos != drag.last_position {
+            // Rolling deltas allow live precision mode without jumping when
+            // Shift changes. The mapping remains the one captured at press.
+            let gain = if ctx.input(|i| i.modifiers.shift) {
+                0.1
+            } else {
+                1.
+            };
+            drag.displacement += (pos - drag.last_position) * gain;
             drag.last_position = pos;
+            let delta = drag.displacement;
             let mut next = drag.before.clone();
             let channel = next
                 .channel_mut(drag.target.channel)
@@ -151,19 +167,35 @@ pub(super) fn update(session: &mut Session, ctx: &Context) {
                     super::graph_canvas::boundary(&drag.before, drag.target.channel, index, length)
                 }
                 Kind::Endpoint { end } => {
-                    let t = &mut channel.transitions[index];
+                    let t = &channel.transitions[index];
                     let value =
                         if end { t.end } else { t.start } - delta.y as f64 * drag.value_per_point;
-                    if end {
-                        t.end = value;
-                    } else {
-                        t.start = value;
-                    }
-                    if matches!(t.function, Function::Constant {}) {
-                        t.start = value;
-                        t.end = value;
-                    }
-                    channel.validate().map(|()| next).map_err(|e| e.to_string())
+                    qx_document::region_edit::endpoint(
+                        &drag.before,
+                        drag.target.channel,
+                        index,
+                        end,
+                        value,
+                    )
+                    .map_err(|e| e.to_string())
+                }
+                Kind::Control { index: control } => {
+                    let mut t = channel.transitions[index].clone();
+                    let qx_geometry::transition::Function::Nurbs { profile } = &mut t.function
+                    else {
+                        unreachable!("captured NURBS control")
+                    };
+                    let candidate = profile.refine_for_edit().map_err(|e| e.to_string());
+                    candidate.and_then(|()| {
+                        qx_document::region_edit::shape_control(
+                            &drag.before,
+                            drag.target.channel,
+                            index,
+                            control,
+                            profile.values[control] - delta.y as f64 * drag.value_per_point,
+                        )
+                        .map_err(|e| e.to_string())
+                    })
                 }
             };
             match candidate {

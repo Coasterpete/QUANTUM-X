@@ -41,6 +41,9 @@ pub struct SurfaceOutput {
     pub reset_navigation: bool,
 }
 pub trait EditorSurface {
+    fn window_title(&self) -> String {
+        format!("{} — Editor", crate::identity::product().name)
+    }
     fn select_section(&mut self, _id: qx_geometry::authoring::SectionId) {}
     fn inspect_station(&mut self, _point: Option<(qx_geometry::authoring::SectionId, f64)>) {}
     fn window_preferences(&self) -> WindowPreferences {
@@ -151,6 +154,7 @@ impl Workspace {
             false
         };
         let window = self.window.as_ref().unwrap().clone();
+        window.set_title(&self.surface.window_title());
         let input = self.input.as_mut().unwrap().take_egui_input(&window);
         let before = self.display.clone();
         let mut action = None;
@@ -276,8 +280,8 @@ impl ApplicationHandler for Workspace {
             let window = Arc::new(
                 event_loop
                     .create_window(
-                        Window::default_attributes()
-                            .with_title("QUANTUM-X — Development workbench")
+                        crate::identity::window_attributes()?
+                            .with_title(self.surface.window_title())
                             .with_inner_size(LogicalSize::new(placement.size[0], placement.size[1]))
                             .with_min_inner_size(LogicalSize::new(
                                 placement.minimum[0],

@@ -12,11 +12,7 @@ use qx_document::{
 use qx_geometry::math::{Quaternion, Vec3};
 use qx_rendering::{DisplayOptions, EditorSurface};
 use serde_json::json;
-use std::{
-    error::Error,
-    path::{Path, PathBuf},
-    time::Instant,
-};
+use std::{error::Error, path::PathBuf, time::Instant};
 
 pub(super) fn run(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn Error>> {
     std::fs::create_dir_all(&output)?;
@@ -34,7 +30,7 @@ pub(super) fn run(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn Error>>
     if !s.execute(vec![Command::SetHeartline(reference)]) {
         return Err(s.status.into());
     }
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/development/train");
+    let fixtures = super::library_ui::assets_root().join("development/train");
     let start = Instant::now();
     let body = s
         .assets

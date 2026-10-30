@@ -18,7 +18,7 @@ use winit::{
     keyboard::{KeyCode, PhysicalKey},
     window::{Window, WindowId},
 };
-pub const HELP: &str = "QUANTUM-X DEVELOPMENT-ONLY geometry inspector (temporary controls)\n\
+pub const HELP: &str = "QUANTUM Dynamics DEVELOPMENT-ONLY geometry inspector (temporary controls)\n\
 Left drag / arrows: orbit | Right/middle drag / WASD: pan | Wheel / +/-: zoom\n\
 F/Home: fit all | Tab: next section | 0: clear selection | Enter: fit selection\n\
 1: perspective | 2: top | 3: side (+Z) | 4: front (+X) | O: toggle orthographic\n\
@@ -128,7 +128,7 @@ impl Inspector {
                 })
                 .unwrap_or_else(|| "All sections".into());
             w.set_title(&format!(
-                "QUANTUM-X [DEVELOPMENT INSPECTOR] | {} | {} | {} | grid {}m N:{} K:{} | {}",
+                "QUANTUM Dynamics [DEVELOPMENT INSPECTOR] | {} | {} | {} | grid {}m N:{} K:{} | {}",
                 self.scene.name,
                 selected,
                 if self.camera.orthographic {
@@ -259,8 +259,8 @@ impl ApplicationHandler for Inspector {
             let window = Arc::new(
                 event_loop
                     .create_window(
-                        Window::default_attributes()
-                            .with_title("QUANTUM-X [DEVELOPMENT INSPECTOR]")
+                        crate::identity::window_attributes()?
+                            .with_title("QUANTUM Dynamics [DEVELOPMENT INSPECTOR]")
                             .with_inner_size(LogicalSize::new(1200., 800.)),
                     )
                     .map_err(|e| e.to_string())?,

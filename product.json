@@ -1,0 +1,7 @@
+{
+  "name": "QUANTUM Dynamics",
+  "repository": "QUANTUM-X",
+  "windows_executable": "QUANTUM Dynamics.exe",
+  "development_executable": "quantum-x.exe",
+  "project_extension": "qx.json"
+}

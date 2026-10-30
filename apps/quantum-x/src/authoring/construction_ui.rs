@@ -4,7 +4,7 @@ use super::session::Session;
 use qx_style::construction::{HardwareShape, Profile, TrackConstruction};
 pub(super) fn controls(session: &mut Session, ui: &mut egui::Ui) {
     ui.strong("Procedural construction");
-    ui.small("Engine validation configurations · provisional dimensions. Independent of the concept catalog below.");
+    ui.small("Engine validation configurations · provisional dimensions. Independent of planned library styles below.");
     let c = &mut session.construction_draft;
     egui::ComboBox::from_id_salt("validation construction")
         .selected_text(match c.strategy {

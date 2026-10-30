@@ -20,6 +20,8 @@ struct Harness {
     cursor: egui::CursorIcon,
     canvas_rect: Rect,
     handles: Vec<((u64, Option<bool>), Rect)>,
+    controls: Vec<(u64, usize, Rect)>,
+    text_positions: Vec<(String, Pos2)>,
     focused: bool,
 }
 impl Harness {
@@ -54,6 +56,8 @@ impl Harness {
             cursor: egui::CursorIcon::Default,
             canvas_rect: Rect::NOTHING,
             handles: vec![],
+            controls: vec![],
+            text_positions: vec![],
             focused: true,
         };
         for _ in 0..5 {
@@ -62,6 +66,10 @@ impl Harness {
         h
     }
     fn frame(&mut self, events: Vec<Event>) {
+        self.frame_modifiers(events, Modifiers::NONE);
+    }
+    fn frame_modifiers(&mut self, mut events: Vec<Event>, modifiers: Modifiers) {
+        events.insert(0, Event::ModifiersChanged(modifiers));
         let mut output = self.ctx.run_pass(
             egui::RawInput {
                 screen_rect: Some(Rect::from_min_size(Pos2::ZERO, self.size)),
@@ -85,6 +93,29 @@ impl Harness {
                     )))
                     .map_or(Rect::NOTHING, |r| r.rect);
                 self.handles.clear();
+                self.controls.clear();
+                let channel = self
+                    .session
+                    .draft
+                    .channel_mut(self.session.channel)
+                    .unwrap();
+                for t in &channel.transitions {
+                    if let qx_geometry::transition::Function::Nurbs { profile } = &t.function {
+                        let mut profile = profile.clone();
+                        profile.refine_for_edit().unwrap();
+                        for index in 3..profile.values.len() - 3 {
+                            let target = super::graph_gesture::Target {
+                                section: SectionId(2),
+                                channel: self.session.channel,
+                                transition: t.id,
+                                kind: super::graph_gesture::Kind::Control { index },
+                            };
+                            if let Some(r) = ctx.read_response(target.id()) {
+                                self.controls.push((t.id, index, r.rect));
+                            }
+                        }
+                    }
+                }
                 for transition in 1..=2_u64 {
                     for end in [Some(false), Some(true), None] {
                         let id = if let Some(end) = end {
@@ -115,6 +146,16 @@ impl Harness {
             .iter()
             .filter_map(|s| match &s.shape {
                 egui::Shape::Text(t) => Some(t.galley.job.text.clone()),
+                _ => None,
+            })
+            .collect();
+        self.text_positions = output
+            .shapes
+            .iter()
+            .filter_map(|s| match &s.shape {
+                egui::Shape::Text(t) => {
+                    Some((t.galley.job.text.clone(), t.pos + t.galley.size() * 0.5))
+                }
                 _ => None,
             })
             .collect();
@@ -735,6 +776,48 @@ fn endpoint_drag_preserves_every_transition_function_and_constant_semantics() {
     }
 }
 #[test]
+fn nurbs_shared_boundary_drag_keeps_c2_and_is_one_reversible_history_transaction() {
+    for (scale, floating) in [(1., false), (1.5, true), (2., false)] {
+        let mut h = Harness::new(ChannelKey::Normal, scale, floating);
+        let extent = h.session.draft.extent;
+        h.session
+            .draft
+            .channel_mut(ChannelKey::Normal)
+            .unwrap()
+            .transitions = vec![qx_geometry::transition::Transition::nurbs(
+            1, extent, 1., 1.5,
+        )];
+        h.session.draft =
+            qx_document::editing::split_transition(&h.session.draft, ChannelKey::Normal, 1, 0.3577)
+                .unwrap();
+        assert!(h.session.apply_draft());
+        graph_canvas::fit(&mut h.session);
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        let before = h.session.editor.project().clone();
+        let pos = h.target(1, Some(true));
+        h.press(pos);
+        h.move_to(pos - egui::vec2(0., 10.));
+        h.release(pos - egui::vec2(0., 10.));
+        assert!(!h.session.draft_dirty(), "{}", h.session.status);
+        let edited = h.session.editor.project().clone();
+        assert_ne!(before, edited);
+        let channel = h.session.draft.channel_mut(ChannelKey::Normal).unwrap();
+        assert!(channel.continuity().unwrap().is_empty());
+        assert_eq!(channel.transitions[0].end, channel.transitions[1].start);
+        h.session.undo(false);
+        assert_eq!(h.session.editor.project(), &before);
+        h.session.undo(true);
+        assert_eq!(h.session.editor.project(), &edited);
+        let json = qx_document::persistence::to_json(&edited, &h.session.catalog).unwrap();
+        assert_eq!(
+            edited,
+            qx_document::persistence::from_json(&json, &h.session.catalog).unwrap()
+        );
+    }
+}
+#[test]
 fn m7_real_graph_gestures_regenerate_solids_and_reuse_accepted_preview() {
     for channel in [ChannelKey::Normal, ChannelKey::Lateral, ChannelKey::Roll] {
         let mut h = Harness::new(channel, 1., false);
@@ -769,4 +852,164 @@ fn m7_real_graph_gestures_regenerate_solids_and_reuse_accepted_preview() {
             &h.scene.mesh.as_ref().unwrap().components
         );
     }
+}
+
+#[test]
+fn direct_nurbs_controls_preview_cancel_apply_history_and_reopen_at_multiple_scales() {
+    for (scale, floating) in [(1., false), (1.5, true), (2., false)] {
+        let mut h = Harness::new(ChannelKey::Normal, scale, floating);
+        let length = h.session.draft.extent;
+        h.session
+            .draft
+            .channel_mut(ChannelKey::Normal)
+            .unwrap()
+            .transitions = vec![qx_geometry::transition::Transition::nurbs(
+            1, length, 1., 1.5,
+        )];
+        assert!(h.session.apply_draft());
+        graph_canvas::fit(&mut h.session);
+        h.wait();
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        let before = h.session.editor.project().clone();
+        let original_scene = h.scene.track.clone();
+        let (_, control, rect) = h.controls[0];
+        let pos = rect.center();
+        h.press(pos);
+        assert!(matches!(h.session.graph_drag.as_ref().unwrap().target.kind,
+            super::graph_gesture::Kind::Control { index } if index == control));
+        h.move_to(pos - egui::vec2(0., 12.));
+        h.wait();
+        assert_ne!(
+            h.scene.track, original_scene,
+            "graph edit must reach generated geometry"
+        );
+        assert!(h.session.visible_preview);
+        assert_eq!(
+            h.session.editor.project(),
+            &before,
+            "drag preview cannot commit"
+        );
+        h.key(egui::Key::Escape, Modifiers::NONE);
+        h.release(pos);
+        assert_eq!(h.session.editor.project(), &before);
+        assert_eq!(h.session.draft, before.sections[1]);
+        h.wait();
+        assert_eq!(h.scene.track, original_scene);
+        // Existing drafts stay staged; release must not swallow Apply/Cancel.
+        super::graph_regions::split(&mut h.session, length * 0.5);
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        let staged = h.session.draft.clone();
+        let (_, _, rect) = h.controls[0];
+        let pos = rect.center();
+        h.press(pos);
+        h.move_to(pos - egui::vec2(0., 8.));
+        h.release(pos - egui::vec2(0., 8.));
+        assert_ne!(h.session.draft, staged);
+        assert_eq!(h.session.editor.project(), &before);
+        assert!(
+            h.session
+                .draft
+                .channel_mut(ChannelKey::Normal)
+                .unwrap()
+                .continuity()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(h.session.apply_draft(), "{}", h.session.status);
+        let after = h.session.editor.project().clone();
+        h.session.undo(false);
+        assert_eq!(h.session.editor.project(), &before);
+        h.session.undo(true);
+        assert_eq!(h.session.editor.project(), &after);
+        let json = qx_document::persistence::to_json(&after, &h.session.catalog).unwrap();
+        let reopened = qx_document::persistence::from_json(&json, &h.session.catalog).unwrap();
+        assert_eq!(reopened, after);
+        assert_eq!(
+            reopened
+                .generate(&h.session.catalog, h.session.options)
+                .unwrap(),
+            after
+                .generate(&h.session.catalog, h.session.options)
+                .unwrap()
+        );
+        super::graph_regions::split(&mut h.session, length * 0.75);
+        h.session.cancel_section();
+        assert_eq!(h.session.draft, after.sections[1]);
+    }
+}
+
+#[test]
+fn graph_context_split_uses_frozen_station_and_selects_right_region() {
+    let mut h = Harness::new(ChannelKey::Normal, 1., false);
+    let before = h.session.draft.clone();
+    let rect = graph_canvas::plot_rect(h.canvas());
+    let pos = egui::pos2(rect.left() + rect.width() * 0.7, rect.bottom() - 20.);
+    let view = h.session.graph_view.view;
+    let station = view.x.min + 0.7 * view.x.span();
+    h.frame(vec![
+        Event::PointerMoved(pos),
+        pointer(pos, PointerButton::Secondary, true),
+    ]);
+    h.frame(vec![pointer(pos, PointerButton::Secondary, false)]);
+    for _ in 0..3 {
+        h.frame(vec![]);
+    }
+    let button = h
+        .text_positions
+        .iter()
+        .find(|(label, _)| label == "Split here (preserve shape)")
+        .expect("graph context menu split command")
+        .1;
+    // Moving from the graph to the popup must not change the requested station.
+    h.press(button);
+    h.release(button);
+    assert_eq!(h.session.transition, 2);
+    let c = h.session.draft.channel_mut(ChannelKey::Normal).unwrap();
+    assert_eq!(c.transitions.len(), 3);
+    assert!((c.transitions[0].length + c.transitions[1].length - station).abs() < 1e-5);
+    assert!(c.continuity().unwrap().is_empty());
+    for i in 0..=100 {
+        let x = h.session.draft.extent * i as f64 / 100.;
+        let mut a = before.clone();
+        let e = a
+            .channel_mut(ChannelKey::Normal)
+            .unwrap()
+            .evaluate(x)
+            .unwrap();
+        let f = h
+            .session
+            .draft
+            .channel_mut(ChannelKey::Normal)
+            .unwrap()
+            .evaluate(x)
+            .unwrap();
+        assert!((e.value - f.value).abs() < 1e-12);
+    }
+    h.session.cancel_section();
+    assert_eq!(h.session.draft, before);
+}
+
+#[test]
+fn live_shift_precision_uses_rolling_deltas_without_modifier_jumps() {
+    let mut h = Harness::new(ChannelKey::Normal, 1., false);
+    let pos = h.target(1, Some(true));
+    let start = h.value(0, true);
+    let scale =
+        h.session.graph_view.view.y.span() / graph_canvas::plot_rect(h.canvas()).height() as f64;
+    h.press(pos);
+    h.move_to(pos - egui::vec2(0., 10.));
+    h.frame_modifiers(
+        vec![Event::PointerMoved(pos - egui::vec2(0., 30.))],
+        Modifiers::SHIFT,
+    );
+    assert!((h.value(0, true) - start - 12. * scale).abs() < 1e-8);
+    h.frame_modifiers(vec![], Modifiers::NONE);
+    assert!((h.value(0, true) - start - 12. * scale).abs() < 1e-8);
+    h.move_to(pos - egui::vec2(0., 40.));
+    assert!((h.value(0, true) - start - 22. * scale).abs() < 1e-8);
+    h.release(pos - egui::vec2(0., 40.));
 }

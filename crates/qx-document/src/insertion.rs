@@ -4,7 +4,7 @@ use qx_geometry::{
     authoring::{Domain, Section, SectionKind},
     math::{Frame, Vec3},
     solver::GeneratedTrack,
-    transition::{Channel, Function, Transition, Unit},
+    transition::{Channel, Transition, Unit},
 };
 
 /// Initialize a fresh template at an insertion index using resolved *committed*
@@ -61,14 +61,7 @@ pub fn initialize(
     };
     let profile = |unit, value| Channel {
         unit,
-        transitions: vec![Transition {
-            id: 1,
-            length: section.extent,
-            start: value,
-            end: value,
-            amplitude: 0.,
-            function: Function::QuinticSmoothstep {},
-        }],
+        transitions: vec![Transition::nurbs(1, section.extent, value, value)],
     };
     let tangent = frame.tangent();
     let curvature = omega.cross(tangent);

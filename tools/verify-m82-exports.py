@@ -102,7 +102,7 @@ assert {c["name"] for c in evidence["cases"]} == {"conventional", "below-track",
 for case in evidence["cases"]:
     directory = root / case["name"]
     project = json.loads((root / case["project"]).read_text())
-    assert project["schema_version"] == 5
+    assert project["schema_version"] == 6
     train = project["trains"][0]
     assert len(train["cars"]) == 3
     components = {c["id"]: c for c in train["components"]}
