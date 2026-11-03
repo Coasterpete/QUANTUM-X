@@ -4,7 +4,7 @@ use super::{
     plot::Plot,
     session::Session,
 };
-use egui::{Color32, Pos2, Sense, Stroke};
+use egui::{Color32, Sense, Stroke};
 use qx_geometry::{
     authoring::{ChannelKey, Section},
     transition::Function,
@@ -159,6 +159,8 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         );
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let (_, color) = channel_style(key);
+    let mut detail_budget = 16384;
+    let mut sampling_feedback = None;
     let committed = if let Some(device) = session.graph_device() {
         session
             .editor
@@ -180,23 +182,15 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     if let Some(committed) = committed.filter(|c| c.transitions != channel.transitions) {
         let mut start = 0.;
         for t in &committed.transitions {
-            let from = (x.min - start).clamp(0., t.length);
-            let to = (x.max - start).clamp(0., t.length);
-            if to > from {
-                for i in (0..160).step_by(2) {
-                    let a = from + (to - from) * i as f64 / 160.;
-                    let b = from + (to - from) * (i + 1) as f64 / 160.;
-                    if let (Ok(ae), Ok(be)) = (t.evaluate(a), t.evaluate(b)) {
-                        painter.line_segment(
-                            [
-                                mapping.map(start + a, ae.value),
-                                mapping.map(start + b, be.value),
-                            ],
-                            Stroke::new(1., Color32::from_gray(155)),
-                        );
-                    }
-                }
-            }
+            sampling_feedback = super::graph_curve::paint(
+                &painter,
+                &mapping,
+                t,
+                start,
+                super::graph_curve::Appearance::Committed,
+                &mut detail_budget,
+            )
+            .or(sampling_feedback);
             start += t.length;
         }
         painter.text(
@@ -253,37 +247,15 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             ],
             Stroke::new(1., Color32::from_gray(78)),
         );
-        let begin_x = (x.min - cursor).clamp(0., t.length);
-        let end_x = (x.max - cursor).clamp(0., t.length);
-        let points: Vec<Pos2> = (0..=128)
-            .filter_map(|i| {
-                if end_x <= begin_x {
-                    return None;
-                }
-                let input = begin_x + (end_x - begin_x) * i as f64 / 128.;
-                t.evaluate(input)
-                    .ok()
-                    .map(|e| mapping.map(cursor + input, e.value))
-            })
-            .collect();
-        if points.len() > 1 {
-            // Neutral under-stroke preserves exact blue/purple against black.
-            painter.add(egui::Shape::line(
-                points.clone(),
-                Stroke::new(if active { 4.5 } else { 3.5 }, Color32::from_gray(190)),
-            ));
-            painter.add(egui::Shape::line(
-                points,
-                Stroke::new(
-                    if active { 2.5 } else { 1.5 },
-                    if active {
-                        color
-                    } else {
-                        color.gamma_multiply(0.65)
-                    },
-                ),
-            ));
-        }
+        sampling_feedback = super::graph_curve::paint(
+            &painter,
+            &mapping,
+            t,
+            cursor,
+            super::graph_curve::Appearance::Draft { color, active },
+            &mut detail_budget,
+        )
+        .or(sampling_feedback);
         if active
             && let Some(text) =
                 super::graph_regions::controls(session, ui, &mapping, t, index, cursor, color)
@@ -495,6 +467,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         feedback = Some(format!(
             "Selected {label} · {station:.8} {x_unit} · {value:.8} {unit} · Edit values for exact coordinates"
         ));
+    }
+    if let Some(sampling) = sampling_feedback {
+        feedback =
+            Some(feedback.map_or_else(|| sampling.clone(), |text| format!("{sampling} · {text}")));
     }
     session.graph_readout = feedback.map(|text| {
         format!(

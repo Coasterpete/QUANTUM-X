@@ -61,11 +61,9 @@ impl View {
         channel.validate().ok()?;
         let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
         for t in &channel.transitions {
-            for i in 0..=512 {
-                let value = t.evaluate(t.length * (i as f64 / 512.)).ok()?.value;
-                min = min.min(value);
-                max = max.max(value);
-            }
+            let bounds = qx_geometry::profile_plot::bounds(t).ok()?;
+            min = min.min(bounds[0]);
+            max = max.max(bounds[1]);
         }
         let constant_margin: f64 = match channel.unit {
             Unit::RadiansPerMetre => 0.05,

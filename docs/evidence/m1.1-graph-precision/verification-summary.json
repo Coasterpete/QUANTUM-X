@@ -1,0 +1,22 @@
+{
+  "date": "2026-11-03",
+  "branch": "codex/m1.1-graph-precision-kex-reference",
+  "checkpoint": "b3f21463e03b7e2d679cf3a3043efec9b5505695",
+  "baseline_passed": 368,
+  "final_passed": 383,
+  "focused_geometry_passed": 11,
+  "focused_editor_passed": 4,
+  "opt_in_gpu_test_passed": 1,
+  "offscreen_images": 6,
+  "kex_commit": "9847fea0568f1c5a59e4464eb8431013dec8aa9b",
+  "kex_upstream_tests_passed": 143,
+  "native_gui_manual_tested": false,
+  "numeric_persistence_artifacts_identical": 10,
+  "checks": [
+    "cargo fmt --all -- --check",
+    "cargo check --workspace",
+    "cargo clippy --workspace --all-targets -- -D warnings",
+    "cargo test --workspace",
+    "cargo build --release --workspace"
+  ]
+}

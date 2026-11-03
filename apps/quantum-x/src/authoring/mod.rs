@@ -17,11 +17,14 @@ mod expansion_tests;
 mod files;
 mod graph;
 mod graph_canvas;
+mod graph_curve;
 mod graph_domain;
 #[cfg(test)]
 mod graph_drag_tests;
 mod graph_gesture;
 mod graph_precision;
+#[cfg(test)]
+mod graph_precision_tests;
 mod graph_regions;
 mod graph_view;
 mod icons;

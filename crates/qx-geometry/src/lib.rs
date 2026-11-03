@@ -9,6 +9,7 @@ pub mod engineering;
 pub mod heartline;
 pub mod math;
 pub mod profile;
+pub mod profile_plot;
 mod profile_transition;
 pub mod solver;
 pub mod source_profile;
