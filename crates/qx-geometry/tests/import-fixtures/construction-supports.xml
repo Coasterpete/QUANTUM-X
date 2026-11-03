@@ -1,0 +1,15 @@
+<!-- Original synthetic support positions; no verified connector solids. MIT OR Apache-2.0. -->
+<root><supports>
+<rasc type="2" center_rails_coord="7.587090047692944" custom_track_index="0"><subnode id="rail-12"><pos>106.26603506990385 43.22729079930108 -69.43452924758425</pos></subnode></rasc>
+<footernode id="footer-12" contype="0" basetype="1"><pos>106.26603506990385 20 -69.43452924758425</pos></footernode>
+<beam start="rail-12" end="footer-12" type="1" size1="0.3"/>
+<rasc type="2" center_rails_coord="28.18771754010219" custom_track_index="0"><subnode id="rail-48"><pos>123.07846351900156 50.897500178300234 -61.31320051993133</pos></subnode></rasc>
+<footernode id="footer-48" contype="0" basetype="1"><pos>123.07846351900156 20 -61.31320051993133</pos></footernode>
+<beam start="rail-48" end="footer-48" type="1" size1="0.3"/>
+<rasc type="2" center_rails_coord="57.95804521075998" custom_track_index="0"><subnode id="rail-100"><pos>134.9123245311419 40.693440096718405 -37.4758020583696</pos></subnode></rasc>
+<footernode id="footer-100" contype="0" basetype="1"><pos>134.9123245311419 20 -37.4758020583696</pos></footernode>
+<beam start="rail-100" end="footer-100" type="1" size1="0.3"/>
+<rasc type="2" center_rails_coord="84.49278178397824" custom_track_index="0"><subnode id="rail-144"><pos>129.0984211272539 27.912022095321745 -15.550529881228556</pos></subnode></rasc>
+<footernode id="footer-144" contype="0" basetype="1"><pos>129.0984211272539 20 -15.550529881228556</pos></footernode>
+<beam start="rail-144" end="footer-144" type="1" size1="0.3"/>
+</supports></root>

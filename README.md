@@ -182,6 +182,9 @@ for executed checks and manual limitations.
 - [Procedural track construction](docs/m7-procedural-track-engine.md),
   [GLB assets and rigid-body foundations](docs/m8-rigid-body-foundation.md), and
   [experimental vehicle playback](docs/m82-universal-vehicle-playback.md).
+- [M1.3 segmented construction diagnostic and asset inventory](docs/m1.3-segmented-construction.md),
+  [synthetic rendering comparisons](docs/evidence/m1.3-segmented-construction/README.md),
+  and [guided Rust/C++ lesson](docs/m1.3-rust-guide.md).
 - [Catalog and asset contracts](docs/library-catalog.md),
   [approved Windows icon](docs/windows-icon.md), and
   [core math and coordinate conventions](docs/core-foundation.md).

@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "segments": [
+    {
+      "id": "synthetic-0",
+      "start_m": 0.0,
+      "end_m": 24.25,
+      "style_id": "box-spined-100",
+      "variant_id": "source-single"
+    },
+    {
+      "id": "synthetic-1",
+      "start_m": 24.25,
+      "end_m": 70.75,
+      "style_id": "box-spined-100",
+      "variant_id": "diagnostic-double"
+    },
+    {
+      "id": "synthetic-2",
+      "start_m": 70.75,
+      "end_m": 92.97301124220668,
+      "style_id": "box-spined-100",
+      "variant_id": "source-single"
+    }
+  ]
+}

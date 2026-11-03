@@ -1,5 +1,7 @@
 //! Renderer-independent f64 procedural construction. No source sample is changed.
 //! Profiles live in (N,L); hardware uses local (T,N,L). Repeated meshes are shared.
+pub mod segmented;
+
 use crate::{
     Result, ensure,
     math::{Frame, Quaternion, Vec3},
@@ -275,6 +277,17 @@ fn sweep(
     caps: bool,
     budget: &mut Budget,
 ) -> Result<Mesh> {
+    sweep_with_caps(samples, profile, offset, rotation, [caps; 2], budget)
+}
+fn sweep_with_caps(
+    samples: &[CenterlineSample],
+    profile: &Profile,
+    offset: Vec3,
+    rotation: f64,
+    caps: [bool; 2],
+    budget: &mut Budget,
+) -> Result<Mesh> {
+    let cap_count = caps.iter().filter(|c| **c).count();
     let points = profile
         .points()
         .map_err(|e| crate::GeometryError(e.to_string()))?;
@@ -282,11 +295,11 @@ fn sweep(
     let rings = samples.len();
     let count = rings
         .checked_mul(n * 2)
-        .and_then(|v| v.checked_add(if caps { n * 2 } else { 0 }))
+        .and_then(|v| v.checked_add(cap_count * n))
         .ok_or_else(|| crate::GeometryError("vertex count overflow".into()))?;
     let index_count = (rings - 1)
         .checked_mul(n * 6)
-        .and_then(|v| v.checked_add(if caps { (n - 2) * 6 } else { 0 }))
+        .and_then(|v| v.checked_add(cap_count * (n - 2) * 3))
         .ok_or_else(|| crate::GeometryError("index count overflow".into()))?;
     budget.reserve(count, index_count, 0)?;
     let mut vertices = allocated(count)?;
@@ -340,9 +353,12 @@ fn sweep(
             indices.extend_from_slice(&[a, b, c, b, d, c]);
         }
     }
-    if caps {
+    if cap_count > 0 {
         let triangles = cap_triangles(&points)?;
-        for (i, sign) in [(0, -1.), (rings - 1, 1.)] {
+        for (end, (i, sign)) in [(0, -1.), (rings - 1, 1.)].into_iter().enumerate() {
+            if !caps[end] {
+                continue;
+            }
             let base = vertices.len() as u32;
             for (j, point) in points.iter().enumerate() {
                 vertices.push(MeshVertex {
@@ -428,9 +444,54 @@ pub fn build_with_assets(
         instances: 0,
         bytes: 0,
     };
+    let components = build_components(
+        track,
+        &track.samples,
+        definition,
+        Part::All,
+        None,
+        assets,
+        &mut budget,
+        &mut vec![],
+    )?;
+    finish_mesh(
+        components,
+        definition.materials.clone(),
+        budget,
+        track.samples[0].position_m,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum Part {
+    All,
+    Running,
+    Structure,
+}
+#[derive(Clone, Copy)]
+struct HardwareWindow {
+    start: f64,
+    end: f64,
+    final_interval: bool,
+}
+// The same sweep and asset resolver serve ordinary and segmented construction.
+#[allow(clippy::too_many_arguments)]
+fn build_components(
+    track: &GeneratedTrack,
+    samples: &[CenterlineSample],
+    definition: &TrackConstruction,
+    part: Part,
+    window: Option<HardwareWindow>,
+    assets: &dyn ConstructionAssets,
+    budget: &mut Budget,
+    omitted: &mut Vec<(String, f64)>,
+) -> Result<Vec<Component>> {
     let mut components = vec![];
-    let mut bounds = Bounds::point(track.samples[0].position_m);
-    for c in &definition.continuous {
+    for c in definition.continuous.iter().filter(|c| match part {
+        Part::All => true,
+        Part::Running => c.role == Role::Running,
+        Part::Structure => c.role != Role::Running,
+    }) {
         let resolved;
         let profile = if let Profile::AssetSection { path, scale, .. } = &c.profile {
             resolved = assets.section(path, *scale)?;
@@ -438,15 +499,17 @@ pub fn build_with_assets(
         } else {
             &c.profile
         };
-        let mesh = sweep(
-            &track.samples,
+        let caps = window.map_or([c.cap_ends; 2], |w| {
+            [c.cap_ends || w.start > 0., c.cap_ends || !w.final_interval]
+        });
+        let mesh = sweep_with_caps(
+            samples,
             profile,
             v3(c.offset_m),
             c.rotation_rad,
-            c.cap_ends,
-            &mut budget,
+            caps,
+            budget,
         )?;
-        bounds.union(mesh.bounds);
         components.push(Component {
             id: c.id.clone(),
             role: c.role,
@@ -457,9 +520,13 @@ pub fn build_with_assets(
             placements: vec![],
         });
     }
-    for c in &definition.repeated {
+    for c in definition
+        .repeated
+        .iter()
+        .filter(|_| !matches!(part, Part::Running))
+    {
         let end = track.length_m() - c.end_margin_m;
-        let count = if end < c.start_m {
+        let total = if end < c.start_m {
             0
         } else {
             let steps = ((end - c.start_m) / c.spacing_m).floor();
@@ -469,7 +536,18 @@ pub fn build_with_assets(
             )?;
             steps as usize + 1
         };
-        budget.reserve(0, 0, count)?;
+        let first = window.map_or(0, |w| {
+            (((w.start - c.start_m) / c.spacing_m).ceil().max(0.) as usize).min(total)
+        });
+        let last = window.map_or(total, |w| {
+            let k = if w.final_interval {
+                ((w.end - c.start_m) / c.spacing_m).floor() + 1.
+            } else {
+                ((w.end - c.start_m) / c.spacing_m).ceil()
+            };
+            (k.max(0.) as usize).min(total)
+        });
+        let count = last.saturating_sub(first);
         let frame = Frame::new(Quaternion::IDENTITY)?;
         let mesh = match &c.shape {
             HardwareShape::Asset { path, scale, .. } => {
@@ -502,7 +580,7 @@ pub fn build_with_assets(
                     Vec3::ZERO,
                     0.,
                     true,
-                    &mut budget,
+                    budget,
                 )?
             }
         };
@@ -511,8 +589,29 @@ pub fn build_with_assets(
             .compose(Quaternion::axis_angle(Vec3::X, c.rotation_rad[0])?);
         let mut placements = allocated(count)?;
         let mut component_bounds = None::<Bounds>;
-        for k in 0..count {
+        // A local sphere limits seam tests to nearby hardware. Test transformed
+        // vertices against each cut plane: curved/banked parts are never cut or
+        // stretched, and their finite rigid footprint cannot cross that plane.
+        let radius = mesh
+            .vertices
+            .iter()
+            .map(|v| (rotation.rotate_unit(v.position_m) + v3(c.offset_m)).length())
+            .fold(0., f64::max);
+        let cuts = window
+            .map(|w| {
+                Ok::<_, crate::GeometryError>((
+                    track.sample_at_distance(w.start)?,
+                    track.sample_at_distance(w.end)?,
+                ))
+            })
+            .transpose()?;
+        for k in first..last {
             let station = c.start_m + k as f64 * c.spacing_m;
+            if let Some(w) = window
+                && (station < w.start || station > w.end || (!w.final_interval && station == w.end))
+            {
+                continue;
+            }
             let sample = track.sample_at_distance(station)?;
             let base = if c.alignment == Alignment::TrackFrame {
                 sample.frame
@@ -525,6 +624,25 @@ pub fn build_with_assets(
                 position_m: sample.position_m + base.local_to_world(v3(c.offset_m)),
                 frame: Frame::new(base.orientation().compose(rotation))?,
             };
+            if let (Some(w), Some((start, end))) = (window, cuts.as_ref()) {
+                let crosses = mesh.vertices.iter().any(|v| {
+                    let p = placement.position_m + placement.frame.local_to_world(v.position_m);
+                    (w.start > 0.
+                        && station - w.start <= radius
+                        && (p - start.position_m).dot(start.frame.tangent()) < -1e-10)
+                        || (!w.final_interval
+                            && w.end - station <= radius
+                            && (p - end.position_m).dot(end.frame.tangent()) > 1e-10)
+                });
+                if crosses {
+                    ensure(
+                        omitted.len() < budget.limits.max_instances.min(100_000),
+                        "omitted boundary hardware diagnostic budget exceeded",
+                    )?;
+                    omitted.push((c.id.clone(), station));
+                    continue;
+                }
+            }
             for vertex in &mesh.vertices {
                 let p = placement.position_m + placement.frame.local_to_world(vertex.position_m);
                 if let Some(b) = &mut component_bounds {
@@ -535,8 +653,8 @@ pub fn build_with_assets(
             }
             placements.push(placement);
         }
-        let cb = component_bounds.unwrap_or(Bounds::point(track.samples[0].position_m));
-        bounds.union(cb);
+        budget.reserve(0, 0, placements.len())?;
+        let cb = component_bounds.unwrap_or(Bounds::point(samples[0].position_m));
         components.push(Component {
             id: c.id.clone(),
             role: Role::Hardware,
@@ -546,6 +664,18 @@ pub fn build_with_assets(
             placements,
             bounds: cb,
         });
+    }
+    Ok(components)
+}
+fn finish_mesh(
+    components: Vec<Component>,
+    materials: Vec<Material>,
+    budget: Budget,
+    origin: Vec3,
+) -> Result<TrackMesh> {
+    let mut bounds = Bounds::point(origin);
+    for c in &components {
+        bounds.union(c.bounds);
     }
     let rendered_triangles = components
         .iter()
@@ -560,7 +690,7 @@ pub fn build_with_assets(
         .sum();
     Ok(TrackMesh {
         components,
-        materials: definition.materials.clone(),
+        materials,
         bounds,
         stats: MeshStats {
             vertices: budget.vertices,

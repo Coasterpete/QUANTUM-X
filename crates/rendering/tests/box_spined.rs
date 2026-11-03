@@ -22,6 +22,23 @@ fn fixture() -> TrackConstruction {
     .unwrap()
 }
 #[test]
+fn planned_sources_validate_without_activating_unresolved_styles() {
+    let assets = sources();
+    for number in [100, 200, 300] {
+        let spine = format!("tracks/box-spined/{number}/Box-Spine-{number}.glb");
+        let tie = format!("tracks/box-spined/{number}/Box-Spine-{number}-crosstie.glb");
+        let profile = assets.section(&spine, [1.; 3]).unwrap();
+        let hardware = assets.hardware(&tie, [1.; 3]).unwrap();
+        profile.validate().unwrap();
+        hardware.validate().unwrap();
+        println!(
+            "style {number}: {} section edges, {} tie vertices; source validation only, assembly/attachment conventions still require owner specification",
+            profile.points().unwrap().len(),
+            hardware.vertices.len()
+        );
+    }
+}
+#[test]
 fn original_spine_section_and_crosstie_are_preserved() {
     let assets = sources();
     let source = assets.original(SPINE, [1.; 3]).unwrap();
