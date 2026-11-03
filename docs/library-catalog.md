@@ -41,8 +41,10 @@ The named style IDs are `floorless-dive-machine`, `xtreme-spinning`, and
 a train or a validated simulation configuration. Controlled 4D, free-spin,
 flying, inverted and suspended motorcycle categories remain distinct.
 
-`.gitkeep` preserves the 36 otherwise empty leaf directories. No style manifests,
-cross-sections, train bodies, textures or previews were manufactured to fill them.
+`.gitkeep` preserves otherwise empty leaf directories. M2 registers Box Spined-100
+from the owner's existing GLBs, with a construction manifest and previews
+rendered from that construction. No substitute hardware or train bodies were
+manufactured to fill other directories.
 `assets/development/train/` retains the original diagnostic GLBs separately.
 
 ## Style manifest version 1
@@ -72,9 +74,11 @@ directory, including through Windows junctions/symlinks.
 
 Track manifests use `kind: "track"` and an explicit, validated M7
 `TrackConstruction` in `construction`. Its serialized format is the same as a
-project's `construction` field. Arbitrary GLB references are metadata, not a new
-track-mesh rendering implementation. A ready track requires supported procedural
-construction; a standalone mesh reference cannot satisfy that requirement.
+project's `construction` field. M2's `AssetSection` profile and repeated `Asset`
+shape resolve through the construction importer; visual references alone remain
+insufficient. A ready track requires supported, verified construction. Source
+references inside construction are assets-root-relative to allow reuse across
+families; manifest `visuals` and preview paths remain style-directory-relative.
 
 Train manifests use `kind: "train"` and a `mechanical_definition` path to a
 standalone serialized `qx_document::train::Train`. Its SI component masses,
@@ -126,7 +130,11 @@ Development executables fall back to the workspace assets directory.
 ```
 
 The strict check also parses mechanical definitions for content-ready trains.
-All current entries are planned and therefore report `content_ready: false`.
+Box Spined-100 now reports `content_ready: true` when its registered files resolve;
+the application additionally imports and builds its source construction during
+`--self-check` and gates Apply on a valid worker preview. Other current entries
+are Planned and report `content_ready: false`. Available describes implemented
+visual content, not finalized production dimensions or mechanical certification.
 
 ## Compatibility and project persistence
 
@@ -148,10 +156,12 @@ Unavailable catalog content does not discard saved definitions or assignments.
 
 ## Editor boundary
 
-Existing Coaster Properties now exposes the indexed track families, explicit
-status, paths, diagnostics and compatibility. Planned entries have disabled Apply
-controls. A content-ready procedural track can apply its construction and style
-selection as one transaction, preserving the authored centerline.
+Coaster Properties exposes indexed track families, numbered styles, explicit
+status, actual previews and compatibility. Raw paths/asset diagnostics remain in
+optional development inspection. Planned entries can record design intent but
+cannot install missing construction. A content-ready style previews and applies
+its construction and selection as one transaction, preserving authored sections,
+NURBS transition profiles, reference settings and train mechanics.
 
 Train Configuration contains a collapsed **Train Library · development inspection**
 group showing the owner's public families and styles. It is read-only: this pass

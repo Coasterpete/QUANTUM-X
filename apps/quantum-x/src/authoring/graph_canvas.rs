@@ -1,10 +1,10 @@
-//! Pointer authoring is a reversible draft gesture, committed at most once on release.
+//! Pointer authoring stages reversible draft gestures; only explicit Apply commits.
 use super::{
     graph_gesture::{self, Kind, Target},
     plot::Plot,
     session::Session,
 };
-use egui::{Color32, Pos2, Sense, Stroke};
+use egui::{Color32, Sense, Stroke};
 use qx_geometry::{
     authoring::{ChannelKey, Section},
     transition::Function,
@@ -21,11 +21,40 @@ pub(super) fn channel_style(key: ChannelKey) -> (&'static str, Color32) {
 }
 pub(super) fn fit(session: &mut Session) {
     super::graph_view::sync(session);
-    if let Some(view) =
-        super::graph_view::View::fit(session.draft.channel_mut(session.channel).unwrap())
-    {
+    let mut c = session
+        .graph_section()
+        .channel_mut(session.graph_key())
+        .unwrap()
+        .clone();
+    if session.graph_device().is_some() {
+        c.unit = qx_geometry::transition::Unit::MetresPerSecondSquared;
+    }
+    if let Some(view) = super::graph_view::View::fit(&c) {
         session.graph_view.set(view);
     }
+}
+pub(super) fn fit_region(session: &mut Session) {
+    super::graph_view::sync(session);
+    let extent = session
+        .graph_section()
+        .channel_mut(session.graph_key())
+        .unwrap()
+        .length();
+    if let Some(x) = super::plot::Axis::new(0., extent) {
+        session.graph_view.set(super::graph_view::View {
+            x,
+            ..session.graph_view.view
+        });
+    }
+}
+pub(super) fn reset(session: &mut Session) {
+    super::graph_view::sync(session);
+    let mut section = session.graph_section();
+    let c = section.channel_mut(session.graph_key()).unwrap();
+    if session.graph_device().is_some() {
+        c.unit = qx_geometry::transition::Unit::MetresPerSecondSquared;
+    }
+    session.graph_view.set(super::graph_view::View::reset(c));
 }
 pub(super) fn boundary(
     section: &Section,
@@ -48,11 +77,7 @@ pub(super) fn route_scroll_tail(session: &Session, ui: &egui::Ui) {
     if fresh {
         let over_graph = ui
             .ctx()
-            .read_response(egui::Id::unique((
-                "graph canvas",
-                session.selected.0,
-                session.channel as u8,
-            )))
+            .read_response(session.graph_canvas_id())
             .is_some_and(|r| {
                 ui.ctx()
                     .pointer_hover_pos()
@@ -75,7 +100,9 @@ pub(super) fn plot_rect(outer: egui::Rect) -> egui::Rect {
 }
 pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     super::graph_view::sync(session);
-    let extent = session.draft.channel_mut(session.channel).unwrap().length();
+    let mut section = session.graph_section();
+    let key = session.graph_key();
+    let extent = section.channel_mut(key).unwrap().length();
     let height = ui.available_height().clamp(54., 600.);
     // Unwrapped precision labels or toolbar minimum widths must never push the
     // mathematical right endpoint past the pane's actual interactive clip.
@@ -84,33 +111,99 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         .min(ui.clip_rect().right() - ui.cursor().left())
         .max(2.);
     let (_, outer) = ui.allocate_space(egui::vec2(width, height));
-    let response = ui.interact(
-        outer,
-        egui::Id::unique(("graph canvas", session.selected.0, session.channel as u8)),
-        Sense::click_and_drag(),
-    );
+    let response = ui.interact(outer, session.graph_canvas_id(), Sense::click_and_drag());
     let super::graph_view::View { x, y } = session.graph_view.view;
     let rect = plot_rect(outer);
     let Some(mapping) = Plot::new(rect, [x.min, x.max], [y.min, y.max]) else {
         return;
     };
-    let x_unit = match session.draft.domain {
+    let x_unit = match section.domain {
         qx_geometry::authoring::Domain::Time => "s",
         qx_geometry::authoring::Domain::Distance => "m",
         _ => "normalized",
     };
-    let channel = session.draft.channel_mut(session.channel).unwrap().clone();
-    let unit = match channel.unit {
-        qx_geometry::transition::Unit::G => "g",
-        qx_geometry::transition::Unit::RadiansPerSecond => "rad/s",
-        qx_geometry::transition::Unit::RadiansPerMetre => "rad/m",
-        _ => "rad/u",
-    };
+    let channel = section.channel_mut(key).unwrap().clone();
+    let unit = super::snap::unit_label(if session.graph_device().is_some() {
+        qx_geometry::transition::Unit::MetresPerSecondSquared
+    } else {
+        channel.unit
+    });
     mapping.paint_grid(ui, outer, x_unit, unit);
+    let label = format!(
+        "{} · {}",
+        section.name,
+        if session.graph_device().is_some() {
+            if session.expansion.operations != session.editor.project().operations {
+                "Draft"
+            } else {
+                "Committed"
+            }
+        } else if session.draft_dirty() {
+            "Draft"
+        } else {
+            "Committed"
+        }
+    );
+    let galley = egui::WidgetText::from(label).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Truncate),
+        (rect.left() - outer.left() - 6.).max(1.),
+        egui::TextStyle::Small,
+    );
+    ui.painter()
+        .with_clip_rect(outer.intersect(ui.clip_rect()))
+        .galley(
+            outer.left_top() + egui::vec2(0., 14.),
+            galley,
+            ui.visuals().text_color(),
+        );
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
-    let (_, color) = channel_style(session.channel);
+    let (_, color) = channel_style(key);
+    let mut detail_budget = 16384;
+    let mut sampling_feedback = None;
+    let committed = if let Some(device) = session.graph_device() {
+        session
+            .editor
+            .project()
+            .operations
+            .devices
+            .iter()
+            .find(|d| d.id == device)
+            .and_then(|d| d.acceleration_curve.clone())
+    } else {
+        session
+            .editor
+            .project()
+            .sections
+            .iter()
+            .find(|s| s.id == section.id)
+            .and_then(|s| s.clone().channel_mut(key).ok().cloned())
+    };
+    if let Some(committed) = committed.filter(|c| c.transitions != channel.transitions) {
+        let mut start = 0.;
+        for t in &committed.transitions {
+            sampling_feedback = super::graph_curve::paint(
+                &painter,
+                &mapping,
+                t,
+                start,
+                super::graph_curve::Appearance::Committed,
+                &mut detail_budget,
+            )
+            .or(sampling_feedback);
+            start += t.length;
+        }
+        painter.text(
+            rect.right_bottom() - egui::vec2(7., 5.),
+            egui::Align2::RIGHT_BOTTOM,
+            "Solid: draft · dashed: committed",
+            egui::FontId::monospace(11.),
+            Color32::WHITE,
+        );
+    }
     if let Some((id, input)) = session.inspect_input
         && id == session.selected
+        && session.graph_device().is_none()
         && (x.min..=x.max).contains(&input)
     {
         let px = mapping.map(input, 0.).x;
@@ -122,7 +215,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     let mut cursor = 0.;
     let mut feedback = None;
     for (index, t) in channel.transitions.iter().enumerate() {
-        let active = session.transition == index;
+        let active = session.graph_transition() == index;
         let left = mapping.map(cursor, y.min).x.max(rect.left());
         let right = mapping.map(cursor + t.length, y.max).x.min(rect.right());
         if active && right > left {
@@ -138,7 +231,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 egui::pos2(left + 6., rect.top() + 5.),
                 egui::Align2::LEFT_TOP,
                 format!(
-                    "Region {} · {cursor:.4}–{:.4} {x_unit}",
+                    "Transition {} · {cursor:.4}–{:.4} {x_unit}",
                     index + 1,
                     cursor + t.length
                 ),
@@ -154,32 +247,15 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             ],
             Stroke::new(1., Color32::from_gray(78)),
         );
-        let begin_x = (x.min - cursor).clamp(0., t.length);
-        let end_x = (x.max - cursor).clamp(0., t.length);
-        let points: Vec<Pos2> = (0..=128)
-            .filter_map(|i| {
-                if end_x <= begin_x {
-                    return None;
-                }
-                let input = begin_x + (end_x - begin_x) * i as f64 / 128.;
-                t.evaluate(input)
-                    .ok()
-                    .map(|e| mapping.map(cursor + input, e.value))
-            })
-            .collect();
-        if points.len() > 1 {
-            painter.add(egui::Shape::line(
-                points,
-                Stroke::new(
-                    if active { 2.5 } else { 1.5 },
-                    if active {
-                        color
-                    } else {
-                        color.gamma_multiply(0.65)
-                    },
-                ),
-            ));
-        }
+        sampling_feedback = super::graph_curve::paint(
+            &painter,
+            &mapping,
+            t,
+            cursor,
+            super::graph_curve::Appearance::Draft { color, active },
+            &mut detail_budget,
+        )
+        .or(sampling_feedback);
         if active
             && let Some(text) =
                 super::graph_regions::controls(session, ui, &mapping, t, index, cursor, color)
@@ -195,8 +271,9 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 egui::Rect::NOTHING
             };
             let target = Target {
-                section: session.selected,
-                channel: session.channel,
+                device: session.graph_device(),
+                section: session.graph_id(),
+                channel: key,
                 transition: t.id,
                 kind: Kind::Boundary,
             };
@@ -236,7 +313,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 ));
             }
             if handle.clicked() {
-                session.transition = index;
+                session.set_graph_transition(index);
             }
             handle.on_hover_text(format!("Boundary {} · {:.8} {x_unit}. Drag horizontally to transfer duration between these two transitions; values and other channels stay unchanged. Esc cancels.", index + 1, cursor + t.length));
         }
@@ -271,8 +348,9 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 0.
             };
             let target = Target {
-                section: session.selected,
-                channel: session.channel,
+                device: session.graph_device(),
+                section: session.graph_id(),
+                channel: key,
                 transition: t.id,
                 kind: Kind::Endpoint { end },
             };
@@ -298,7 +376,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             };
             let handle = ui
                 .interact(hit, target.id(), Sense::click_and_drag())
-                .on_hover_cursor(egui::CursorIcon::ResizeVertical);
+                .on_hover_cursor(target.cursor());
             graph_gesture::capture(session, &mapping, &handle, target, index);
             let dragging = session
                 .graph_drag
@@ -315,7 +393,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                     1.,
                     if dragging && session.graph_feedback.is_some() {
                         Color32::from_rgb(240, 195, 100)
-                    } else if handle.hovered() || dragging {
+                    } else if handle.hovered()
+                        || dragging
+                        || session.graph_selection == Some(target)
+                    {
                         Color32::WHITE
                     } else {
                         color
@@ -336,10 +417,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 ));
             }
             if handle.clicked() {
-                session.transition = index;
+                session.set_graph_transition(index);
             }
             handle.on_hover_text(format!(
-                "Transition {} {} · {:.8} {unit}. Drag vertically; {}. Esc cancels.",
+                "Transition {} {} · {:.8} {unit}. Drag to edit value and internal station (outer stations fixed); {}. Esc cancels; Apply commits.",
                 index + 1,
                 if end { "end" } else { "start" },
                 value,
@@ -361,14 +442,50 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             let input =
                 x.min + (pos.x - rect.left()) as f64 / rect.width() as f64 * (x.max - x.min);
             if (cursor..=cursor + t.length).contains(&input) && (index == 0 || input > cursor) {
-                session.transition = index;
+                session.set_graph_transition(index);
             }
         }
         cursor += t.length;
     }
     // The reserved status line shows this on the next repaint. An overlay would
     // obscure handles in short graphs; allocated text would resize floating UI.
-    session.graph_readout = feedback;
+    if feedback.is_none()
+        && let Some(target) = session.graph_selection.filter(|t| {
+            t.section == session.graph_id()
+                && t.channel == key
+                && t.device == session.graph_device()
+        })
+        && let Some((station, value)) = super::graph_precision::coordinates(session, target)
+    {
+        let label = match target.kind {
+            Kind::Endpoint { end: false } => "start point",
+            Kind::Endpoint { end: true } => "end point",
+            Kind::Boundary => "boundary",
+            Kind::Control { .. } => "shape / easing handle",
+            Kind::Plateau => "plateau level",
+        };
+        feedback = Some(format!(
+            "Selected {label} · {station:.8} {x_unit} · {value:.8} {unit} · Edit values for exact coordinates"
+        ));
+    }
+    if let Some(sampling) = sampling_feedback {
+        feedback =
+            Some(feedback.map_or_else(|| sampling.clone(), |text| format!("{sampling} · {text}")));
+    }
+    session.graph_readout = feedback.map(|text| {
+        format!(
+            "{text} · {}",
+            if session
+                .workbench
+                .snap
+                .graph_active(ui.input(|i| i.modifiers.alt))
+            {
+                "Snap active · Alt bypass"
+            } else {
+                "Snap off / bypassed"
+            }
+        )
+    });
     if session.graph_drag.is_none() {
         super::graph_regions::context_menu(session, ui, &response, &mapping, x_unit);
     }
@@ -377,8 +494,17 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         rect.contains(*p) && ui.clip_rect().contains(*p) && ui.rect_contains_pointer(outer)
     }) {
         let (input, anchor_y) = mapping.unmap(pos);
+        painter.line_segment(
+            [
+                egui::pos2(rect.left(), pos.y),
+                egui::pos2(rect.right(), pos.y),
+            ],
+            Stroke::new(0.75, Color32::from_gray(85)),
+        );
         if let Ok(e) = channel.evaluate(input) {
-            session.inspect_input = Some((session.selected, input));
+            if session.graph_device().is_none() {
+                session.inspect_input = Some((session.selected, input));
+            }
             let point = mapping.map(input, e.value);
             painter.line_segment(
                 [
@@ -388,7 +514,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 Stroke::new(1., Color32::from_gray(100)),
             );
             painter.circle_filled(point, 4., Color32::WHITE);
-            let text = format!("{input:.6} {x_unit}   {:.6} {unit}", e.value);
+            let text = format!(
+                "Station {input:.8} {x_unit} · cursor {anchor_y:.8} · curve {:.8} {unit}",
+                e.value
+            );
             painter.text(
                 rect.right_top() + egui::vec2(-8., 22.),
                 egui::Align2::RIGHT_TOP,
@@ -399,7 +528,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         }
         if session.graph_drag.is_none() {
             let scroll = ui.input_mut(|i| {
-                let delta: f32 = i
+                let delta: (f32, f32) = i
                     .raw
                     .events
                     .iter()
@@ -412,32 +541,36 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                             ..
                         } = event
                             && modifiers.ctrl
-                            && !modifiers.alt
-                            && !modifiers.shift
                         {
-                            Some(
-                                delta.y
-                                    * match unit {
-                                        egui::MouseWheelUnit::Point => 1.,
-                                        egui::MouseWheelUnit::Line => 24.,
-                                        egui::MouseWheelUnit::Page => rect.height(),
-                                    },
-                            )
+                            let amount = delta.y
+                                * match unit {
+                                    egui::MouseWheelUnit::Point => 1.,
+                                    egui::MouseWheelUnit::Line => 24.,
+                                    egui::MouseWheelUnit::Page => rect.height(),
+                                };
+                            Some((
+                                if modifiers.alt { 0. } else { amount },
+                                if modifiers.shift { 0. } else { amount },
+                            ))
                         } else {
                             None
                         }
                     })
-                    .sum();
+                    .fold((0., 0.), |a, b| (a.0 + b.0, a.1 + b.1));
                 i.smooth_scroll_delta = egui::Vec2::ZERO;
                 delta
             });
-            if scroll != 0. {
-                let factor = (-scroll as f64 * 0.005).exp().clamp(0.1, 10.);
-                session.graph_view.set(session.graph_view.view.zoom(
-                    (input, anchor_y),
-                    factor,
-                    extent,
-                ));
+            if scroll != (0., 0.) {
+                let factors = (
+                    (-scroll.0 as f64 * 0.005).exp().clamp(0.1, 10.),
+                    (-scroll.1 as f64 * 0.005).exp().clamp(0.1, 10.),
+                );
+                let view = session.graph_view.view;
+                session.graph_view.set(if factors.0 == factors.1 {
+                    view.zoom((input, anchor_y), factors.0, extent)
+                } else {
+                    view.zoom_axes((input, anchor_y), factors, extent)
+                });
             }
             if !ui.ctx().egui_wants_keyboard_input()
                 && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::F))

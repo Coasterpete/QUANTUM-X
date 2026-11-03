@@ -9,6 +9,26 @@ use qx_style::construction::{
     Alignment, HardwareShape, Material, Profile, Role, TrackConstruction,
 };
 
+/// Importers live outside the numerical engine. A resolver must return exact
+/// source geometry, or fail explicitly; there is no substitute-mesh fallback.
+pub trait ConstructionAssets {
+    fn section(&self, path: &str, scale: [f64; 3]) -> Result<Profile>;
+    fn hardware(&self, path: &str, scale: [f64; 3]) -> Result<Mesh>;
+}
+struct NoAssets;
+impl ConstructionAssets for NoAssets {
+    fn section(&self, path: &str, _: [f64; 3]) -> Result<Profile> {
+        Err(crate::GeometryError(format!(
+            "Unresolved construction source: {path}"
+        )))
+    }
+    fn hardware(&self, path: &str, _: [f64; 3]) -> Result<Mesh> {
+        Err(crate::GeometryError(format!(
+            "unresolved component asset: {path}; provide a construction source resolver"
+        )))
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshVertex {
     pub position_m: Vec3,
@@ -217,6 +237,36 @@ fn cap_triangles(p: &[[f64; 2]]) -> Result<Vec<[usize; 3]>> {
     out.push([ring[0], ring[1], ring[2]]);
     Ok(out)
 }
+pub(crate) fn member_solid(a: Vec3, b: Vec3, profile: &Profile, roll: f64) -> Result<Mesh> {
+    let length = (b - a).length();
+    ensure(
+        length.is_finite() && (1e-5..=1e5).contains(&length),
+        "support member is degenerate or too long",
+    )?;
+    let frame = Frame::new(crate::math::rotation_between(Vec3::X, b - a)?)?;
+    let samples = [
+        CenterlineSample {
+            distance_m: 0.,
+            design_time_s: 0.,
+            position_m: a,
+            frame,
+        },
+        CenterlineSample {
+            distance_m: length,
+            design_time_s: 0.,
+            position_m: b,
+            frame,
+        },
+    ];
+    let mut budget = Budget {
+        limits: MeshLimits::default(),
+        vertices: 0,
+        indices: 0,
+        instances: 0,
+        bytes: 0,
+    };
+    sweep(&samples, profile, Vec3::ZERO, roll, true, &mut budget)
+}
 fn sweep(
     samples: &[CenterlineSample],
     profile: &Profile,
@@ -359,6 +409,14 @@ pub fn build(
     definition: &TrackConstruction,
     limits: MeshLimits,
 ) -> Result<TrackMesh> {
+    build_with_assets(track, definition, limits, &NoAssets)
+}
+pub fn build_with_assets(
+    track: &GeneratedTrack,
+    definition: &TrackConstruction,
+    limits: MeshLimits,
+    assets: &dyn ConstructionAssets,
+) -> Result<TrackMesh> {
     definition
         .validate()
         .map_err(|e| crate::GeometryError(e.to_string()))?;
@@ -373,9 +431,16 @@ pub fn build(
     let mut components = vec![];
     let mut bounds = Bounds::point(track.samples[0].position_m);
     for c in &definition.continuous {
+        let resolved;
+        let profile = if let Profile::AssetSection { path, scale, .. } = &c.profile {
+            resolved = assets.section(path, *scale)?;
+            &resolved
+        } else {
+            &c.profile
+        };
         let mesh = sweep(
             &track.samples,
-            &c.profile,
+            profile,
             v3(c.offset_m),
             c.rotation_rad,
             c.cap_ends,
@@ -393,14 +458,6 @@ pub fn build(
         });
     }
     for c in &definition.repeated {
-        let size = match &c.shape {
-            HardwareShape::Box { size_m } => *size_m,
-            HardwareShape::Asset { id, path, .. } => {
-                return Err(crate::GeometryError(format!(
-                    "unresolved component asset {id}: {path}; GLB import is not implemented"
-                )));
-            }
-        };
         let end = track.length_m() - c.end_margin_m;
         let count = if end < c.start_m {
             0
@@ -414,31 +471,41 @@ pub fn build(
         };
         budget.reserve(0, 0, count)?;
         let frame = Frame::new(Quaternion::IDENTITY)?;
-        let template = [
-            CenterlineSample {
-                distance_m: 0.,
-                design_time_s: 0.,
-                position_m: Vec3::X * (-size[0] / 2.),
-                frame,
-            },
-            CenterlineSample {
-                distance_m: size[0],
-                design_time_s: 0.,
-                position_m: Vec3::X * (size[0] / 2.),
-                frame,
-            },
-        ];
-        let mesh = sweep(
-            &template,
-            &Profile::Box {
-                height_m: size[1],
-                width_m: size[2],
-            },
-            Vec3::ZERO,
-            0.,
-            true,
-            &mut budget,
-        )?;
+        let mesh = match &c.shape {
+            HardwareShape::Asset { path, scale, .. } => {
+                let mesh = assets.hardware(path, *scale)?;
+                mesh.validate()?;
+                budget.reserve(mesh.vertices.len(), mesh.indices.len(), 0)?;
+                mesh
+            }
+            HardwareShape::Box { size_m: size } => {
+                let template = [
+                    CenterlineSample {
+                        distance_m: 0.,
+                        design_time_s: 0.,
+                        position_m: Vec3::X * (-size[0] / 2.),
+                        frame,
+                    },
+                    CenterlineSample {
+                        distance_m: size[0],
+                        design_time_s: 0.,
+                        position_m: Vec3::X * (size[0] / 2.),
+                        frame,
+                    },
+                ];
+                sweep(
+                    &template,
+                    &Profile::Box {
+                        height_m: size[1],
+                        width_m: size[2],
+                    },
+                    Vec3::ZERO,
+                    0.,
+                    true,
+                    &mut budget,
+                )?
+            }
+        };
         let rotation = Quaternion::axis_angle(Vec3::Z, c.rotation_rad[2])?
             .compose(Quaternion::axis_angle(Vec3::Y, c.rotation_rad[1])?)
             .compose(Quaternion::axis_angle(Vec3::X, c.rotation_rad[0])?);
@@ -515,6 +582,15 @@ pub fn build_reference(
     definition: &TrackConstruction,
     limits: MeshLimits,
 ) -> Result<TrackMesh> {
+    build_reference_with_assets(source, reference, definition, limits, &NoAssets)
+}
+pub fn build_reference_with_assets(
+    source: &GeneratedTrack,
+    reference: &crate::heartline::ReferenceTrack,
+    definition: &TrackConstruction,
+    limits: MeshLimits,
+    assets: &dyn ConstructionAssets,
+) -> Result<TrackMesh> {
     ensure(
         reference.role == crate::heartline::ReferencePathRole::TrackCenterline,
         "mesh reference must be physical track",
@@ -552,7 +628,7 @@ pub fn build_reference(
             a.1 + (b.1 - a.1) * (s - a.0) / (b.0 - a.0)
         }
     };
-    let mut mesh = build(&track, definition, limits)?;
+    let mut mesh = build_with_assets(&track, definition, limits, assets)?;
     for c in &mut mesh.components {
         if c.role == Role::Hardware {
             for p in &mut c.placements {

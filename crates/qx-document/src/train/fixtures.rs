@@ -34,6 +34,9 @@ impl Train {
         } else {
             -1.4
         };
+        // Three-point idealization: the front bearing locates car roll; the
+        // rear spherical bearing accommodates rail twist. Locking roll at both
+        // ends would overconstrain a rigid car on changing track banking.
         for n in 0..count {
             let body_id = format!("car-{}", n + 1);
             let offset = n as f64 * 4.;
@@ -72,7 +75,14 @@ impl Train {
                     component_b: id.clone(),
                     anchor_a_m: Vec3::new(x, -height, 0.),
                     anchor_b_m: Vec3::ZERO,
-                    model: JointModel::Ball,
+                    model: if k == 0 && arrangement != DevelopmentArrangement::BelowTrack {
+                        JointModel::RollLock {
+                            frame_a: Quaternion::IDENTITY,
+                            frame_b: Quaternion::IDENTITY,
+                        }
+                    } else {
+                        JointModel::Ball
+                    },
                 });
                 gear.push(id);
             }
@@ -118,14 +128,31 @@ impl Train {
                 bogie_ids: gear,
             });
             if n > 0 {
-                train.connections.push(Connection {
-                    id: format!("coupler-{n}"),
-                    component_a: format!("car-{n}"),
-                    component_b: body_id,
-                    anchor_a_m: Vec3::new(-2., 0., 0.),
-                    anchor_b_m: Vec3::new(2., 0., 0.),
-                    model: JointModel::Ball,
-                });
+                // A one-metre drawbar with two spherical bearings transmits
+                // force while letting adjacent cars pitch, yaw and roll. It is
+                // an independent rigid body, not coincident rigid hitch arms or
+                // numerical clearance used to conceal incompatible geometry.
+                let link = format!("drawbar-{n}");
+                train.components.push(component(
+                    link.clone(),
+                    ComponentKind::Auxiliary,
+                    Vec3::new(1., 0.1, 0.1),
+                    20.,
+                    Placement::Track {
+                        offset_m: -offset + 2.,
+                        frame: LocalFrame::default(),
+                    },
+                ));
+                for (end, car, x) in [("front", format!("car-{n}"), -1.5), ("rear", body_id, 1.5)] {
+                    train.connections.push(Connection {
+                        id: format!("coupler-{n}-{end}"),
+                        component_a: car,
+                        component_b: link.clone(),
+                        anchor_a_m: Vec3::new(x, -height, 0.),
+                        anchor_b_m: Vec3::new(-x / 3., 0., 0.),
+                        model: JointModel::Ball,
+                    });
+                }
             }
         }
         train.validate()?;

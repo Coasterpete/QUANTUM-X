@@ -36,7 +36,7 @@ fn frame(
     size: [u32; 2],
 ) -> Option<egui::Rect> {
     let mut handle = None;
-    let _ = ctx.run_pass(
+    let mut output = ctx.run_pass(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
@@ -59,6 +59,8 @@ fn frame(
                 .map(|r| r.rect);
         },
     );
+    // This input-only verification context has no GPU texture consumer.
+    output.textures_delta.clear();
     handle
 }
 fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {

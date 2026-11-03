@@ -95,6 +95,63 @@ fn real_blender_export_and_hierarchy_rotation_are_supported() {
     assert!((n[3][1] - 0.2).abs() < 1e-6);
 }
 #[test]
+fn glb_pbr_maps_follow_standard_channels_and_reject_unsupported_uv_sets() {
+    let (mut v, b) = parts();
+    v["materials"][0]["normalTexture"] = json!({"index":0,"scale":0.7});
+    v["materials"][0]["occlusionTexture"] = json!({"index":0,"strength":0.6});
+    v["materials"][0]["emissiveTexture"] = json!({"index":0});
+    v["materials"][0]["emissiveFactor"] = json!([0.2, 0.3, 0.4]);
+    v["materials"][0]["pbrMetallicRoughness"]["metallicRoughnessTexture"] = json!({"index":0});
+    let model = import_glb(&pack(&v, b.clone())).unwrap();
+    let m = &model.primitives[0].material;
+    assert_eq!(m.metallic_map.as_ref().unwrap().channel, 2);
+    assert_eq!(m.roughness_map.as_ref().unwrap().channel, 1);
+    assert!(!m.roughness_map.as_ref().unwrap().invert);
+    assert_eq!(m.occlusion.as_ref().unwrap().channel, 0);
+    assert_eq!(m.normal_scale, 0.7);
+    assert!(Arc::ptr_eq(
+        m.normal.as_ref().unwrap(),
+        m.texture.as_ref().unwrap()
+    ));
+    assert!(model.cpu_bytes() < 4096);
+    v["materials"][0]["normalTexture"]["texCoord"] = json!(1);
+    assert!(import_glb(&pack(&v, b)).is_err());
+}
+#[test]
+fn authored_tangents_are_preserved_and_invalid_frames_are_rejected() {
+    let (mut v, mut b) = parts();
+    let original = import_glb(BODY).unwrap();
+    let mut tangents = vec![];
+    for vertex in &original.primitives[0].vertices {
+        let normal = glam::Vec3::from(vertex.normal);
+        let axis = if normal.x.abs() < 0.9 {
+            glam::Vec3::X
+        } else {
+            glam::Vec3::Y
+        };
+        let t = normal.cross(axis).normalize();
+        tangents.extend([t.x, t.y, t.z, 1.]);
+    }
+    let offset = b.len();
+    b.extend_from_slice(bytemuck::cast_slice(&tangents));
+    let view = v["bufferViews"].as_array().unwrap().len();
+    v["bufferViews"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"buffer":0,"byteOffset":offset,"byteLength":tangents.len()*4}));
+    let accessor = v["accessors"].as_array().unwrap().len();
+    v["accessors"]
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"bufferView":view,"componentType":5126,"count":24,"type":"VEC4"}));
+    v["buffers"][0]["byteLength"] = json!(b.len());
+    v["meshes"][0]["primitives"][0]["attributes"]["TANGENT"] = json!(accessor);
+    let model = import_glb(&pack(&v, b.clone())).unwrap();
+    assert_eq!(model.primitives[0].vertices[0].tangent, tangents[..4]);
+    b[offset..offset + 16].fill(0);
+    assert!(import_glb(&pack(&v, b)).is_err());
+}
+#[test]
 fn rejects_malformed_ranges_indices_nonfinite_data_cycles_and_features_without_panics() {
     for mutate in 0..20 {
         let (mut v, mut b) = parts();

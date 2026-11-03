@@ -186,7 +186,8 @@ fn different_arrangements_replay_reset_and_render_origins_use_mass_centers() {
                 .world_point(-train.components[i].center_of_mass_m)
                 .unwrap();
             assert!((com - end.components[i].pose.position_m).length() < 1e-10);
-            assert_eq!(s.world().angular_joints.len(), 3);
+            // One roll-locating suspension joint plus one seat hinge per car.
+            assert_eq!(s.world().angular_joints.len(), 2 * train.cars.len());
         }
         s.reset();
         assert_eq!(s.ticks(), 0);
@@ -229,10 +230,14 @@ fn failed_endpoint_step_retains_bodies_hints_and_clock() {
     let mut s = TrackSimulation::new(train, track(), 196., 10.).unwrap();
     for _ in 0..240 {
         let (world, guides, ticks) = (s.world().clone(), s.guides().to_vec(), s.ticks());
+        let previous = s.previous_snapshot().clone();
+        let current = s.snapshot().unwrap();
         if s.step().is_err() {
             assert_eq!(s.world(), &world);
             assert_eq!(s.guides(), guides);
             assert_eq!(s.ticks(), ticks);
+            assert_eq!(s.previous_snapshot(), &previous);
+            assert_eq!(s.snapshot().unwrap(), current);
             return;
         }
     }
@@ -288,4 +293,52 @@ fn mounts_resolve_out_of_order_and_never_replace_mechanical_joints() {
     let expected = -4.905 * (1. + 1. / 960.);
     assert!((seat.pose.position_m.y - initial.pose.position_m.y - expected).abs() < 1e-10);
     assert_eq!(seat.pose.orientation, initial.pose.orientation);
+}
+
+#[test]
+fn roll_bearing_preserves_two_swing_axes_and_pairwise_angular_momentum() {
+    for swing_axis in [Vec3::Y, Vec3::Z, Vec3::new(0., 1., 1.)] {
+        let axis = swing_axis.normalized().unwrap();
+        let mut w = joint_world(JointModel::RollLock {
+            frame_a: Quaternion::IDENTITY,
+            frame_b: Quaternion::IDENTITY,
+        });
+        w.bodies[1].pose.orientation = Quaternion::axis_angle(axis, 0.3).unwrap();
+        w.bodies[1].angular_velocity_radps = axis * 1.2;
+        for _ in 0..120 {
+            let d = w.step().unwrap();
+            assert!(d.max_angular_error_rad < 1e-12);
+            assert!(d.angular_torque_on_b_nm[0].length() < 1e-10);
+            assert!((w.bodies[1].angular_velocity_radps - axis * 1.2).length() < 1e-10);
+        }
+        assert!(
+            (w.bodies[1]
+                .pose
+                .orientation
+                .rotation_vector()
+                .unwrap()
+                .length()
+                - 0.9)
+                .abs()
+                < 1e-10
+        );
+        // A roll impulse must be shared, rather than locking either body to world.
+        w.bodies[1].angular_velocity_radps = Vec3::X;
+        let before = w.bodies[0].angular_velocity_radps + w.bodies[1].angular_velocity_radps;
+        assert!(w.step().unwrap().angular_torque_on_b_nm[0].length() > 1.);
+        let after = w.bodies[0].angular_velocity_radps + w.bodies[1].angular_velocity_radps;
+        assert!((after - before).length() < 1e-10);
+    }
+}
+
+#[test]
+fn singular_roll_bearing_rejects_transactionally_instead_of_hiding_error() {
+    let mut w = joint_world(JointModel::RollLock {
+        frame_a: Quaternion::IDENTITY,
+        frame_b: Quaternion::IDENTITY,
+    });
+    w.bodies[1].pose.orientation = Quaternion::axis_angle(Vec3::Y, std::f64::consts::PI).unwrap();
+    let before = w.clone();
+    assert!(w.step().unwrap_err().contains("singular"));
+    assert_eq!(w, before);
 }

@@ -77,8 +77,13 @@ fn connected_bodies_travel_on_curved_track_deterministically() {
     let mut joint: f64 = 0.;
     let mut guide: f64 = 0.;
     for _ in 0..240 {
-        let d = w.step_on_track(&t, &mut guides).unwrap();
-        assert_eq!(d, replay.step_on_track(&t, &mut replay_guides).unwrap());
+        let d = w.step_on_track(&t, &mut guides, &mut []).unwrap();
+        assert_eq!(
+            d,
+            replay
+                .step_on_track(&t, &mut replay_guides, &mut [])
+                .unwrap()
+        );
         joint = joint.max(d.max_joint_error_m);
         guide = guide.max(d.max_guide_error_m);
         assert_eq!(d.guide_force_n.len(), 2);
@@ -126,7 +131,7 @@ fn banked_inspection_and_open_endpoint_rollback() {
     w.bodies[0].linear_velocity_mps = -t.samples[0].frame.tangent() * 10.;
     let old = w.clone();
     let old_guides = guides.clone();
-    assert!(w.step_on_track(&t, &mut guides).is_err());
+    assert!(w.step_on_track(&t, &mut guides, &mut []).is_err());
     assert_eq!(w, old);
     assert_eq!(guides, old_guides);
 }
@@ -176,7 +181,7 @@ fn inverted_loop_reports_centripetal_reaction_and_bounded_energy_drift() {
     let mut max_error: f64 = 0.;
     let mut force = 0.;
     for _ in 0..240 {
-        let d = w.step_on_track(&t, &mut guides).unwrap();
+        let d = w.step_on_track(&t, &mut guides, &mut []).unwrap();
         max_error = max_error.max(d.max_guide_error_m);
         force += d.guide_force_n[0].length() / 240.;
     }

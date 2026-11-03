@@ -59,7 +59,7 @@ fn validate_scene(scene: &InspectionScene) -> Result<(), String> {
         || scene.track.sections.is_empty()
         || scene.track.graphs.len() + 1 != scene.track.samples.len()
     {
-        return Err("inspector requires generated samples and sections".into());
+        return Err("inspector requires generated samples and regions".into());
     }
     if scene
         .track
@@ -67,7 +67,7 @@ fn validate_scene(scene: &InspectionScene) -> Result<(), String> {
         .iter()
         .any(|s| s.start_sample > s.end_sample || s.end_sample >= scene.track.samples.len())
     {
-        return Err("invalid generated section range".into());
+        return Err("invalid generated region range".into());
     }
     Ok(())
 }
@@ -122,11 +122,11 @@ impl Inspector {
                         .labels
                         .iter()
                         .find(|l| l.id == s.id)
-                        .map_or(format!("Section {}", s.id.0), |l| {
+                        .map_or(format!("Region {}", s.id.0), |l| {
                             format!("{}: {} ({})", s.id.0, l.name, l.method)
                         })
                 })
-                .unwrap_or_else(|| "All sections".into());
+                .unwrap_or_else(|| "All regions".into());
             w.set_title(&format!(
                 "QUANTUM Dynamics [DEVELOPMENT INSPECTOR] | {} | {} | {} | grid {}m N:{} K:{} | {}",
                 self.scene.name,
@@ -370,7 +370,7 @@ impl ApplicationHandler for Inspector {
                                 return;
                             }
                             self.status = format!(
-                                "Loaded {} sections, {:.3}m",
+                                "Loaded {} regions, {:.3}m",
                                 self.scene.track.sections.len(),
                                 self.scene.track.length_m()
                             );

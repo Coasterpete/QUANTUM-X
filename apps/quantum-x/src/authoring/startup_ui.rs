@@ -114,7 +114,8 @@ fn welcome(app: &mut App, ui: &mut egui::Ui) {
         ("QUANTUM", theme::LIME, -0.48),
         ("DYNAMICS", theme::BLUE, 0.48),
     ] {
-        ui.painter().text(
+        theme::outlined_text(
+            ui.painter(),
             brand.center() + egui::vec2(0., brand_size * line),
             egui::Align2::CENTER_CENTER,
             label,
@@ -187,14 +188,23 @@ fn navigation(
             egui::Button::new(
                 egui::RichText::new(label.to_uppercase())
                     .size(font)
-                    .strong()
-                    .color(color),
+                    .color(egui::Color32::TRANSPARENT),
             )
             .fill(egui::Color32::BLACK)
             .stroke(egui::Stroke::new(2., color))
             .corner_radius(3.),
         )
         .on_hover_cursor(egui::CursorIcon::PointingHand);
+    // Large destination lettering follows the original outline treatment while
+    // keeping the button's accessible label and exact interior hue.
+    theme::outlined_text(
+        ui.painter(),
+        response.rect.center(),
+        egui::Align2::CENTER_CENTER,
+        &label.to_uppercase(),
+        egui::FontId::monospace(font),
+        color,
+    );
     if response.hovered() || response.has_focus() {
         ui.painter().rect_stroke(
             response.rect.shrink(3.),

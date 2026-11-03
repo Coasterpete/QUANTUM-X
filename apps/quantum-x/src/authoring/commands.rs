@@ -15,11 +15,7 @@ pub(super) type HeaderResult = (
 pub(super) fn status_height(session: &Session) -> f32 {
     session.graph_drag.as_ref().map_or_else(
         || {
-            48. + if session.pending_action.is_some() {
-                62.
-            } else {
-                0.
-            } + if session.draft_error.is_some() {
+            48. + if session.draft_error.is_some() {
                 66.
             } else {
                 0.
@@ -59,17 +55,18 @@ pub(super) fn show(
                     });
                     ui.menu_button(egui::RichText::new("Edit").strong().color(super::theme::GREEN), |ui| {
                         if ui.button("Coaster Properties").clicked() { super::coaster_properties::open(session); ui.close(); }
+                        if ui.button("Track Appearance / Materials").clicked() { super::coaster_properties::open(session); session.material_ui.appearance_tab = true; ui.close(); }
                         ui.separator();
                         if icons::button(ui, Icon::Undo, "Undo   Ctrl+Z", session.editor.can_undo() || session.has_drafts(), "Undo last document transaction").clicked() { session.ui_action = Some(UiAction::History(false)); ui.close(); }
                         if icons::button(ui, Icon::Redo, "Redo   Ctrl+Y", session.editor.can_redo() || session.has_drafts(), "Redo last document transaction").clicked() { session.ui_action = Some(UiAction::History(true)); ui.close(); }
                         ui.separator();
-                        if icons::button(ui, Icon::Apply, "Apply section   Ctrl+Enter", session.draft_dirty(), "Commit selected section draft").clicked() { session.apply_draft(); ui.close(); }
-                        if icons::button(ui, Icon::Cancel, "Cancel section draft   Esc", session.draft_dirty(), "Restore committed section").clicked() { session.cancel_section(); ui.close(); }
+                        if icons::button(ui, Icon::Apply, "Apply region   Ctrl+Enter", session.draft_dirty(), "Commit selected region draft").clicked() { session.apply_draft(); ui.close(); }
+                        if icons::button(ui, Icon::Cancel, "Cancel region draft   Esc", session.draft_dirty(), "Restore committed region").clicked() { session.cancel_section(); ui.close(); }
                     });
-                    ui.menu_button(egui::RichText::new("View").strong().color(super::theme::VIOLET), |ui| {
+                    ui.menu_button(super::theme::text("View", super::theme::PURPLE).strong(), |ui| {
                         ui.menu_button("Track display",|ui|{for mode in [qx_rendering::DisplayMode::Rendered,qx_rendering::DisplayMode::RenderedCenterline,qx_rendering::DisplayMode::Technical,qx_rendering::DisplayMode::Wireframe] {ui.selectable_value(&mut display.mode,mode,mode.label());}});
                         if icons::button(ui, Icon::FitAll, "Fit All   F over viewport", true, "Fit all generated track references").clicked() { view = Some(ViewCommand::FitAll); ui.close(); }
-                        if icons::button(ui, Icon::FitSelection, "Fit Selection", true, "Fit selected section").clicked() { view = Some(ViewCommand::FitSelected); ui.close(); }
+                        if icons::button(ui, Icon::FitSelection, "Fit Selection", true, "Fit selected region").clicked() { view = Some(ViewCommand::FitSelected); ui.close(); }
                         for (label, command) in [("Perspective", ViewCommand::Perspective), ("Top", ViewCommand::Top), ("Side", ViewCommand::Side), ("Front", ViewCommand::Front), ("Toggle orthographic", ViewCommand::ToggleOrthographic)] {
                             if ui.button(label).clicked() { view = Some(command); ui.close(); }
                         }
@@ -88,6 +85,7 @@ pub(super) fn show(
                         ui.small("Current workbench presentation is provisional; catalog entries do not certify dynamics.");
                     });
                     ui.menu_button(egui::RichText::new("Preferences").strong().color(super::theme::RED), |ui| {
+                        if ui.button("Snap Settings…").clicked() { session.snap_dialog = true; ui.close(); }
                         if icons::button(ui, Icon::Preferences, "Display and UI scale…", true, "Window sizing, maximized state and independent UI scaling").clicked() {
                             session.window_draft = session.workbench.window.clone(); session.display_dialog = true; ui.close();
                         }
@@ -97,7 +95,7 @@ pub(super) fn show(
                         ui.selectable_value(&mut session.workbench.active, Profile::Train, "Train Workspace   Ctrl+2");
                         ui.separator();
                         if ui.button("Reset current workspace layout").clicked() { session.workbench.reset_layout(); ui.close(); }
-                        if ui.button("Reset Window/Layout").clicked() { session.workbench = Default::default(); session.preferences.allow_reset(); window = Some(WindowCommand::Reset); ui.close(); }
+                        if ui.button("Reset Window/Layout").clicked() { let snap = session.workbench.snap; session.workbench = Default::default(); session.workbench.snap = snap; session.preferences.allow_reset(); window = Some(WindowCommand::Reset); ui.close(); }
                         ui.separator();
                         let layout = &session.workbench.layouts[session.workbench.active.index()];
                         for pane in session.workbench.active.panes().iter().copied().filter(|p| !p.is_viewport()) {

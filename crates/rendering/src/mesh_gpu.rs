@@ -38,10 +38,13 @@ struct Batch {
     instances: Range<u32>,
     role: Role,
     visible: bool,
+    support: bool,
+    material: wgpu::BindGroup,
 }
 pub(crate) struct MeshGpu {
     solid: wgpu::RenderPipeline,
     wire: wgpu::RenderPipeline,
+    selection_mask: wgpu::RenderPipeline,
     bind: wgpu::BindGroup,
     uniform: wgpu::Buffer,
     vertices: wgpu::Buffer,
@@ -50,7 +53,9 @@ pub(crate) struct MeshGpu {
     instances: wgpu::Buffer,
     batches: Vec<Batch>,
     source: Option<Arc<TrackMesh>>,
+    material_source: Option<Arc<crate::material_library::LoadedMaterials>>,
     origin: Vec3,
+    materials: crate::material_gpu::MaterialGpu,
     pub upload_ms: f64,
     pub upload_bytes: usize,
     pub uploads: u64,
@@ -59,20 +64,24 @@ fn pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
     layout: &wgpu::PipelineLayout,
-    wire: bool,
+    entry: &str,
 ) -> wgpu::RenderPipeline {
+    let wire = entry == "wire";
+    let mask = entry == "selection_mask";
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("procedural materials"),
-        source: wgpu::ShaderSource::Wgsl(include_str!("mesh.wgsl").into()),
+        source: wgpu::ShaderSource::Wgsl(
+            crate::material_gpu::shader(include_str!("mesh.wgsl")).into(),
+        ),
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor{
-        label:Some(if wire{"portable indexed mesh edges"}else{"indexed procedural solids"}),layout:Some(layout),
+        label:Some(entry),layout:Some(layout),
         vertex:wgpu::VertexState{module:&shader,entry_point:Some("vertex"),compilation_options:Default::default(),buffers:&[
             Some(wgpu::VertexBufferLayout{array_stride:std::mem::size_of::<Vertex>() as u64,step_mode:wgpu::VertexStepMode::Vertex,attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2,3=>Float32]}),
             Some(wgpu::VertexBufferLayout{array_stride:std::mem::size_of::<Instance>() as u64,step_mode:wgpu::VertexStepMode::Instance,attributes:&wgpu::vertex_attr_array![4=>Float32x3,5=>Float32x3,6=>Float32x3,7=>Float32x3,8=>Float32x3,9=>Float32x3]})]},
         primitive:wgpu::PrimitiveState{topology:if wire{wgpu::PrimitiveTopology::LineList}else{wgpu::PrimitiveTopology::TriangleList},cull_mode:if wire{None}else{Some(wgpu::Face::Back)},front_face:wgpu::FrontFace::Ccw,..Default::default()},
-        depth_stencil:Some(wgpu::DepthStencilState{format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:Some(true),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),
-        multisample:Default::default(),fragment:Some(wgpu::FragmentState{module:&shader,entry_point:Some(if wire{"wire"}else{"fragment"}),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),multiview_mask:None,cache:None })
+        depth_stencil:Some(wgpu::DepthStencilState{format:wgpu::TextureFormat::Depth32Float,depth_write_enabled:Some(!mask),depth_compare:Some(wgpu::CompareFunction::LessEqual),stencil:Default::default(),bias:Default::default()}),
+        multisample:Default::default(),fragment:Some(wgpu::FragmentState{module:&shader,entry_point:Some(entry),compilation_options:Default::default(),targets:&[Some(wgpu::ColorTargetState{format,blend:None,write_mask:wgpu::ColorWrites::ALL})]}),multiview_mask:None,cache:None })
 }
 impl MeshGpu {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
@@ -103,9 +112,10 @@ impl MeshGpu {
                 resource: uniform.as_entire_binding(),
             }],
         });
+        let materials = crate::material_gpu::MaterialGpu::new(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(&bind_layout)],
+            bind_group_layouts: &[Some(&bind_layout), Some(&materials.layout)],
             immediate_size: 0,
         });
         let empty = |usage| {
@@ -117,16 +127,24 @@ impl MeshGpu {
             })
         };
         Self {
-            solid: pipeline(device, format, &layout, false),
-            wire: pipeline(device, format, &layout, true),
+            solid: pipeline(device, format, &layout, "fragment"),
+            wire: pipeline(device, format, &layout, "wire"),
+            selection_mask: pipeline(
+                device,
+                wgpu::TextureFormat::R8Unorm,
+                &layout,
+                "selection_mask",
+            ),
             bind,
             uniform,
             vertices: empty(wgpu::BufferUsages::VERTEX),
             indices: empty(wgpu::BufferUsages::INDEX),
             edges: empty(wgpu::BufferUsages::INDEX),
             instances: empty(wgpu::BufferUsages::VERTEX),
+            materials,
             batches: vec![],
             source: None,
+            material_source: None,
             origin: Vec3::ZERO,
             upload_ms: 0.,
             upload_bytes: 0,
@@ -142,13 +160,22 @@ impl MeshGpu {
     ) -> Result<(), String> {
         let Some(mesh) = &scene.mesh else {
             self.batches.clear();
+            self.materials.clear();
             self.source = None;
+            self.material_source = None;
             return Ok(());
         };
-        if self.source.as_ref().is_some_and(|m| Arc::ptr_eq(m, mesh)) && self.origin == origin {
+        if self.source.as_ref().is_some_and(|m| Arc::ptr_eq(m, mesh))
+            && self
+                .material_source
+                .as_ref()
+                .is_some_and(|m| Arc::ptr_eq(m, &scene.materials))
+            && self.origin == origin
+        {
             return Ok(());
         }
         let start = Instant::now();
+        self.materials.retain(scene.materials.slots.values());
         let mut vertices = Vec::new();
         let mut indices = Vec::new();
         let mut edges = Vec::new();
@@ -160,6 +187,22 @@ impl MeshGpu {
                 .iter()
                 .find(|m| m.id == c.material)
                 .ok_or("mesh material missing")?;
+            let fallback = crate::asset::Material {
+                color: [
+                    material.base_color[0],
+                    material.base_color[1],
+                    material.base_color[2],
+                    1.,
+                ],
+                metallic: material.metallic,
+                roughness: material.roughness,
+                ..Default::default()
+            };
+            let gpu_material = self.materials.bind(
+                device,
+                queue,
+                scene.materials.slots.get(&c.material).unwrap_or(&fallback),
+            )?;
             let base = vertices.len() as u32;
             let repeated = c.role == Role::Hardware;
             for v in &c.mesh.vertices {
@@ -218,6 +261,8 @@ impl MeshGpu {
                 instances: first_instance..instances.len() as u32,
                 role: c.role,
                 visible: c.visible,
+                support: c.id.starts_with("support/"),
+                material: gpu_material,
             });
         }
         let data = [
@@ -261,6 +306,7 @@ impl MeshGpu {
         }
         self.batches = batches;
         self.source = Some(mesh.clone());
+        self.material_source = Some(scene.materials.clone());
         self.origin = origin;
         self.uploads += 1;
         self.upload_ms = start.elapsed().as_secs_f64() * 1000.;
@@ -275,6 +321,30 @@ impl MeshGpu {
         origin: Vec3,
         aspect: f64,
     ) {
+        let range = if let Some((structure, member)) = display.selected_support {
+            let values: Vec<_> = self
+                .source
+                .iter()
+                .flat_map(|mesh| &mesh.components)
+                .filter(|c| {
+                    let mut id = c.id.split('/');
+                    id.next() == Some("support")
+                        && id.next().and_then(|s| s.parse::<u64>().ok()) == Some(structure)
+                        && member.is_none_or(|m| {
+                            id.next().and_then(|s| s.parse::<u64>().ok()) == Some(m)
+                        })
+                })
+                .filter_map(|c| c.mesh.vertices.first().map(|v| v.source_station_m))
+                .collect();
+            (!values.is_empty()).then(|| {
+                (
+                    values.iter().copied().fold(f64::INFINITY, f64::min),
+                    values.iter().copied().fold(f64::NEG_INFINITY, f64::max),
+                )
+            })
+        } else {
+            range
+        };
         let eye = camera.eye(origin);
         queue.write_buffer(
             &self.uniform,
@@ -299,6 +369,13 @@ impl MeshGpu {
         }
         let wire = display.mode == DisplayMode::Wireframe;
         pass.set_pipeline(if wire { &self.wire } else { &self.solid });
+        self.draw_batches(pass, display, wire);
+    }
+    pub fn draw_selection_mask(&self, pass: &mut wgpu::RenderPass<'_>, display: &DisplayOptions) {
+        pass.set_pipeline(&self.selection_mask);
+        self.draw_batches(pass, display, false);
+    }
+    fn draw_batches(&self, pass: &mut wgpu::RenderPass<'_>, display: &DisplayOptions, wire: bool) {
         pass.set_bind_group(0, &self.bind, &[]);
         pass.set_vertex_buffer(0, self.vertices.slice(..));
         pass.set_vertex_buffer(1, self.instances.slice(..));
@@ -312,14 +389,19 @@ impl MeshGpu {
         );
         for b in &self.batches {
             if !b.visible
-                || !match b.role {
-                    Role::Running => display.running,
-                    Role::Structure => display.structure,
-                    Role::Hardware => display.hardware,
-                }
+                || !(if b.support {
+                    display.supports
+                } else {
+                    match b.role {
+                        Role::Running => display.running,
+                        Role::Structure => display.structure,
+                        Role::Hardware => display.hardware,
+                    }
+                })
             {
                 continue;
             }
+            pass.set_bind_group(1, &b.material, &[]);
             pass.draw_indexed(
                 if wire {
                     b.edges.clone()

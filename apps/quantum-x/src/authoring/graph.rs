@@ -5,6 +5,14 @@ use qx_geometry::transition::Function;
 use qx_rendering::InspectionScene;
 
 pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionScene) {
+    if session.expansion.engineering {
+        super::engineering_ui::show(session, ui, scene);
+        return;
+    }
+    if session.graph_device().is_some() {
+        super::device_curve_ui::show(session, ui);
+        return;
+    }
     super::graph_gesture::update(session, ui.ctx());
     ui.spacing_mut().item_spacing.y = 3.;
     ui.spacing_mut().button_padding.y = 3.;
@@ -23,23 +31,24 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
         session.transition = session.transition.min(channel.transitions.len() - 1);
         let selected = &channel.transitions[session.transition];
         let context = format!(
-            "Section {} · {} · {}",
-            session.selected.0,
+            "{} · {} · {} ({})",
             session.draft.name,
-            super::timeline::extent(&session.draft)
+            super::timeline::extent(&session.draft),
+            super::graph_canvas::channel_style(session.channel).0,
+            super::snap::unit_label(channel.unit),
         );
         ui.add_sized(
             [
                 if narrow_header {
                     ui.available_width()
                 } else {
-                    (ui.available_width() - 550.).max(60.)
+                    (ui.available_width() - 660.).max(60.)
                 },
                 26.,
             ],
             egui::Label::new(context.clone()).truncate(),
         )
-        .on_hover_text(context);
+        .on_hover_text(format!("{context}\n{}", session.region_extent_status()));
         ui.add_enabled_ui(session.graph_drag.is_none(), |ui| {
             egui::ComboBox::from_id_salt("selected transition")
                 .width(148.)
@@ -79,7 +88,7 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
                 super::icons::Icon::Apply,
                 "Apply",
                 session.draft_dirty(),
-                "Commit section draft · Ctrl+Enter",
+                "Commit region draft · Ctrl+Enter",
             )
             .clicked()
             {
@@ -90,12 +99,13 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
                 super::icons::Icon::Cancel,
                 "Cancel",
                 session.draft_dirty(),
-                "Discard section draft · Esc",
+                "Discard region draft · Esc",
             )
             .clicked()
             {
                 session.cancel_section();
             }
+            super::snap_ui::quick(session, ui);
         });
     });
     let compact = ui.available_width() < 1100.;
@@ -104,26 +114,31 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
         ui.horizontal_wrapped(|ui| {
             for key in qx_document::editing::channel_keys(&session.draft) {
                 let (label, color) = super::graph_canvas::channel_style(key);
-                if ui.selectable_label(session.channel == key, egui::RichText::new(label).color(color)).clicked() {
+                if ui.selectable_label(session.channel == key, super::theme::text(label, color)).clicked() {
                     session.select_channel(key);
                 }
             }
-            if !narrow && super::icons::button(ui, super::icons::Icon::Transitions, "Fit Graph", true,
-                "Fit full section and sampled curve. Constant profiles keep a useful unit-specific range. F over graph.").clicked() {
+            if !narrow && ui.button("Fit Region").on_hover_text("Show the full Region domain; retain the vertical range.").clicked() {
+                super::graph_canvas::fit_region(session);
+            }
+            if !narrow && super::icons::button(ui, super::icons::Icon::Transitions, "Fit Curve", true,
+                "Fit full region and sampled curve. Constant profiles keep a useful unit-specific range. F over graph.").clicked() {
                 super::graph_canvas::fit(session);
             }
-            if !narrow && ui.button("Reset View").on_hover_text("Full section domain; Y: force -1..3 g, distance rates ±0.05 rad/m, other rates ±1. Display only.").clicked() {
+            if !narrow && ui.button("Reset View").on_hover_text("Full region domain; Y: force -1..3 g, distance rates ±0.05 rad/m, other rates ±1. Display only.").clicked() {
                 let view = super::graph_view::View::reset(session.draft.channel_mut(session.channel).unwrap());
                 session.graph_view.set(view);
             }
             let range_menu = super::panels::input_menu(ui, if narrow { "Graph view" } else { "View range" }, |ui| {
                 if narrow {
-                    if ui.button("Fit Graph").clicked() { super::graph_canvas::fit(session); }
+                    if ui.button("Fit Region").clicked() { super::graph_canvas::fit_region(session); }
+                    if ui.button("Fit Curve").clicked() { super::graph_canvas::fit(session); }
                     if ui.button("Reset View").clicked() {
                         let view=super::graph_view::View::reset(session.draft.channel_mut(session.channel).unwrap());
                         session.graph_view.set(view);
                     }
                 }
+                if ui.button("Engineering plots").clicked() {session.expansion.engineering=true;}
                 exact_view_bounds(session, ui);
             });
             if range_menu.inner.is_none() {
@@ -131,7 +146,8 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
                 session.graph_view.error = None;
             }
             super::panels::input_menu(ui, "Edit values", |ui| {
-                ui.label("Authored values - Apply commits the section");
+                ui.label("Authored values - Apply commits the region");
+                super::graph_precision::selected(session, ui);
                 transition_values(session, ui, "graph quick values");
             });
             if compact {
@@ -143,12 +159,12 @@ pub(super) fn editor(session: &mut Session, ui: &mut egui::Ui, scene: &Inspectio
                 });
             } else {
                 super::panels::input_menu(ui, "Transitions", |ui| transition_tools(session, ui));
-                super::panels::input_menu(ui, "Section actions", |ui| {
+                super::panels::input_menu(ui, "Region actions", |ui| {
                     super::timeline::ordering(session, ui);
                     super::panels::insertion(session, ui);
                 });
             }
-            ui.label("?").on_hover_text("Square: drag value vertically\nCircle: local NURBS shape control (endpoint jets fixed)\nDiamond: drag boundary horizontally\nRight-click graph: split at station, merge or remove region\nShift while dragging: fine adjustment\nCtrl+wheel over graph: zoom about pointer\nMiddle drag: pan\nF: Fit Graph · Esc: cancel drag\nPlain wheel over timeline scrolls sections; over precision tools scrolls tools. It never zooms the graph.");
+            ui.label("?").on_hover_text("Square: drag value and internal station\nCircle: drag scalar shape / easing timing (endpoint jets fixed)\nBar: plateau level; entrance / exit retained\nDiamond: drag boundary horizontally\nRight-click graph: split at station, merge or remove region\nShift while dragging: fine adjustment\nCtrl+wheel: zoom both axes\nCtrl+Shift+wheel: X only · Ctrl+Alt+wheel: Y only\nMiddle drag: pan\nF: Fit Curve · Esc: cancel drag\nPlain wheel over timeline scrolls regions; over precision tools scrolls tools. It never zooms the graph.");
         });
     });
     let valid = session
@@ -202,16 +218,13 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
             .width(136.)
             .selected_text({
                 let (label, color) = super::graph_canvas::channel_style(session.channel);
-                egui::RichText::new(label).color(color)
+                super::theme::text(label, color)
             })
             .show_ui(ui, |ui| {
                 for key in qx_document::editing::channel_keys(&session.draft) {
                     let (label, color) = super::graph_canvas::channel_style(key);
                     if ui
-                        .selectable_label(
-                            session.channel == key,
-                            egui::RichText::new(label).color(color),
-                        )
+                        .selectable_label(session.channel == key, super::theme::text(label, color))
                         .clicked()
                     {
                         session.select_channel(key);
@@ -219,8 +232,11 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
                 }
             });
         super::panels::input_menu(ui, "Graph tools", |ui| {
+            if ui.button("Engineering plots").clicked() {
+                session.expansion.engineering = true;
+            }
             if short_sequence {
-                ui.menu_button("Sections", |ui| {
+                ui.menu_button("Regions", |ui| {
                     for section in session.editor.project().sections.clone() {
                         if ui
                             .selectable_label(section.id == session.selected, &section.name)
@@ -232,7 +248,7 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
                 });
             }
             ui.label(format!(
-                "Section {} · {}",
+                "Region {} · {}",
                 session.selected.0, session.draft.name
             ));
             let count = session
@@ -255,8 +271,11 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
                     }
                 },
             );
-            if ui.button("Fit Graph").clicked() {
+            if ui.button("Fit Curve").clicked() {
                 super::graph_canvas::fit(session);
+            }
+            if ui.button("Fit Region").clicked() {
+                super::graph_canvas::fit_region(session);
             }
             if ui.button("Reset View").clicked() {
                 let view = super::graph_view::View::reset(
@@ -270,15 +289,17 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
                     .is_some();
             super::panels::input_menu(ui, "Measurements", |ui| derived(session, ui, scene));
             super::panels::input_menu(ui, "Edit values", |ui| {
+                super::graph_precision::selected(session, ui);
                 transition_values(session, ui, "compact graph values")
             });
             super::panels::input_menu(ui, "Precision editor", |ui| numeric_transition(session, ui));
-            super::panels::input_menu(ui, "Section actions", |ui| {
+            super::panels::input_menu(ui, "Region actions", |ui| {
                 super::timeline::ordering(session, ui);
                 super::panels::insertion(session, ui);
             });
         });
         super::panels::input_menu(ui, "Edit values", |ui| {
+            super::graph_precision::selected(session, ui);
             transition_values(session, ui, "compact quick values")
         });
         for (icon, help, apply) in [
@@ -293,6 +314,7 @@ fn compact_editor(session: &mut Session, ui: &mut egui::Ui, scene: &InspectionSc
                 }
             }
         }
+        super::snap_ui::quick(session, ui);
     });
     if !editing_range {
         session.graph_view.range_edit = session.graph_view.view.bounds();
@@ -325,7 +347,7 @@ fn exact_view_bounds(session: &mut Session, ui: &mut egui::Ui) {
     if ui.button("Apply range").clicked() {
         state.apply_range(session.draft.channel_mut(session.channel).unwrap().length());
     }
-    ui.small("Each section/channel remembers its view. First visit fits; unit/domain conversion fits again.");
+    ui.small("Each region/channel remembers its view. First visit fits; unit/domain conversion fits again.");
 }
 
 pub(super) fn numeric_transition(session: &mut Session, ui: &mut egui::Ui) {
@@ -354,12 +376,17 @@ fn numeric_transition_inner(session: &mut Session, ui: &mut egui::Ui) {
         ));
         ui.label("End boundary");
         if ui
-            .add_enabled(
-                index + 1 < channel.transitions.len(),
-                egui::DragValue::new(&mut boundary)
-                    .speed(0.01)
-                    .max_decimals(12),
-            )
+            .add_enabled_ui(index + 1 < channel.transitions.len(), |ui| {
+                super::snap_ui::graph_number(
+                    ui,
+                    &mut boundary,
+                    "",
+                    0.01,
+                    session.workbench.snap,
+                    super::snap::GraphAxis::Boundary(session.draft.domain),
+                )
+            })
+            .inner
             .changed()
         {
             match super::graph_canvas::boundary(&session.draft, key, index, boundary - before) {
@@ -369,7 +396,7 @@ fn numeric_transition_inner(session: &mut Session, ui: &mut egui::Ui) {
         }
     });
     ui.collapsing("Individual transition length · advanced timing", |ui| {
-        ui.small("Edit lengths precisely; every channel must still sum to the section extent. Use End boundary above to transfer duration between neighbors.");
+        ui.small("Edit lengths precisely; every channel must still sum to the region extent. Use End boundary above to transfer duration between neighbors.");
         let t = &mut session.draft.channel_mut(key).unwrap().transitions[index];
         ui.add(egui::DragValue::new(&mut t.length).speed(0.01).max_decimals(12));
     });
@@ -377,6 +404,7 @@ fn numeric_transition_inner(session: &mut Session, ui: &mut egui::Ui) {
     transition_tools(session, ui);
 }
 pub(super) fn transition_tools(session: &mut Session, ui: &mut egui::Ui) {
+    super::graph_precision::tools(session, ui);
     let key = session.channel;
     let channel = session.draft.channel_mut(key).unwrap();
     let index = session.transition.min(channel.transitions.len() - 1);
@@ -411,7 +439,7 @@ pub(super) fn transition_tools(session: &mut Session, ui: &mut egui::Ui) {
     });
     ui.horizontal_wrapped(|ui| {
         ui.label("Insert fraction"); ui.add(egui::DragValue::new(&mut session.split_fraction).range(0.001..=0.999).speed(0.01));
-        if ui.button("Split region (preserve shape)").on_hover_text("Exact NURBS knot insertion or exact legacy restriction. Preserves profile, physical derivatives, station, and geometry. Apply to commit; Cancel discards.").clicked() {
+        if ui.button("Split transition (preserve shape)").on_hover_text("Exact NURBS knot insertion or exact legacy restriction. Preserves profile, physical derivatives, station, and geometry. Apply to commit; Cancel discards.").clicked() {
             let c = session.draft.channel_mut(key).unwrap();
             let start: f64 = c.transitions[..index].iter().map(|t| t.length).sum();
             let station = start + c.transitions[index].length * session.split_fraction;
@@ -423,30 +451,37 @@ pub(super) fn transition_tools(session: &mut Session, ui: &mut egui::Ui) {
         if ui.button("Remove and extend neighbor").on_hover_text("Explicit reshape; neighbor fills removed duration. Apply to commit.").clicked() {
             match qx_document::editing::remove_transition(&session.draft, key, id) { Ok(section) => { session.draft = section; session.transition = index.saturating_sub(1); }, Err(e) => session.status = e.to_string() }
         }
-        if ui.button("Apply section (Ctrl+Enter)").clicked() { session.apply_draft(); }
-        if ui.button("Cancel section draft (Esc)").clicked() { session.cancel_section(); }
+        if ui.button("Apply region (Ctrl+Enter)").clicked() { session.apply_draft(); }
+        if ui.button("Cancel region draft (Esc)").clicked() { session.cancel_section(); }
     });
 }
 pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: &str) {
-    let key = session.channel;
-    let c = session.draft.channel_mut(key).unwrap();
-    session.transition = session.transition.min(c.transitions.len() - 1);
-    let index = session.transition;
+    let key = session.graph_key();
+    let mut section = session.graph_section();
+    let c = section.channel_mut(key).unwrap();
+    session.set_graph_transition(session.graph_transition().min(c.transitions.len() - 1));
+    let index = session.graph_transition();
     let mut t = c.transitions[index].clone();
     let original = t.clone();
+    let unit = if session.graph_device().is_some() {
+        qx_geometry::transition::Unit::MetresPerSecondSquared
+    } else {
+        c.unit
+    };
+    let snap = session.workbench.snap;
     let mut endpoint_edit = None;
     let mut incoming_edit = None;
     let mut operation_error = None;
     let mut join_edit = false;
-    ui.push_id((salt,session.selected.0,key as u8,t.id),|ui| {
+    ui.push_id((salt,session.graph_id().0,key as u8,t.id),|ui| {
         ui.label(format!("Transition {}",t.id));
         ui.small("Constrained shared values edit both adjacent regions; outer boundary jets and other regions are preserved.");
         egui::Grid::new("transition value fields").num_columns(2).show(ui,|ui| {
             ui.label("Start");
-            if ui.add(egui::DragValue::new(&mut t.start).speed(0.01).max_decimals(10)).changed() {endpoint_edit=Some((false,t.start));}
+            if super::snap_ui::graph_number(ui,&mut t.start,"",0.01,snap,super::snap::GraphAxis::Value(unit)).changed() {endpoint_edit=Some((false,t.start));}
             ui.end_row();
             ui.label("End");
-            if ui.add_enabled(!matches!(t.function,Function::Constant {}),egui::DragValue::new(&mut t.end).speed(0.01).max_decimals(10)).changed() {endpoint_edit=Some((true,t.end));}
+            if ui.add_enabled_ui(!matches!(t.function,Function::Constant {}),|ui| super::snap_ui::graph_number(ui,&mut t.end,"",0.01,snap,super::snap::GraphAxis::Value(unit))).inner.changed() {endpoint_edit=Some((true,t.end));}
             ui.end_row();
             ui.label("Amplitude");
             ui.add_enabled(!matches!(t.function,Function::Constant {}|Function::Nurbs {..}|Function::CosineSpan {..}),egui::DragValue::new(&mut t.amplitude).speed(0.01).max_decimals(10));
@@ -465,6 +500,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
                 }
             });
         });
+        ui.collapsing("Advanced shape operations", |ui| {
         if ui.button("Reshape as cubic NURBS").on_hover_text("Explicit reshape; preserves endpoint values and first/second derivatives, but changes the interior. Apply or Cancel the draft.").clicked() {
             let result=(|| -> qx_geometry::Result<_> {
                 let a=t.evaluate(0.)?;let b=t.evaluate(t.length)?;let rule=t.incoming_continuity();
@@ -476,6 +512,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
             match result {Ok(next)=>t=next,Err(e)=>operation_error=Some(e.to_string())}
         }
         if ui.add_enabled(index>0,egui::Button::new("Join incoming smoothly (C2 reshape)")).on_hover_text("Explicitly reshape both neighboring profiles. Keeps this start value/slope/second derivative and both outer boundary jets. Legacy cosine interiors become cubic. Preview, then Apply or Cancel.").clicked() {join_edit=true;}
+        });
         if let Function::Hermite {start_slope,end_slope}=&mut t.function {
             ui.label("Slopes (output / input)");
             egui::Grid::new("transition slope fields").num_columns(2).show(ui,|ui| {
@@ -484,6 +521,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
             });
         }
         if let Function::Nurbs {profile}=&mut t.function {
+            ui.collapsing("NURBS shape controls / continuity", |ui| {
             ui.label(format!("NURBS degree {} · {} controls",profile.degree,profile.values.len()));
             let mut shape=profile.clone();
             if let Err(e)=shape.refine_for_edit() {operation_error=Some(e.to_string());}
@@ -493,7 +531,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
                 let count=shape.values.len();
                 for (i,value) in shape.values.iter_mut().enumerate().take(count-3).skip(3) {
                     ui.label(format!("Shape control {}",i-2));
-                    reshaped|=ui.add(egui::DragValue::new(value).speed(0.001).max_decimals(10)).changed();ui.end_row();
+                    reshaped|=super::snap_ui::graph_number(ui,value,"",0.001,snap,super::snap::GraphAxis::Handle(unit)).changed();ui.end_row();
                 }
             });
             if reshaped {*profile=shape;}
@@ -527,8 +565,9 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
                 if ui.button("Insert knot (preserve shape)").clicked()
                     && let Err(e)=profile.insert_knot(session.split_fraction) {operation_error=Some(e.to_string());}
             });
+            });
         }
-        if let Ok(issues)=session.draft.channel_mut(key).unwrap().continuity() {
+        if let Ok(issues)=session.graph_section().channel_mut(key).unwrap().continuity() {
             for issue in issues {
                 ui.colored_label(egui::Color32::YELLOW,format!("Boundary {:.8}: value jump {:.3e}, slope jump {:.3e}, second derivative jump {:.3e}",issue.input,issue.value_jump,issue.derivative_jump,issue.second_derivative_jump));
             }
@@ -536,7 +575,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
     });
     let next = if let Some((end, value)) = endpoint_edit {
         Some(qx_document::region_edit::endpoint(
-            &session.draft,
+            &session.graph_section(),
             key,
             index,
             end,
@@ -544,20 +583,20 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
         ))
     } else if join_edit {
         Some(qx_document::region_edit::join_incoming(
-            &session.draft,
+            &session.graph_section(),
             key,
             index,
         ))
     } else if let Some(rule) = incoming_edit {
         Some(qx_document::region_edit::continuity(
-            &session.draft,
+            &session.graph_section(),
             key,
             index,
             rule,
         ))
     } else if t != original {
         Some(qx_document::region_edit::replace(
-            &session.draft,
+            &session.graph_section(),
             key,
             index,
             t,
@@ -567,7 +606,7 @@ pub(super) fn transition_values(session: &mut Session, ui: &mut egui::Ui, salt: 
     };
     if let Some(next) = next {
         match next {
-            Ok(section) => session.draft = section,
+            Ok(section) => session.accept_graph_section(section),
             Err(e) => session.status = e.to_string(),
         }
     }

@@ -31,6 +31,14 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x authoring-scenario <output-directory>
   quantum-x transition-scenario <new-output-directory>
   quantum-x track-scenario <output-directory>
+  quantum-x material-scenario <new-output-directory>
+  quantum-x box-spined-scenario <new-output-directory>
+  quantum-x material-editor-scenario <new-output-directory>
+  quantum-x selection-scenario <new-output-directory>
+  quantum-x ride-camera-scenario <project.qx.json> <new-output-directory>
+  quantum-x integrated-core-scenario <new-output-directory>
+  quantum-x ride-native-profile <project.qx.json> <new-output-directory> <30|60|144|legacy>
+  quantum-x ride-recording <project.qx.json> <new-output-directory>
   quantum-x library [assets-root]
   quantum-x --version
   quantum-x benchmark
@@ -41,11 +49,39 @@ The design reference speed is not a simulated train velocity.";
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
     let launch = authoring::startup::launch(&std::env::current_exe()?, &args);
+    if args.len() == 2 && args[0] == "integrated-core-scenario" {
+        return authoring::expansion_scenario::run(PathBuf::from(&args[1]));
+    }
+    if args.len() == 3 && args[0] == "ride-recording" {
+        return authoring::ride_quality::record(PathBuf::from(&args[1]), PathBuf::from(&args[2]));
+    }
+    if args.len() == 4 && args[0] == "ride-native-profile" {
+        return authoring::ride_quality::native(
+            PathBuf::from(&args[1]),
+            PathBuf::from(&args[2]),
+            args[3].to_str().ok_or("invalid presentation rate")?,
+        );
+    }
+    if args.len() == 3 && args[0] == "ride-camera-scenario" {
+        return authoring::ride_scenario::run(PathBuf::from(&args[1]), PathBuf::from(&args[2]));
+    }
+    if args.len() == 2 && args[0] == "box-spined-scenario" {
+        return authoring::box_spined_scenario::run(PathBuf::from(&args[1]));
+    }
     if args.len() == 3 && args[0] == "ui-reference-scenario" {
         return authoring::ui_reference_scenario::run(
             PathBuf::from(&args[1]),
             PathBuf::from(&args[2]),
         );
+    }
+    if args.len() == 2 && args[0] == "material-scenario" {
+        return authoring::material_scenario::run(PathBuf::from(&args[1]));
+    }
+    if args.len() == 2 && args[0] == "material-editor-scenario" {
+        return authoring::material_editor_scenario::run(PathBuf::from(&args[1]));
+    }
+    if args.len() == 2 && args[0] == "selection-scenario" {
+        return authoring::selection_scenario::run(PathBuf::from(&args[1]));
     }
     if args
         .first()
@@ -94,6 +130,36 @@ fn run() -> Result<(), Box<dyn Error>> {
         {
             qx_document::library::load_train_definition(&library, &entry.style_id)?;
         }
+        let sources = qx_rendering::construction_assets::Sources::new(&root);
+        let track = qx_geometry::solver::generate(
+            &Default::default(),
+            &[qx_geometry::authoring::Section::straight(
+                1,
+                "Content check",
+                3.,
+            )],
+            Default::default(),
+        )?;
+        let mut construction_checks = Vec::new();
+        for entry in library
+            .entries
+            .iter()
+            .filter(|e| e.kind == qx_style::library::LibraryKind::Track)
+        {
+            if let Some(construction) = entry
+                .manifest
+                .as_ref()
+                .and_then(|m| m.construction.as_ref())
+            {
+                let mesh = qx_geometry::construction::build_with_assets(
+                    &track,
+                    construction,
+                    Default::default(),
+                    &sources,
+                )?;
+                construction_checks.push(serde_json::json!({"style":entry.style_id,"source_geometry_verified":true,"components":mesh.components.len(),"vertices":mesh.stats.vertices,"assembly_available":entry.content_ready}));
+            }
+        }
         println!(
             "{}",
             serde_json::to_string_pretty(&serde_json::json!({
@@ -105,6 +171,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 "track_families": library.catalog.families.len(),
                 "train_families": library.catalog.train_families.len(),
                 "entries": library.entries,
+                "construction_checks": construction_checks,
             }))?
         );
         return Ok(());

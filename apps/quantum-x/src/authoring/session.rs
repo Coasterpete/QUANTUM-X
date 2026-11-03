@@ -20,14 +20,21 @@ pub(super) fn scene(
     catalog: &Catalog,
     options: GenerationOptions,
 ) -> Result<InspectionScene, String> {
-    scene_cached(project, catalog, options, None)
+    let assets = qx_rendering::construction_assets::Sources::new(&super::library_ui::assets_root());
+    scene_cached(project, catalog, options, None, false, &assets)
 }
 fn scene_cached(
     project: &Project,
     catalog: &Catalog,
     options: GenerationOptions,
     cache: Option<&(Project, GenerationOptions, InspectionScene)>,
+    reload_materials: bool,
+    assets: &qx_rendering::construction_assets::Sources,
 ) -> Result<InspectionScene, String> {
+    project.validate(catalog).map_err(|e| e.to_string())?;
+    if reload_materials {
+        assets.clear();
+    }
     let same_path = cache.is_some_and(|(p, o, _)| {
         *o == options && p.initial == project.initial && p.sections == project.sections
     });
@@ -39,6 +46,10 @@ fn scene_cached(
             .generate(catalog, options)
             .map_err(|e| e.to_string())?
     };
+    project
+        .operations
+        .validate_track(&track)
+        .map_err(|e| e.to_string())?;
     track.diagnostics.retain(|d| d.code != "reference_error");
     let solver_ms = solver_start.elapsed().as_secs_f64() * 1000.;
     let reference = if same_path && cache.unwrap().0.heartline == project.heartline {
@@ -57,6 +68,18 @@ fn scene_cached(
             }
         }
     };
+    let physical_track = if project.heartline.authored_reference
+        == qx_geometry::heartline::AuthoredReference::RiderReference
+    {
+        reference
+            .as_ref()
+            .map(|r| qx_geometry::supports::physical_attachment_track(&track, r))
+            .transpose()
+            .map_err(|e| e.to_string())?
+            .map(std::sync::Arc::new)
+    } else {
+        None
+    };
     let labels = project
         .sections
         .iter()
@@ -67,9 +90,22 @@ fn scene_cached(
         })
         .collect();
     let start = Instant::now();
-    let mesh = if same_path
+    let refresh_sources = reload_materials
+        && (project.construction.continuous.iter().any(|c| {
+            matches!(
+                c.profile,
+                qx_style::construction::Profile::AssetSection { .. }
+            )
+        }) || project
+            .construction
+            .repeated
+            .iter()
+            .any(|c| matches!(c.shape, qx_style::construction::HardwareShape::Asset { .. })));
+    let mesh = if !refresh_sources
+        && same_path
         && cache.unwrap().0.heartline == project.heartline
         && cache.unwrap().0.construction == project.construction
+        && cache.unwrap().0.supports == project.supports
     {
         cache.unwrap().2.mesh.clone().unwrap()
     } else {
@@ -77,27 +113,83 @@ fn scene_cached(
             if project.heartline.authored_reference
                 == qx_geometry::heartline::AuthoredReference::RiderReference
             {
-                qx_geometry::construction::build_reference(
+                qx_geometry::construction::build_reference_with_assets(
                     &track,
                     reference
                         .as_ref()
                         .ok_or("Physical track inverse unavailable; previous mesh retained")?,
                     &project.construction,
                     Default::default(),
+                    assets,
                 )
             } else {
-                qx_geometry::construction::build(&track, &project.construction, Default::default())
+                qx_geometry::construction::build_with_assets(
+                    &track,
+                    &project.construction,
+                    Default::default(),
+                    assets,
+                )
             }
+            .and_then(|mut mesh| {
+                let physical = if project.heartline.authored_reference
+                    == qx_geometry::heartline::AuthoredReference::RiderReference
+                {
+                    Some(qx_geometry::supports::physical_attachment_track(
+                        &track,
+                        reference.as_ref().ok_or_else(|| {
+                            qx_geometry::GeometryError("physical reference unavailable".into())
+                        })?,
+                    )?)
+                } else {
+                    None
+                };
+                qx_geometry::supports::append_mesh(
+                    physical.as_ref().unwrap_or(&track),
+                    &project.supports,
+                    &mut mesh,
+                )?;
+                Ok(mesh)
+            })
             .map_err(|e| e.to_string())?,
         )
     };
+    let mesh_ms = start.elapsed().as_secs_f64() * 1000.;
+    let materials = if !reload_materials
+        && cache.is_some_and(|(p, _, _)| {
+            p.construction.materials == project.construction.materials
+                && p.supports == project.supports
+        }) {
+        cache.unwrap().2.materials.clone()
+    } else {
+        let mut bindings = project.construction.materials.clone();
+        for support in &project.supports {
+            let mut material = support.material.clone();
+            material.id = format!("support/material/{}", support.id);
+            bindings.push(material);
+        }
+        std::sync::Arc::new(qx_rendering::material_library::load_bindings(
+            &super::library_ui::assets_root().join("materials"),
+            &bindings,
+        ))
+    };
+    track.diagnostics.retain(|d| d.code != "material_library");
+    for warning in &materials.warnings {
+        track.diagnostics.push(qx_geometry::solver::Diagnostic {
+            section_id: project.sections[0].id,
+            input: None,
+            code: "material_library",
+            message: warning.clone(),
+        });
+    }
     Ok(InspectionScene {
+        materials,
         mesh: Some(mesh),
-        mesh_ms: start.elapsed().as_secs_f64() * 1000.,
+        mesh_ms,
         solver_ms,
         name: project.metadata.name.clone(),
         track,
         labels,
+        physical_track,
         reference,
         authored_reference: project.heartline.authored_reference,
     })
@@ -105,11 +197,11 @@ fn scene_cached(
 pub(super) fn method(section: &Section) -> &'static str {
     match &section.kind {
         SectionKind::Spline { curve } => curve.method(),
-        SectionKind::Force { .. } => "force-vector",
-        SectionKind::Geometric { .. } => "world-geometric",
-        SectionKind::RiderLocal { .. } => "rider-local",
-        SectionKind::Straight {} => "straight",
-        SectionKind::Arc { .. } => "arc",
+        SectionKind::Force { .. } => "Force-Based",
+        SectionKind::Geometric { .. } => "World-geometric",
+        SectionKind::RiderLocal { .. } => "Geometric",
+        SectionKind::Straight {} => "Straight",
+        SectionKind::Arc { .. } => "Circular arc",
     }
 }
 struct GenerationResult {
@@ -117,11 +209,16 @@ struct GenerationResult {
     result: Result<InspectionScene, String>,
     elapsed_ms: f64,
 }
-type Job = (u64, Project, GenerationOptions);
+type Job = (u64, Project, GenerationOptions, u64);
 pub(super) struct Session {
+    pub expansion: super::expansion::State,
+    pub material_catalog: Result<qx_style::materials::Library, String>,
+    pub material_ui: super::material_ui::State,
+    material_epoch: u64,
     pub workbench: super::workbench::Workbench,
     pub preferences: super::workbench::PreferenceStore,
     pub display_dialog: bool,
+    pub snap_dialog: bool,
     /// Session-only opt-in; never changes the project or saved docking layout.
     pub development: bool,
     pub generation_details: String,
@@ -136,6 +233,7 @@ pub(super) struct Session {
     pub next_section_id: Option<u64>,
     pub draft: Section,
     pub channel: ChannelKey,
+    region_channels: std::collections::BTreeMap<u64, (ChannelKey, usize)>,
     pub transition: usize,
     pub track_tab: usize,
     pub heartline_draft: HeartlineSettings,
@@ -151,6 +249,7 @@ pub(super) struct Session {
     pub graph_view: super::graph_view::State,
     pub derived_graph: usize,
     pub graph_drag: Option<super::graph_gesture::Drag>,
+    pub graph_selection: Option<super::graph_gesture::Target>,
     pub graph_feedback: Option<String>,
     pub graph_readout: Option<String>,
     pub pending_action: Option<super::workflow::PendingAction>,
@@ -162,6 +261,7 @@ pub(super) struct Session {
     pub viewport_inspection: Option<(SectionId, f64)>,
     pub train_station_m: Option<f64>,
     pub playback: super::train_playback::State,
+    pub ride: super::ride_camera::State,
     pub assets: super::train_assets::State,
     pub keyboard_owned_last_frame: bool,
     pub apply_section_requested: bool,
@@ -171,6 +271,7 @@ pub(super) struct Session {
     pub style_family: String,
     pub previews: super::previews::State,
     pub construction_draft: qx_style::construction::TrackConstruction,
+    pub style_construction_base: Option<qx_style::construction::TrackConstruction>,
     pub draft_request: Option<super::draft_workflow::DraftRequest>,
     pub resolution_error: Option<String>,
     pub save_failure: Option<String>,
@@ -200,15 +301,26 @@ impl Session {
         let (jobs, work) = mpsc::sync_channel::<Job>(1);
         let (send, results) = mpsc::channel();
         let worker_catalog = catalog.clone();
+        let worker_root = library_root.clone();
         std::thread::spawn(move || {
+            let assets = qx_rendering::construction_assets::Sources::new(&worker_root);
             let mut cache = None;
+            let mut material_epoch = 0;
             while let Ok(mut job) = work.recv() {
                 while let Ok(newer) = work.try_recv() {
                     job = newer;
                 }
                 let start = Instant::now();
-                let result = scene_cached(&job.1, &worker_catalog, job.2, cache.as_ref());
+                let result = scene_cached(
+                    &job.1,
+                    &worker_catalog,
+                    job.2,
+                    cache.as_ref(),
+                    material_epoch != job.3,
+                    &assets,
+                );
                 if let Ok(scene) = &result {
+                    material_epoch = job.3;
                     cache = Some((job.1, job.2, scene.clone()));
                 }
                 if send
@@ -224,9 +336,16 @@ impl Session {
             }
         });
         let mut session = Self {
+            expansion: super::expansion::State::new(&project),
+            material_ui: super::material_ui::State::new(library_root.join("materials")),
+            material_epoch: 0,
+            material_catalog: qx_rendering::material_library::read_manifest(
+                &library_root.join("materials"),
+            ),
             workbench: Default::default(),
             preferences: Default::default(),
             display_dialog: false,
+            snap_dialog: false,
             development: false,
             generation_details: String::new(),
             window_draft: Default::default(),
@@ -240,6 +359,7 @@ impl Session {
                 .checked_add(1),
             draft: project.sections[0].clone(),
             channel: ChannelKey::Roll,
+            region_channels: Default::default(),
             transition: 0,
             track_tab: 0,
             heartline_draft: project.heartline.clone(),
@@ -249,6 +369,7 @@ impl Session {
             style_family: project.style.family_id.clone(),
             previews: Default::default(),
             construction_draft: project.construction.clone(),
+            style_construction_base: None,
             draft_request: None,
             resolution_error: None,
             save_failure: None,
@@ -259,7 +380,7 @@ impl Session {
             startup_approved: None,
             startup_after_save: false,
             recent_project: None,
-            status: "Ready. Select a section to author its transitions.".into(),
+            status: "Ready. Select a region to author its transitions.".into(),
             path: path.map_or(String::new(), |p| p.to_string_lossy().into_owned()),
             file_dialog: None,
             saved: path.map(|_| project),
@@ -281,6 +402,7 @@ impl Session {
             graph_view: Default::default(),
             derived_graph: 0,
             graph_drag: None,
+            graph_selection: None,
             graph_feedback: None,
             graph_readout: None,
             pending_action: None,
@@ -292,6 +414,7 @@ impl Session {
             viewport_inspection: None,
             train_station_m: None,
             playback: Default::default(),
+            ride: Default::default(),
             assets: Default::default(),
             keyboard_owned_last_frame: false,
             apply_section_requested: false,
@@ -316,7 +439,8 @@ impl Session {
             != Some(&self.draft)
     }
     pub fn pending_edits(&self) -> bool {
-        self.dirty()
+        self.expansion.dirty(self.editor.project())
+            || self.dirty()
             || self.assets.draft_dirty(self.editor.project())
             || self.draft_dirty()
             || self.heartline_draft != self.editor.project().heartline
@@ -326,6 +450,19 @@ impl Session {
             || self.construction_draft != self.editor.project().construction
     }
     pub fn sync_draft(&mut self) {
+        if let Some(next) = self.next_section_id {
+            let maximum = self
+                .editor
+                .project()
+                .sections
+                .iter()
+                .map(|s| s.id.0)
+                .max()
+                .unwrap_or(0);
+            if next <= maximum {
+                self.next_section_id = maximum.checked_add(1);
+            }
+        }
         let selected = self
             .editor
             .project()
@@ -353,19 +490,42 @@ impl Session {
             return;
         }
         if !self.editor.project().sections.iter().any(|s| s.id == id) {
-            self.status = "Selected section is no longer in this document.".into();
+            self.status = "Selected region is no longer in this document.".into();
             return;
         }
         if self.defer_section_action(super::workflow::PendingAction::Select(id)) {
             return;
         }
+        self.region_channels
+            .insert(self.selected.0, (self.channel, self.transition));
+        let target = self
+            .editor
+            .project()
+            .sections
+            .iter()
+            .find(|r| r.id == id)
+            .unwrap();
+        let default = match target.kind {
+            SectionKind::Force { .. } => ChannelKey::Normal,
+            SectionKind::RiderLocal { .. } | SectionKind::Geometric { .. } => ChannelKey::Pitch,
+            _ => ChannelKey::Roll,
+        };
+        (self.channel, self.transition) = self
+            .region_channels
+            .get(&id.0)
+            .copied()
+            .unwrap_or((default, 0));
         self.selected = id;
+        self.expansion.curve_device = None;
         self.graph_feedback = None;
         self.inspect_input = None;
         self.pending_action = None;
         self.sync_draft();
     }
     pub fn select_channel(&mut self, key: ChannelKey) {
+        if self.graph_drag.is_none() {
+            self.expansion.curve_device = None;
+        }
         if self.graph_drag.is_none()
             && key != self.channel
             && qx_document::editing::channel_keys(&self.draft).contains(&key)
@@ -437,6 +597,7 @@ impl Session {
                 if self.editor.project().construction != previous_construction {
                     self.construction_draft = self.editor.project().construction.clone();
                 }
+                self.expansion.sync(self.editor.project());
                 self.refresh_view();
                 self.draft_error = None;
                 self.graph_feedback = None;
@@ -466,8 +627,14 @@ impl Session {
     pub fn regenerate(&mut self) {
         self.queue_generation(self.editor.project().clone(), false);
     }
+    pub fn reload_material_assets(&mut self) {
+        self.material_epoch += 1;
+        self.last_job = None;
+        self.refresh_view();
+    }
     pub fn refresh_view(&mut self) {
-        if self.draft_dirty()
+        if self.expansion.dirty(self.editor.project())
+            || self.draft_dirty()
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
             || self.construction_draft != self.editor.project().construction
@@ -488,6 +655,11 @@ impl Session {
             .find(|s| s.id == self.selected)
         {
             *section = self.draft.clone();
+        }
+        candidate.operations = self.expansion.operations.clone();
+        candidate.supports = self.expansion.supports.clone();
+        if let Some((_, _, completion)) = &self.expansion.completion {
+            candidate.sections.push(completion.section.clone());
         }
         candidate.heartline = self.heartline_draft.clone();
         candidate.initial = self.initial_draft.clone();
@@ -548,7 +720,10 @@ impl Session {
             self.frame_revision = Some(self.revision);
         }
         self.queued_job = None;
-        match self.jobs.try_send((self.revision, project, self.options)) {
+        match self
+            .jobs
+            .try_send((self.revision, project, self.options, self.material_epoch))
+        {
             Ok(()) => self.status = "Updating track geometry…".into(),
             Err(mpsc::TrySendError::Full(job)) => {
                 self.queued_job = Some(job);
@@ -623,6 +798,7 @@ impl Session {
             return;
         }
         self.assets.draft = None;
+        self.style_construction_base = None;
         if if redo {
             self.editor.redo()
         } else {
@@ -636,6 +812,7 @@ impl Session {
             self.style_draft = self.editor.project().style.clone();
             self.style_family = self.style_draft.family_id.clone();
             self.construction_draft = self.editor.project().construction.clone();
+            self.expansion = super::expansion::State::new(self.editor.project());
             self.regenerate();
         }
     }
@@ -708,6 +885,7 @@ impl Session {
                 self.recent_project = path.clone();
                 self.graph_view = Default::default();
                 self.graph_drag = None;
+                self.graph_selection = None;
                 self.graph_feedback = None;
                 self.pending_action = None;
                 self.inspect_input = None;
@@ -715,6 +893,7 @@ impl Session {
                 self.viewport_inspection = None;
                 self.train_station_m = None;
                 self.playback = Default::default();
+                self.ride = Default::default();
                 self.assets = Default::default();
                 self.previews = Default::default();
                 self.last_job = None;
@@ -744,6 +923,8 @@ impl Session {
                 self.style_draft = self.editor.project().style.clone();
                 self.style_family = self.style_draft.family_id.clone();
                 self.construction_draft = self.editor.project().construction.clone();
+                self.style_construction_base = None;
+                self.expansion = super::expansion::State::new(self.editor.project());
                 self.regenerate();
                 self.frame_revision = Some(self.revision);
             }
@@ -751,7 +932,8 @@ impl Session {
         }
     }
     pub fn has_drafts(&self) -> bool {
-        self.draft_dirty()
+        self.expansion.dirty(self.editor.project())
+            || self.draft_dirty()
             || self.assets.draft_dirty(self.editor.project())
             || self.heartline_draft != self.editor.project().heartline
             || self.initial_draft != self.editor.project().initial
@@ -766,7 +948,7 @@ pub(super) fn blank_project() -> Project {
     p.metadata.name = "Untitled".into();
     p.metadata.description.clear();
     p.metadata.author.clear();
-    p.sections = vec![Section::straight(1, "Section 1", 10.)];
+    p.sections = vec![Section::straight(1, "Region 1", 10.)];
     p
 }
 pub(super) fn new_project_id() -> String {

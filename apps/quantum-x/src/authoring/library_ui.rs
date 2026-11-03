@@ -117,7 +117,8 @@ pub(super) fn tracks(session: &mut Session, ui: &mut egui::Ui) {
             }
         });
     }
-    if let Some((selection, construction)) = choose {
+    if let Some((selection, mut construction)) = choose {
+        construction.reuse_material_bindings(&session.editor.project().construction);
         session.execute(vec![
             qx_document::command::Command::SetStyle(selection),
             qx_document::command::Command::SetConstruction(construction),

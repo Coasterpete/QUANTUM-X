@@ -144,7 +144,8 @@ impl Train {
         require(
             !self.cars.is_empty()
                 && self.cars.len() <= 256
-                && self.components.len() <= 1024
+                // Includes independent drawbars and passenger assemblies for 256 cars.
+                && self.components.len() <= 2048
                 && self.connections.len() <= 4096,
             "invalid train size",
         )?;

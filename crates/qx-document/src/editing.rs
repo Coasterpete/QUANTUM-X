@@ -14,7 +14,7 @@ pub fn resize(section: &Section, extent: f64) -> Result<Section> {
     )?;
     require(
         extent.is_finite() && (1e-8..=1e6).contains(&extent),
-        "section extent must be in [1e-8,1e6]",
+        "region extent must be in [1e-8,1e6]",
     )?;
     let mut result = section.clone();
     let ratio = extent / result.extent;

@@ -251,6 +251,8 @@ fn version_one_migration_preserves_pass1_output_and_rejects_new_data() {
             < 1e-12
     );
     let mut value = serde_json::to_value(spline_comparison_project()).unwrap();
+    value.as_object_mut().unwrap().remove("operations");
+    value.as_object_mut().unwrap().remove("supports");
     value["schema_version"] = 1.into();
     for field in ["heartline", "construction", "trains"] {
         value.as_object_mut().unwrap().remove(field);
