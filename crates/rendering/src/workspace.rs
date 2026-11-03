@@ -41,10 +41,15 @@ pub struct SurfaceOutput {
     pub reset_navigation: bool,
 }
 pub trait EditorSurface {
+    fn diagnostic_tick(&mut self, _elapsed_s: f64) {}
+    fn frame_diagnostics(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
     fn window_title(&self) -> String {
         format!("{} — Editor", crate::identity::product().name)
     }
     fn select_section(&mut self, _id: qx_geometry::authoring::SectionId) {}
+    fn select_support(&mut self, _structure: u64, _member: u64) {}
     fn inspect_station(&mut self, _point: Option<(qx_geometry::authoring::SectionId, f64)>) {}
     fn window_preferences(&self) -> WindowPreferences {
         WindowPreferences::default()
@@ -63,6 +68,24 @@ pub trait EditorSurface {
     fn request_close(&mut self) -> bool;
 }
 pub fn edit(scene: InspectionScene, surface: impl EditorSurface + 'static) -> Result<(), String> {
+    run(scene, surface, None)
+}
+pub fn profile_editor(
+    scene: InspectionScene,
+    surface: impl EditorSurface + 'static,
+    config: crate::NativeProfile,
+) -> Result<(), String> {
+    run(
+        scene,
+        surface,
+        Some(crate::profiling::Capture::new(config)?),
+    )
+}
+fn run(
+    scene: InspectionScene,
+    surface: impl EditorSurface + 'static,
+    capture: Option<crate::profiling::Capture>,
+) -> Result<(), String> {
     let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
     let mut app = Workspace {
         scene,
@@ -83,11 +106,17 @@ pub fn edit(scene: InspectionScene, surface: impl EditorSurface + 'static) -> Re
         needs_fit: [true; 2],
         fatal: None,
         exit_requested: false,
+        capture,
+        repaint_delay: Duration::from_millis(16),
+        next_redraw: Instant::now(),
     };
     event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
     app.fatal.map_or(Ok(()), Err)
 }
 struct Workspace {
+    capture: Option<crate::profiling::Capture>,
+    repaint_delay: Duration,
+    next_redraw: Instant,
     scene: InspectionScene,
     surface: Box<dyn EditorSurface>,
     window: Option<Arc<Window>>,
@@ -145,6 +174,11 @@ impl Workspace {
         Ok(())
     }
     fn draw(&mut self) -> Result<(), String> {
+        let started = Instant::now();
+        if let Some(c) = &self.capture {
+            self.surface
+                .diagnostic_tick(c.start.elapsed().as_secs_f64());
+        }
         let changed = if let Some(scene) = self.surface.poll_scene() {
             self.scene = scene;
             let (min, max) = self.scene.bounds(None);
@@ -170,6 +204,13 @@ impl Workspace {
             profile = result.profile.min(1);
             reset_navigation = result.reset_navigation;
         });
+        let ui_ms = started.elapsed().as_secs_f64() * 1000.;
+        self.repaint_delay = output
+            .viewport_output
+            .get(&egui::ViewportId::ROOT)
+            .map_or(Duration::from_millis(16), |v| v.repaint_delay)
+            .min(Duration::from_millis(16));
+        let camera_view = self.display.camera_view;
         self.input
             .as_mut()
             .unwrap()
@@ -247,9 +288,12 @@ impl Workspace {
                 }
             }
         }
+        self.camera.attached = camera_view.and_then(|v| v.validate().ok());
+        let upload = Instant::now();
         if changed || before != self.display {
             self.rebuild()?;
         }
+        let upload_ms = upload.elapsed().as_secs_f64() * 1000.;
         let jobs = self.ctx.tessellate(output.shapes, output.pixels_per_point);
         self.gpu.as_mut().unwrap().draw_ui(
             &window,
@@ -261,7 +305,18 @@ impl Workspace {
                 pixels_per_point: output.pixels_per_point,
                 viewport: self.viewport,
             }),
-        )
+        )?;
+        if let Some(c) = &mut self.capture {
+            c.record(
+                started,
+                ui_ms,
+                upload_ms,
+                &self.gpu.as_ref().unwrap().last_draw,
+                self.surface.frame_diagnostics(),
+            );
+        }
+        self.next_redraw = started + self.repaint_delay;
+        Ok(())
     }
 }
 impl ApplicationHandler for Workspace {
@@ -277,10 +332,14 @@ impl ApplicationHandler for Workspace {
             }
             let areas: Vec<_> = monitors.iter().map(window::work_area).collect();
             let placement = window::resolve(&preferences, &areas);
+            let mut attributes = crate::identity::window_attributes()?;
+            if self.capture.is_some() {
+                attributes = attributes.with_visible(false).with_active(false);
+            }
             let window = Arc::new(
                 event_loop
                     .create_window(
-                        crate::identity::window_attributes()?
+                        attributes
                             .with_title(self.surface.window_title())
                             .with_inner_size(LogicalSize::new(placement.size[0], placement.size[1]))
                             .with_min_inner_size(LogicalSize::new(
@@ -295,6 +354,9 @@ impl ApplicationHandler for Workspace {
                     )
                     .map_err(|e| e.to_string())?,
             );
+            if self.capture.is_some() {
+                let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(1440, 960));
+            }
             let gpu = pollster::block_on(Gpu::new(window.clone()))?;
             self.input = Some(egui_winit::State::new(
                 self.ctx.clone(),
@@ -314,6 +376,10 @@ impl ApplicationHandler for Workspace {
             self.navigation[1].1.reference = true;
             self.navigation[1].1.offsets = true;
             self.rebuild()?;
+            if let Some(c) = &mut self.capture {
+                c.start = Instant::now();
+                c.next = c.start;
+            }
             Ok(())
         })();
         if let Err(e) = result {
@@ -365,14 +431,24 @@ impl ApplicationHandler for Workspace {
                         && let (Some(start), Some(end)) = (self.drag_start, self.cursor)
                         && (end.0 - start.0).hypot(end.1 - start.1) < 4.
                         && pointer_in_view(&self.ctx, self.viewport, self.cursor)
-                        && let Some((id, _)) = self.scene.pick(
-                            &self.camera,
-                            self.origin,
-                            self.viewport,
-                            egui::pos2(end.0 as f32, end.1 as f32),
-                        )
                     {
-                        self.surface.select_section(id);
+                        let pointer = egui::pos2(end.0 as f32, end.1 as f32);
+                        if self.profile == 0
+                            && let Some((structure, member)) = self.scene.pick_support(
+                                &self.camera,
+                                self.origin,
+                                self.viewport,
+                                pointer,
+                                &self.display,
+                            )
+                        {
+                            self.surface.select_support(structure, member);
+                        } else if let Some((id, _)) =
+                            self.scene
+                                .pick(&self.camera, self.origin, self.viewport, pointer)
+                        {
+                            self.surface.select_section(id);
+                        }
                     }
                     self.drag = None;
                     self.drag_start = None;
@@ -447,15 +523,68 @@ impl ApplicationHandler for Workspace {
             event_loop.exit();
             return;
         }
-        if let Some(w) = &self.window {
+        let now = Instant::now();
+        if self.capture.is_some() {
+            let c = self.capture.as_mut().unwrap();
+            if c.start.elapsed().as_secs_f64() >= c.config.seconds {
+                event_loop.exit();
+                return;
+            }
+            let due = now >= c.next;
+            if due && !c.config.legacy_wait {
+                let period = Duration::from_secs_f64(1. / c.config.hz as f64);
+                c.next += period;
+                while c.next < now {
+                    c.next += period;
+                    c.missed_deadlines += 1;
+                }
+            }
+            // Hidden windows do not receive OS redraw events. Invoke the same
+            // native draw path without activating a desktop window.
+            if due
+                && self.gpu.is_some()
+                && let Err(e) = self.draw()
+            {
+                self.fatal = Some(e);
+                event_loop.exit();
+                return;
+            }
+            let c = self.capture.as_mut().unwrap();
+            if due && c.config.legacy_wait {
+                c.next = Instant::now() + Duration::from_millis(16);
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(c.next));
+            return;
+        }
+        // Active animation follows swapchain pacing, with no extra 16 ms sleep.
+        // Delayed worker/idle polls are measured from frame start, not frame end.
+        if now >= self.next_redraw
+            && let Some(w) = &self.window
+        {
             w.request_redraw();
         }
-        // Worker completion and egui animations use a bounded polling interval.
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(16),
-        ));
+        event_loop.set_control_flow(if self.repaint_delay.is_zero() {
+            ControlFlow::Poll
+        } else {
+            ControlFlow::WaitUntil(self.next_redraw)
+        });
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(c) = &self.capture {
+            let adapter = self
+                .gpu
+                .as_ref()
+                .map_or("unavailable", |g| g.adapter_info.as_str());
+            let refresh = self
+                .window
+                .as_ref()
+                .and_then(|w| w.current_monitor())
+                .and_then(|m| m.refresh_rate_millihertz());
+            if let Err(e) = c.finish(adapter, refresh) {
+                self.fatal = Some(e);
+            }
+            return;
+        }
         if let Some(window) = &self.window {
             let mut preferences = self.surface.window_preferences();
             window::capture(window, &mut preferences);

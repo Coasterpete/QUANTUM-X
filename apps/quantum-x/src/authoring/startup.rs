@@ -104,6 +104,8 @@ impl Setup {
                 heartline: Default::default(),
                 construction: Default::default(),
                 trains: vec![],
+                operations: Default::default(),
+                supports: vec![],
             }
         };
         project.metadata.project_id = id;

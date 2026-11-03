@@ -120,3 +120,11 @@ Native interaction is **not manually verified**. Owner acceptance checklist:
    missing-model feedback. Experimental playback remains explicitly opt-in.
 
 Results and exact deliverable paths are recorded in `docs/owner-ui-report.md`.
+
+## Exact-palette and appearance update — 2026-10-31
+
+The owner now specifies nine exact UI colors. This supersedes the approximate
+blue/violet luminance substitutions and provisional shade choices above. See
+[the color/appearance and reflection implementation](../ux-color-reflections.md)
+for exact tokens, neutral contrast aids, component recoloring and optional
+advanced/development controls. Existing composition and authoring gestures remain.

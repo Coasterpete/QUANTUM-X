@@ -176,6 +176,10 @@ fn boundary_drag_preserves_extent_and_other_channels_as_one_transaction() {
             vec![pointer(moved, egui::PointerButton::Primary, false)],
             egui::Modifiers::NONE,
         );
+        assert_eq!(session.editor.project(), &project);
+        assert!(session.draft_dirty());
+        assert!(!session.editor.can_undo());
+        assert!(session.apply_draft());
         assert_ne!(session.editor.project(), &project);
         assert_eq!(session.draft.extent, project.sections[1].extent);
         assert_eq!(session.draft.roll_rate, project.sections[1].roll_rate);

@@ -259,8 +259,10 @@ fn schema_five_hermite_migrates_exactly_without_erasing_jumps_or_ids() {
     let before = p.generate(&catalog, GenerationOptions::default()).unwrap();
     let mut json = serde_json::to_value(&p).unwrap();
     json["schema_version"] = 5.into();
+    json.as_object_mut().unwrap().remove("operations");
+    json.as_object_mut().unwrap().remove("supports");
     let migrated = persistence::from_json(&json.to_string(), &catalog).unwrap();
-    assert_eq!(migrated.schema_version, 6);
+    assert_eq!(migrated.schema_version, qx_document::SCHEMA_VERSION);
     compare(&legacy, &migrated.sections[0]);
     for t in &channel(&migrated.sections[0]).transitions {
         assert!(matches!(t.function, Function::Nurbs { .. }));
@@ -286,6 +288,8 @@ fn schema_five_hermite_migrates_exactly_without_erasing_jumps_or_ids() {
     }
     let mut invalid = serde_json::to_value(&migrated).unwrap();
     invalid["schema_version"] = 5.into();
+    invalid.as_object_mut().unwrap().remove("operations");
+    invalid.as_object_mut().unwrap().remove("supports");
     assert!(persistence::from_json(&invalid.to_string(), &catalog).is_err());
 }
 #[test]

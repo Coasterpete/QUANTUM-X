@@ -10,7 +10,7 @@ pub(super) fn info(ui: &mut egui::Ui) {
         "Version {} · Alpha development build",
         env!("CARGO_PKG_VERSION")
     ));
-    ui.label("Design with ordered track sections, editable transition graphs and precision numerical controls. Each Alpha project contains one coaster.");
+    ui.label("Design with ordered track regions, editable transition graphs and precision numerical controls. Each Alpha project contains one coaster.");
     ui.separator();
     ui.label("Track and Train Workspaces share the project document. Coaster Properties configures name, description, family and numbered style inside the Editor.");
     ui.label("Support construction, ride operations and clearance-envelope calculations are not implemented. Experimental physics and numerical diagnostics are available through optional development views.");

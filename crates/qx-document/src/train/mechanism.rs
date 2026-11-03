@@ -98,6 +98,15 @@ pub enum JointModel {
         limits: Option<AngleLimits>,
         drive: RotationDrive,
     },
+    /// Constrains the swing/twist decomposition's twist about joint-local X
+    /// (longitudinal), leaving two swing degrees of freedom (pitch/yaw). Linear anchors are enforced by the companion
+    /// ball joint. This is the complement of `Hinge`: a rail-guided car body is
+    /// roll-referenced to its running gear, while a suspended body uses `Ball`
+    /// and swings about the same axis. Frames are component-local.
+    RollLock {
+        frame_a: Quaternion,
+        frame_b: Quaternion,
+    },
 }
 fn unit(q: Quaternion) -> Result<()> {
     let n = q.w.hypot(q.x).hypot(q.y).hypot(q.z);
@@ -111,6 +120,10 @@ impl JointModel {
         match self {
             Self::Ball => Ok(()),
             Self::Fixed { frame_a, frame_b } => {
+                unit(*frame_a)?;
+                unit(*frame_b)
+            }
+            Self::RollLock { frame_a, frame_b } => {
                 unit(*frame_a)?;
                 unit(*frame_b)
             }

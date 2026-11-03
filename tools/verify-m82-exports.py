@@ -93,7 +93,9 @@ def capture(path, count, size):
     for row in rows[int(y):int(y+h)]:
         for i in range(int(x)*4, int(x+w)*4, 4):
             r, g, b = row[i:i+3]
-            orange += r > 100 and r > g*1.3 and g > b*1.2
+            # Sky lighting and the highlight shoulder move this warm fixture
+            # toward gold; retain distinct warm-body / cool-bogie checks.
+            orange += r > 80 and r > g*1.1 and g > b*1.1
             blue += b > 70 and b > r*1.3 and g > r*1.1
     assert orange > 100 and blue > 100, (orange, blue, path)
 

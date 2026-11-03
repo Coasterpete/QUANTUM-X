@@ -13,13 +13,6 @@ struct Instance {
     matrix: [[f32; 4]; 4],
     normal: [[f32; 4]; 3],
 }
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
-struct Material {
-    color: [f32; 4],
-    properties: [f32; 4],
-    double_sided: [f32; 4],
-}
 struct Primitive {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
@@ -37,7 +30,7 @@ pub(crate) struct AssetGpu {
     camera: wgpu::Buffer,
     bind: wgpu::BindGroup,
     resources: Vec<Resource>,
-    material_layout: wgpu::BindGroupLayout,
+    materials: crate::material_gpu::MaterialGpu,
     pub uploads: usize,
     pub instance_count: usize,
     pub texture_uploads: usize,
@@ -72,50 +65,22 @@ impl AssetGpu {
                 resource: camera.as_entire_binding(),
             }],
         });
-        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("GLB material"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
+        let materials = crate::material_gpu::MaterialGpu::new(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &[Some(&camera_layout), Some(&material_layout)],
+            bind_group_layouts: &[Some(&camera_layout), Some(&materials.layout)],
             immediate_size: 0,
         });
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("rigid GLB instances"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("asset.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                crate::material_gpu::shader(include_str!("asset.wgsl")).into(),
+            ),
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label:Some("GLB basic opaque/mask materials"), layout:Some(&layout),
             vertex:wgpu::VertexState { module:&shader, entry_point:Some("vertex"), compilation_options:Default::default(), buffers:&[
-                Some(wgpu::VertexBufferLayout { array_stride:std::mem::size_of::<Vertex>() as u64, step_mode:wgpu::VertexStepMode::Vertex, attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2] }),
+                Some(wgpu::VertexBufferLayout { array_stride:std::mem::size_of::<Vertex>() as u64, step_mode:wgpu::VertexStepMode::Vertex, attributes:&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,2=>Float32x2,10=>Float32x4] }),
                 Some(wgpu::VertexBufferLayout { array_stride:std::mem::size_of::<Instance>() as u64, step_mode:wgpu::VertexStepMode::Instance, attributes:&wgpu::vertex_attr_array![3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4] })
             ] },
             primitive:wgpu::PrimitiveState { cull_mode:None,..Default::default() },
@@ -127,7 +92,7 @@ impl AssetGpu {
             camera,
             bind,
             resources: vec![],
-            material_layout,
+            materials,
             uploads: 0,
             instance_count: 0,
             texture_uploads: 0,
@@ -144,6 +109,11 @@ impl AssetGpu {
         let start = std::time::Instant::now();
         self.resources
             .retain(|r| assets.iter().any(|a| Arc::ptr_eq(&r.source, &a.model)));
+        self.materials.retain(
+            assets
+                .iter()
+                .flat_map(|a| a.model.primitives.iter().map(|p| &p.material)),
+        );
         for a in assets {
             if self
                 .resources
@@ -153,7 +123,7 @@ impl AssetGpu {
                 continue;
             }
             let mut primitives = vec![];
-            let mut textures = std::collections::HashMap::new();
+
             for p in &a.model.primitives {
                 let buffer = |bytes: &[u8], usage| -> Result<wgpu::Buffer, String> {
                     if bytes.len() as u64 > device.limits().max_buffer_size {
@@ -172,95 +142,7 @@ impl AssetGpu {
                     wgpu::BufferUsages::VERTEX,
                 )?;
                 let indices = buffer(bytemuck::cast_slice(&p.indices), wgpu::BufferUsages::INDEX)?;
-                let m = &p.material;
-                let key = m.texture.as_ref().map_or(std::ptr::null(), Arc::as_ptr);
-                if let std::collections::hash_map::Entry::Vacant(entry) = textures.entry(key) {
-                    let (width, height, data) =
-                        m.texture.as_ref().map_or((1, 1, &[255u8; 4][..]), |t| {
-                            (t.width, t.height, &t.rgba[..])
-                        });
-                    if width.max(height) > device.limits().max_texture_dimension_2d {
-                        return Err("GLB texture exceeds this GPU's dimension limit".into());
-                    }
-                    let size = wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    };
-                    let texture = device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("GLB sRGB base color"),
-                        size,
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                        view_formats: &[],
-                    });
-                    queue.write_texture(
-                        texture.as_image_copy(),
-                        data,
-                        wgpu::TexelCopyBufferLayout {
-                            offset: 0,
-                            bytes_per_row: Some(width * 4),
-                            rows_per_image: Some(height),
-                        },
-                        size,
-                    );
-                    let wrap = |v| match v {
-                        gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
-                        gltf::texture::WrappingMode::MirroredRepeat => {
-                            wgpu::AddressMode::MirrorRepeat
-                        }
-                        _ => wgpu::AddressMode::Repeat,
-                    };
-                    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                        address_mode_u: m
-                            .texture
-                            .as_ref()
-                            .map_or(wgpu::AddressMode::Repeat, |t| wrap(t.wrap_s)),
-                        address_mode_v: m
-                            .texture
-                            .as_ref()
-                            .map_or(wgpu::AddressMode::Repeat, |t| wrap(t.wrap_t)),
-                        mag_filter: if m.texture.as_ref().is_some_and(|t| t.nearest) {
-                            wgpu::FilterMode::Nearest
-                        } else {
-                            wgpu::FilterMode::Linear
-                        },
-                        min_filter: wgpu::FilterMode::Linear,
-                        ..Default::default()
-                    });
-                    entry.insert((texture.create_view(&Default::default()), sampler));
-                    self.texture_uploads += 1;
-                }
-                let (texture, sampler) = &textures[&key];
-                let uniform = buffer(
-                    bytemuck::bytes_of(&Material {
-                        color: m.color,
-                        properties: [m.metallic, m.roughness, m.alpha_cutoff.unwrap_or(-1.), 0.],
-                        double_sided: [if m.double_sided { 1. } else { 0. }, 0., 0., 0.],
-                    }),
-                    wgpu::BufferUsages::UNIFORM,
-                )?;
-                let material = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.material_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::TextureView(texture),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::Sampler(sampler),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: uniform.as_entire_binding(),
-                        },
-                    ],
-                });
+                let material = self.materials.bind(device, queue, &p.material)?;
                 let instances = device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("GLB rigid placements"),
                     size: 112,
@@ -282,6 +164,7 @@ impl AssetGpu {
             });
             self.uploads += 1;
         }
+        self.texture_uploads = self.materials.uploads;
         self.instance_count = 0;
         for r in &mut self.resources {
             let mut placements = vec![vec![]; r.primitives.len()];

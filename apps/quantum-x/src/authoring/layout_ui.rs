@@ -16,12 +16,14 @@ pub(super) fn show(
     super::theme::install(ctx);
     ctx.set_zoom_factor(session.workbench.window.ui_scale);
     if session.file_dialog.is_none()
+        && !session.project_prompt_open()
         && session.graph_drag.is_none()
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Num1))
     {
         session.workbench.active = Profile::Track;
     }
     if session.file_dialog.is_none()
+        && !session.project_prompt_open()
         && session.graph_drag.is_none()
         && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Num2))
     {
@@ -112,6 +114,9 @@ pub(super) fn show(
     if session.display_dialog {
         display_preferences(session, ctx, &mut window_command);
     }
+    if session.snap_dialog {
+        super::snap_ui::dialog(session, ctx);
+    }
     (result.0, result.1, window_command)
 }
 
@@ -131,11 +136,12 @@ impl PaneUi<'_> {
                 panels::track(self.session, ui);
             }
             Pane::Transition => graph::editor(self.session, ui, self.scene),
-            Pane::Support => support(ui),
+            Pane::Support => super::support_ui::show(self.session, ui, self.scene),
             Pane::View => self.view(ui),
             Pane::Diagnostics => self.diagnostics(ui),
             Pane::Configuration => {
                 super::theme::heading(ui, "TRAIN WORKSPACE", super::theme::TRAIN);
+                super::ride_camera::gray_box_controls(self.session, ui);
                 super::train_asset_ui::controls(self.session, ui, self.display);
                 ui.collapsing("Rider reference", |ui| panels::heartline(self.session, ui));
                 if self.session.development {
@@ -150,16 +156,11 @@ impl PaneUi<'_> {
             Pane::Summary => {
                 super::theme::heading(ui, "TRAIN SUMMARY", super::theme::TRAIN);
                 super::train_asset_ui::errors(self.session, ui);
+                super::ride_camera::controls(self.session, ui, self.scene);
                 if self.session.development {
-                    super::train_playback_ui::controls(self.session, ui, self.scene);
                     ui.collapsing("Asset import diagnostics", |ui| {
                         super::train_asset_ui::diagnostics(self.session, ui)
                     });
-                } else if self.session.playback.active() {
-                    ui.colored_label(super::theme::YELLOW, "Experimental playback is active.");
-                    if ui.button("Show playback controls").clicked() {
-                        self.session.development = true;
-                    }
                 }
                 let project = self.session.editor.project();
                 train_summary(
@@ -168,6 +169,7 @@ impl PaneUi<'_> {
                     &mut self.session.train_station_m,
                     self.session.playback.snapshot.as_ref().map(|s| &s.poses),
                     self.session.playback.active(),
+                    self.session.development,
                     ui,
                 );
                 if self.session.heartline_draft != project.heartline {
@@ -263,9 +265,9 @@ impl PaneUi<'_> {
                     }
                     ui.menu_button(if compact { "View" } else { "Navigate" }, |ui| {
                         ui.small(if pane == Pane::Preview {
-                            "Rigid train assets and engineering references"
+                            "Train preview and camera controls"
                         } else {
-                            "Track references; rail surfaces unavailable"
+                            "Track view and camera controls"
                         });
                         for (name, command) in [
                             ("Perspective", ViewCommand::Perspective),
@@ -280,7 +282,7 @@ impl PaneUi<'_> {
                             }
                         }
                         ui.separator();
-                        ui.label("Click track: select section · left drag: orbit");
+                        ui.label("Click track: select region · left drag: orbit");
                         ui.label("Middle/right drag: pan");
                         ui.label("Wheel: zoom · F: Fit All");
                     });
@@ -351,16 +353,14 @@ impl PaneUi<'_> {
         ui.checkbox(&mut self.display.running, "Running rails / primary beam");
         ui.checkbox(&mut self.display.structure, "Structural spine / beams");
         ui.checkbox(&mut self.display.hardware, "Repeated hardware");
-        ui.checkbox(&mut self.display.boundaries, "Section boundaries");
-        ui.checkbox(
-            &mut self.display.highlights,
-            "Selected solid section highlight",
-        );
+        ui.checkbox(&mut self.display.supports, "Structural supports");
+        ui.checkbox(&mut self.display.boundaries, "Region boundaries");
+        ui.checkbox(&mut self.display.highlights, "Selected region outline");
         ui.heading("Viewport references");
         ui.horizontal_wrapped(|ui| {
             for (label, command) in [
                 ("Fit all · F", ViewCommand::FitAll),
-                ("Fit section", ViewCommand::FitSelected),
+                ("Fit region", ViewCommand::FitSelected),
                 ("Perspective", ViewCommand::Perspective),
                 ("Top", ViewCommand::Top),
                 ("Side", ViewCommand::Side),
@@ -424,7 +424,7 @@ impl PaneUi<'_> {
         }
         for diagnostic in &self.scene.track.diagnostics {
             ui.label(format!(
-                "Section {} / {}: {}",
+                "Region {} / {}: {}",
                 diagnostic.section_id.0, diagnostic.code, diagnostic.message
             ));
         }
@@ -451,10 +451,9 @@ impl Behavior<Pane> for PaneUi<'_> {
             Pane::Configuration | Pane::Preview | Pane::Summary => super::theme::TRAIN,
             Pane::Support => super::theme::RED,
             Pane::Transition => super::theme::BLUE,
-            Pane::Diagnostics => egui::Color32::from_rgb(255, 219, 102),
+            Pane::Diagnostics => super::theme::YELLOW,
         };
-        egui::RichText::new(self.session.pane_title(*pane))
-            .color(color)
+        super::theme::text(self.session.pane_title(*pane), color)
             .strong()
             .into()
     }
@@ -525,33 +524,6 @@ fn offset_summary(ui: &mut egui::Ui, label: &str, value: qx_geometry::math::Vec3
             ui.label(axis);
             ui.monospace(format!("{value:.6} m"));
             ui.end_row();
-        }
-    });
-}
-fn support(ui: &mut egui::Ui) {
-    super::theme::heading(ui, "SUPPORT WORKSPACE", super::theme::RED);
-    ui.label(
-        egui::RichText::new("Support construction")
-            .strong()
-            .color(super::theme::VIOLET),
-    );
-    ui.label("Not available in this Alpha build.");
-    ui.small(
-        "Support authoring will use the same coaster document. No supports have been generated.",
-    );
-    ui.collapsing("Support Appearance", |ui| {
-        ui.label("No support structure or material is available to edit.");
-        ui.small("Focused support subpanel; separate from application display preferences.");
-    });
-    ui.collapsing("Planned tools", |ui| {
-        for text in [
-            "Support prefab tools",
-            "Foundation generator",
-            "Rail connector generator",
-            "Copy/paste support definitions",
-            "Structure, node, member and attachment selection/editing",
-        ] {
-            ui.label(format!("{text}: unavailable"));
         }
     });
 }
@@ -719,6 +691,7 @@ fn train_summary(
     train_station_m: &mut Option<f64>,
     dynamic: Option<&qx_physics::consist::ConsistInspection>,
     playback_active: bool,
+    development: bool,
     ui: &mut egui::Ui,
 ) {
     let Some(id) = project.heartline.train_configuration_id.as_deref() else {
@@ -734,6 +707,13 @@ fn train_summary(
         );
         return;
     };
+    let track = match scene.train_track() {
+        Ok(track) => track,
+        Err(e) => {
+            ui.colored_label(egui::Color32::LIGHT_YELLOW, e);
+            return;
+        }
+    };
     ui.label(format!(
         "{} · {} cars · {} components",
         train.name,
@@ -741,12 +721,12 @@ fn train_summary(
         train.components.len()
     ));
     let mut station = train_station_m
-        .unwrap_or(scene.track.length_m() * 0.5)
-        .clamp(0., scene.track.length_m());
+        .unwrap_or(track.length_m() * 0.5)
+        .clamp(0., track.length_m());
     ui.label("Inspection station (m)");
     ui.add_enabled_ui(!playback_active, |ui| {
         if ui
-            .add(egui::Slider::new(&mut station, 0.0..=scene.track.length_m()).show_value(false))
+            .add(egui::Slider::new(&mut station, 0.0..=track.length_m()).show_value(false))
             .changed()
         {
             *train_station_m = Some(station);
@@ -758,7 +738,7 @@ fn train_summary(
                     egui::DragValue::new(&mut station)
                         .speed(0.001)
                         .max_decimals(9)
-                        .range(0.0..=scene.track.length_m()),
+                        .range(0.0..=track.length_m()),
                 )
                 .changed()
             {
@@ -769,19 +749,16 @@ fn train_summary(
     ui.label(if dynamic.is_some() {
         "Simulated rigid-body poses · initial station retained for Reset"
     } else {
-        "Kinematic inspection · geometry approximation, no vehicle motion"
+        "Geometric inspection / preview · no physical simulation"
     });
-    if project.heartline.authored_reference
-        == qx_geometry::heartline::AuthoredReference::RiderReference
-    {
-        ui.colored_label(egui::Color32::LIGHT_YELLOW, "Inspection is unavailable for rider-authored geometry until the physical track reference is connected.");
+    if !development {
         return;
     }
-    ui.collapsing("Constraint details", |ui| {
+    ui.collapsing("Constraint details · development", |ui| {
     match dynamic
         .cloned()
         .map(Ok)
-        .unwrap_or_else(|| qx_physics::consist::inspect(train, &scene.track, station))
+        .unwrap_or_else(|| qx_physics::consist::inspect(train, track, station))
     {
         Ok(result) => {
             for joint in &result.joints {
@@ -806,7 +783,7 @@ fn train_summary(
                 if !component.guide_references_m.is_empty()
                     && let (Ok(frame), Ok(sample)) = (
                         qx_geometry::math::Frame::new(pose.pose.orientation),
-                        scene.track.sample_at_distance(pose.station_m),
+                        track.sample_at_distance(pose.station_m),
                     )
                 {
                     for (index, guide) in component.guide_references_m.iter().enumerate() {

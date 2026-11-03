@@ -5,12 +5,16 @@ pub mod authoring;
 pub mod construction;
 pub mod curve;
 pub mod curve_edit;
+pub mod engineering;
 pub mod heartline;
 pub mod math;
 pub mod profile;
 mod profile_transition;
 pub mod solver;
+pub mod source_profile;
 mod spline_track;
+pub mod supports;
+pub mod topology;
 pub mod transition;
 
 use std::fmt;

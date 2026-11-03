@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "kind": "track",
+  "style_id": "box-spined-100",
+  "visuals": [
+    {
+      "id": "spine-source",
+      "path": "Box-Spine-100.glb"
+    },
+    {
+      "id": "crosstie-source",
+      "path": "Box-Spine-100-crosstie.glb"
+    }
+  ],
+  "previews": {
+    "thumbnail": "thumbnail.png",
+    "large": "preview.png"
+  },
+  "construction": {
+    "version": 1,
+    "id": "box-spined-100",
+    "strategy": "dual_rail",
+    "materials": [
+      {
+        "id": "running",
+        "library": {
+          "id": "gloss-painted-steel"
+        },
+        "base_color": [
+          0.62,
+          0.72,
+          0.8
+        ],
+        "metallic": 0,
+        "roughness": 0.16
+      },
+      {
+        "id": "structure",
+        "library": {
+          "id": "gloss-painted-steel"
+        },
+        "base_color": [
+          0.19,
+          0.34,
+          0.43
+        ],
+        "metallic": 0,
+        "roughness": 0.16
+      },
+      {
+        "id": "hardware",
+        "library": {
+          "id": "gloss-painted-steel"
+        },
+        "base_color": [
+          0.19,
+          0.34,
+          0.43
+        ],
+        "metallic": 0,
+        "roughness": 0.16
+      }
+    ],
+    "continuous": [
+      {
+        "id": "rail-left",
+        "role": "running",
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 48
+        },
+        "offset_m": [
+          0,
+          0,
+          -0.55
+        ],
+        "rotation_rad": 0,
+        "material": "running",
+        "visible": true,
+        "cap_ends": true
+      },
+      {
+        "id": "rail-right",
+        "role": "running",
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 48
+        },
+        "offset_m": [
+          0,
+          0,
+          0.55
+        ],
+        "rotation_rad": 0,
+        "material": "running",
+        "visible": true,
+        "cap_ends": true
+      },
+      {
+        "id": "spine",
+        "role": "structure",
+        "profile": {
+          "kind": "asset_section",
+          "id": "box-spined-100-spine",
+          "path": "tracks/box-spined/100/Box-Spine-100.glb",
+          "version": 1,
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "offset_m": [
+          0,
+          0,
+          0
+        ],
+        "rotation_rad": 0,
+        "material": "structure",
+        "visible": true,
+        "cap_ends": true
+      }
+    ],
+    "repeated": [
+      {
+        "id": "cross-tie",
+        "shape": {
+          "kind": "asset",
+          "id": "box-spined-100-crosstie",
+          "path": "tracks/box-spined/100/Box-Spine-100-crosstie.glb",
+          "version": 1,
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "spacing_m": 1.5,
+        "start_m": 0.75,
+        "end_margin_m": 0.75,
+        "offset_m": [
+          0,
+          0,
+          0
+        ],
+        "rotation_rad": [
+          0,
+          0,
+          0
+        ],
+        "alignment": "track_frame",
+        "material": "hardware",
+        "visible": true
+      }
+    ]
+  }
+}

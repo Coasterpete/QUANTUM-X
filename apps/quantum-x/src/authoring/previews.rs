@@ -16,6 +16,9 @@ pub(super) struct State {
     entries: BTreeMap<PathBuf, Entry>,
 }
 impl State {
+    pub fn clear(&mut self) {
+        self.entries.clear();
+    }
     pub fn show(&mut self, ui: &mut egui::Ui, path: PathBuf, label: &str, height: f32) {
         for entry in self.entries.values_mut() {
             poll(entry, ui.ctx());
@@ -105,7 +108,14 @@ fn decode(path: &Path) -> Result<egui::ColorImage, String> {
         limits.max_image_height = Some(4096);
         limits.max_alloc = Some(64 * 1024 * 1024);
         reader.limits(limits);
-        let rgba = reader.decode()?.into_rgba8();
+        // Bound derived thumbnails to conservative egui/device limits. Originals stay intact.
+        let decoded = reader.decode()?;
+        let rgba = if decoded.width().max(decoded.height()) > 512 {
+            decoded.thumbnail(512, 512)
+        } else {
+            decoded
+        }
+        .into_rgba8();
         Ok(egui::ColorImage::from_rgba_unmultiplied(
             [rgba.width() as usize, rgba.height() as usize],
             rgba.as_raw(),

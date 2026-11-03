@@ -10,7 +10,7 @@
     {
       "id": "box-spined",
       "name": "Box Spined",
-      "description": "Owner-defined track family. Content and engineering definitions pending.",
+      "description": "Owner-defined Box-Spined construction. Style 100 integrates original source hardware; other numbered styles remain planned.",
       "directory": "tracks/box-spined"
     },
     {
@@ -87,14 +87,14 @@
       "family_id": "box-spined",
       "number": 100,
       "name": "Box Spined-100",
-      "description": "Planned owner-defined style. No finished assets, dimensions or validated train compatibility.",
+      "description": "Owner-created chamfered box spine and original cross-ties, with continuous parametric running rails. Owner-authorized development defaults: 1.10 m rail centers, 0.13 m rail diameter, 1.50 m cross-tie spacing. These values are configurable and provisional, not finalized production specifications. Original cross-tie pad asymmetry is preserved. Visual construction verified; no structural or wheel-contact validation claimed.",
       "directory": "tracks/box-spined/100",
       "compatible_train_ids": [],
-      "track_asset": null,
+      "track_asset": "tracks/box-spined/100/Box-Spine-100.glb",
       "thumbnail": null,
       "preview": null,
       "reference_images": [],
-      "status": "planned"
+      "status": "available"
     },
     {
       "id": "box-spined-200",
