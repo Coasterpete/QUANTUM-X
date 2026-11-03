@@ -1,6 +1,7 @@
 //! Public welcome startup and preserved development diagnostics.
 mod authoring;
 mod benchmark;
+mod diagnostic_import;
 mod export;
 mod physics_diagnostic;
 use qx_document::{
@@ -43,11 +44,15 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x --version
   quantum-x benchmark
   quantum-x physics-diagnostic
+  quantum-x diagnostic-import <track.csv> <supports.xml|-> [--render <new-directory>] [--construction <generic-dual|box-spined-100>]
 
 Exports authored JSON, numerical CSV, diagnostic OBJ, SVG plots, and summary.
 The design reference speed is not a simulated train velocity.";
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
+    if args.first().is_some_and(|a| a == "diagnostic-import") {
+        return diagnostic_import::run(&args[1..]);
+    }
     let launch = authoring::startup::launch(&std::env::current_exe()?, &args);
     if args.len() == 2 && args[0] == "integrated-core-scenario" {
         return authoring::expansion_scenario::run(PathBuf::from(&args[1]));

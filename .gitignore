@@ -28,3 +28,7 @@ Thumbs.db
 # Keep original icon sources; exclude Blender recovery files and render output.
 *.blend[0-9]
 /assets/icons/quantum-dynamics/renders/
+
+# Local NoLimits 2 Professional diagnostic exports
+/tests/fixtures/nl2/**/*.csv
+/tests/fixtures/nl2/**/*.xml

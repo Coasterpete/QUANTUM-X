@@ -182,6 +182,30 @@ impl InspectionScene {
                 }
             }
         }
+        // Imported diagnostic paths have no authoring sections. Their isolated
+        // connector/footer markers must participate in fitting too.
+        if section.is_none() && self.track.sections.is_empty() {
+            if let Some(mesh) = &self.mesh {
+                min = Vec3::new(
+                    min.x.min(mesh.bounds.min.x),
+                    min.y.min(mesh.bounds.min.y),
+                    min.z.min(mesh.bounds.min.z),
+                );
+                max = Vec3::new(
+                    max.x.max(mesh.bounds.max.x),
+                    max.y.max(mesh.bounds.max.y),
+                    max.z.max(mesh.bounds.max.z),
+                );
+            }
+            if let Some(display) = display {
+                for line in &display.overlay_lines {
+                    for p in [line.start_m, line.end_m] {
+                        min = Vec3::new(min.x.min(p.x), min.y.min(p.y), min.z.min(p.z));
+                        max = Vec3::new(max.x.max(p.x), max.y.max(p.y), max.z.max(p.z));
+                    }
+                }
+            }
+        }
         (min, max)
     }
     /// Hit-test projected centerline segments, retaining stable IDs and station.
@@ -466,6 +490,14 @@ pub(crate) fn vertices(
         [0.6, 0.85, 0.4],
         [0.8, 0.6, 0.9],
     ];
+    if scene.track.sections.is_empty()
+        && display.centerline
+        && display.mode != DisplayMode::Rendered
+    {
+        for pair in scene.track.samples.windows(2) {
+            line(pair[0].position_m, pair[1].position_m, colors[0]);
+        }
+    }
     for (i, s) in scene.track.sections.iter().enumerate() {
         let color = if display.selected == Some(i) && display.highlights {
             [1., 1., 1.]
@@ -649,6 +681,27 @@ mod tests {
             physical_track: None,
             authored_reference: qx_geometry::heartline::AuthoredReference::TrackCenterline,
         }
+    }
+    #[test]
+    fn unsectioned_diagnostic_lines_and_isolated_support_bounds() {
+        let mut scene = scene();
+        scene.track.sections.clear();
+        scene.track.graphs.clear();
+        let mut mesh =
+            qx_geometry::construction::build(&scene.track, &Default::default(), Default::default())
+                .unwrap();
+        mesh.bounds.include(Vec3::new(500., -200., 0.));
+        scene.mesh = Some(std::sync::Arc::new(mesh));
+        let display = DisplayOptions {
+            grid: false,
+            ..Default::default()
+        };
+        let lines = vertices(&scene, Vec3::ZERO, &display);
+        assert_eq!(lines.len(), 6 + 2 * (scene.track.samples.len() - 1));
+        let (min, max) = scene.display_bounds(None, &display);
+        assert_eq!(min.y, -200.);
+        assert_eq!(max.x, 500.);
+        assert!(scene.track.sections.is_empty());
     }
     #[test]
     fn bounds_and_projected_picking_resolve_the_same_section_and_station() {

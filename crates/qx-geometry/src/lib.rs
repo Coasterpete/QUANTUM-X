@@ -5,6 +5,7 @@ pub mod authoring;
 pub mod construction;
 pub mod curve;
 pub mod curve_edit;
+pub mod diagnostic_import;
 pub mod engineering;
 pub mod heartline;
 pub mod math;
