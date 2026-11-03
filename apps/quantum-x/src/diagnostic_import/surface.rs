@@ -12,6 +12,9 @@ pub(super) struct DiagnosticSurface {
     pub show_alignment: bool,
     markers: bool,
     pub closeup: bool,
+    pub evidence_station_m: Option<f64>,
+    pub comparison_camera: bool,
+    pub structural_detail: bool,
 }
 impl DiagnosticSurface {
     pub fn new(inputs: Inputs, loaded: Loaded) -> Self {
@@ -24,6 +27,9 @@ impl DiagnosticSurface {
             show_alignment: false,
             markers: true,
             closeup: false,
+            evidence_station_m: None,
+            comparison_camera: false,
+            structural_detail: false,
         }
     }
     fn reload(&mut self) {
@@ -82,6 +88,7 @@ impl EditorSurface for DiagnosticSurface {
             ui.label("Left drag: orbit · right/middle drag: pan · wheel: zoom");
             ui.checkbox(&mut display.running,"Running rails");ui.checkbox(&mut display.structure,"Track structure");
             ui.checkbox(&mut display.hardware,"Cross ties / hardware");ui.checkbox(&mut display.supports,"Imported support beams");
+            if self.structural_detail { display.supports=false; }
             ui.checkbox(&mut display.centerline,"Exported spline");ui.checkbox(&mut display.frames,"Orientation frames");
             ui.checkbox(&mut self.markers,"Footer / connector position markers");
             ui.checkbox(&mut self.show_alignment,"Connector-to-path distance lines");
@@ -93,6 +100,15 @@ impl EditorSurface for DiagnosticSurface {
                     ui.label(format!("Elevation {:.3} … {:.3} m",l.track.bounds.min.y,l.track.bounds.max.y));
                     ui.label(format!("Endpoint gap {:.3} m · no closure added",l.track.endpoint_gap_m));
                     ui.label(format!("Construction: {} (QUANTUM geometry)",self.inputs.construction));
+                    if let Some(r)=&l.construction_report {
+                        ui.strong("Construction map · DEVELOPMENT ONLY");
+                        ui.label("Pink rectangles: provisional structural boundaries, independent of Regions.");
+                        if let Some(segments)=r["map"]["segments"].as_array() { for s in segments {
+                            ui.label(format!("{}: {}..{} m · {}",s["id"],s["start_m"],s["end_m"],s["variant_id"]));
+                        }}
+                        ui.label("Diagnostic double spine uses test dimensions; connector hardware and junctions unverified.");
+                        ui.label(format!("{} boundary-crossing hardware placements omitted",r["omitted_boundary_hardware"].as_array().map_or(0,Vec::len)));
+                    }
                     if let Some(s)=&l.supports {
                         ui.label(format!("{} nodes · {} beams · {} footers",s.nodes.len(),s.beams.len(),s.footers.len()));
                         if let Some(r)=&l.alignment {
@@ -119,23 +135,48 @@ impl EditorSurface for DiagnosticSurface {
         display.mode = DisplayMode::RenderedCenterline;
         display.overlay_lines.clear();
         display.train_bounds = None;
+        display.camera_view = None;
         if let Some(l) = &self.loaded {
-            if self.markers {
+            display.overlay_lines.extend_from_slice(&l.boundary_markers);
+            if self.comparison_camera {
+                display.train_bounds = Some(super::construction_map::comparison_bounds(
+                    l.track.bounds,
+                    l.supports.as_ref().and_then(|s| s.bounds),
+                ));
+            }
+            if self.markers && !self.structural_detail {
                 display.overlay_lines.extend_from_slice(&l.markers);
             }
             if self.show_alignment {
                 display.overlay_lines.extend_from_slice(&l.alignment_lines);
             }
             if self.closeup {
-                let p = l
-                    .alignment
-                    .as_ref()
-                    .and_then(|r| r.residuals.iter().find(|r| r.track_index == 0))
-                    .map_or(l.track.samples[l.track.samples.len() / 2].position_m, |r| {
-                        r.connector_position_m
-                    });
-                let extent = qx_geometry::math::Vec3::new(12., 12., 12.);
-                display.train_bounds = Some((p - extent, p + extent));
+                if let Some(station) = self.evidence_station_m.or(l.focus_station_m) {
+                    if let Ok(s) = scene.track.sample_at_distance(station) {
+                        let target = s.position_m - s.frame.normal() * 0.4;
+                        let eye = target
+                            + s.frame.tangent() * 4.
+                            + s.frame.normal() * -1.8
+                            + s.frame.lateral() * 3.2;
+                        display.camera_view = Some(qx_rendering::CameraView {
+                            eye_m: eye,
+                            forward: target - eye,
+                            up: s.frame.normal(),
+                        });
+                        let extent = qx_geometry::math::Vec3::new(5., 5., 5.);
+                        display.train_bounds = Some((target - extent, target + extent));
+                    }
+                } else {
+                    let p = l
+                        .alignment
+                        .as_ref()
+                        .and_then(|r| r.residuals.iter().find(|r| r.track_index == 0))
+                        .map_or(l.track.samples[l.track.samples.len() / 2].position_m, |r| {
+                            r.connector_position_m
+                        });
+                    let extent = qx_geometry::math::Vec3::new(12., 12., 12.);
+                    display.train_bounds = Some((p - extent, p + extent));
+                }
             }
         }
         SurfaceOutput {

@@ -7,6 +7,165 @@ fn inputs() -> Inputs {
         csv: root.join("terrain.csv"),
         xml: Some(root.join("terrain-supports.xml")),
         construction: "generic-dual".into(),
+        construction_map: None,
+    }
+}
+fn construction_inputs() -> Inputs {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../crates/qx-geometry/tests/import-fixtures");
+    Inputs {
+        csv: root.join("construction.csv"),
+        xml: Some(root.join("construction-supports.xml")),
+        construction: "box-spined-100".into(),
+        construction_map: Some(root.join("construction-map.json")),
+    }
+}
+fn compare_construction(inputs: Inputs) {
+    let csv = std::fs::read(&inputs.csv).unwrap();
+    let xml = std::fs::read(inputs.xml.as_ref().unwrap()).unwrap();
+    let mut baseline_inputs = inputs.clone();
+    baseline_inputs.construction_map = None;
+    let before = load(&baseline_inputs).unwrap();
+    let after = load(&inputs).unwrap();
+    assert_eq!(before.track, after.track);
+    assert_eq!(before.scene.track, after.scene.track);
+    assert_eq!(before.supports, after.supports);
+    assert_eq!(
+        serde_json::to_value(&before.alignment).unwrap(),
+        serde_json::to_value(&after.alignment).unwrap()
+    );
+    let a = before.scene.mesh.as_ref().unwrap();
+    let b = after.scene.mesh.as_ref().unwrap();
+    let keep = |m: &construction::TrackMesh| {
+        m.components
+            .iter()
+            .filter(|c| {
+                c.role == qx_style::construction::Role::Running || c.id.starts_with("support/")
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        keep(a),
+        keep(b),
+        "rails and imported support meshes must be identical in every attribute"
+    );
+    assert_eq!(
+        a.components
+            .iter()
+            .filter(|c| c.role == qx_style::construction::Role::Running)
+            .count(),
+        2
+    );
+    assert!(after.construction_report.is_some());
+    assert!(!after.boundary_markers.is_empty());
+    for c in &b.components {
+        c.mesh.validate().unwrap();
+    }
+    let again = load(&inputs).unwrap();
+    assert_eq!(after.scene.mesh, again.scene.mesh);
+    assert_eq!(std::fs::read(&inputs.csv).unwrap(), csv);
+    assert_eq!(std::fs::read(inputs.xml.as_ref().unwrap()).unwrap(), xml);
+    println!(
+        "M1.3 comparison: track samples={}, position/frame/rail/support attribute deltas=0; baseline vertices={}, bytes={}, total import+mesh ms={}; segmented vertices={}, bytes={}, total import+mesh ms={}; repeat ms={}",
+        after.track.samples.len(),
+        a.stats.vertices,
+        a.stats.bytes,
+        before.report["import_and_mesh_ms"],
+        b.stats.vertices,
+        b.stats.bytes,
+        after.report["import_and_mesh_ms"],
+        again.report["import_and_mesh_ms"]
+    );
+}
+#[test]
+fn segmented_source_assets_imported_supports_and_geometry_invariants() {
+    compare_construction(construction_inputs());
+}
+
+#[test]
+fn optional_private_segmented_brobdingnagian() {
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/nl2/BROBDINGNAGIAN");
+    let csv = root.join("BROBDINGNAGIAN.csv");
+    let xml = root.join("BROBDINGNAGIAN_supports.xml");
+    if !csv.is_file() || !xml.is_file() {
+        eprintln!("SKIP: private BROBDINGNAGIAN fixture unavailable");
+        return;
+    }
+    let track = import::parse_csv(&import::read_text(&csv).unwrap()).unwrap();
+    let cuts = [
+        0.,
+        250.25,
+        700.75,
+        1250.25,
+        1900.75,
+        2400.25,
+        track.construction_track().length_m(),
+    ];
+    let segments=cuts.windows(2).enumerate().map(|(i,w)|serde_json::json!({"id":format!("local-{i}"),"start_m":w[0],"end_m":w[1],"style_id":"box-spined-100","variant_id":if i%2==0 {"source-single"} else {"diagnostic-double"}})).collect::<Vec<_>>();
+    let map = std::env::temp_dir().join(format!(
+        "qx-m13-map-{}-{}.json",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    ));
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&map)
+        .unwrap();
+    std::io::Write::write_all(
+        &mut file,
+        &serde_json::to_vec(&serde_json::json!({"version":1,"segments":segments})).unwrap(),
+    )
+    .unwrap();
+    drop(file);
+    compare_construction(Inputs {
+        csv,
+        xml: Some(xml),
+        construction: "box-spined-100".into(),
+        construction_map: Some(map.clone()),
+    });
+    std::fs::remove_file(map).unwrap();
+}
+
+#[test]
+fn offscreen_segmented_comparisons_when_requested() {
+    let Some(root) = std::env::var_os("QX_SEGMENT_RENDER_TEST_DIR") else {
+        eprintln!("SKIP: set QX_SEGMENT_RENDER_TEST_DIR for offscreen segmented evidence");
+        return;
+    };
+    let inputs = construction_inputs();
+    let root = PathBuf::from(root);
+    run(&[
+        inputs.csv.into_os_string(),
+        inputs.xml.unwrap().into_os_string(),
+        "--construction-map".into(),
+        inputs.construction_map.unwrap().into_os_string(),
+        "--render".into(),
+        root.clone().into_os_string(),
+    ])
+    .unwrap();
+    for label in ["boundary", "double"] {
+        let before = image::open(root.join(format!("before-{label}.png")))
+            .unwrap()
+            .to_rgb8();
+        let after = image::open(root.join(format!("after-{label}.png")))
+            .unwrap()
+            .to_rgb8();
+        let changes = before
+            .enumerate_pixels()
+            .filter(|(x, y, p)| {
+                *x > 400 && *y > 40 && *y < 1050 && p.0 != after.get_pixel(*x, *y).0
+            })
+            .count();
+        assert!(
+            changes > 100,
+            "actual structural geometry should change viewport pixels; {label}: {changes}"
+        );
     }
 }
 #[test]

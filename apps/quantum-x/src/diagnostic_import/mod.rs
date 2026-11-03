@@ -1,4 +1,5 @@
 //! Replaceable development inspection, independent of all native editor state.
+mod construction_map;
 mod surface;
 #[cfg(test)]
 mod tests;
@@ -18,6 +19,7 @@ struct Inputs {
     csv: PathBuf,
     xml: Option<PathBuf>,
     construction: String,
+    construction_map: Option<PathBuf>,
 }
 struct Loaded {
     scene: InspectionScene,
@@ -28,6 +30,9 @@ struct Loaded {
     markers: Vec<OverlayLine>,
     alignment_lines: Vec<OverlayLine>,
     materials: Vec<String>,
+    construction_report: Option<serde_json::Value>,
+    boundary_markers: Vec<OverlayLine>,
+    focus_station_m: Option<f64>,
 }
 fn load(inputs: &Inputs) -> Result<Loaded, String> {
     let result = || -> Result<Loaded, Box<dyn Error>> {
@@ -56,12 +61,32 @@ fn load(inputs: &Inputs) -> Result<Loaded, String> {
             _ => return Err("construction must be generic-dual or box-spined-100".into()),
         };
         let generated = track.construction_track();
-        let mut mesh = construction::build_with_assets(
-            &generated,
-            &definition,
-            Default::default(),
-            &qx_rendering::construction_assets::Sources::new(&root),
-        )?;
+        let mapped = inputs
+            .construction_map
+            .as_ref()
+            .map(|path| construction_map::build(path, &generated, &definition, &root))
+            .transpose()?;
+        let (mut mesh, construction_report, boundary_markers, focus_station_m) =
+            if let Some(mapped) = mapped {
+                (
+                    mapped.mesh,
+                    Some(mapped.report),
+                    mapped.markers,
+                    Some(mapped.focus_station_m),
+                )
+            } else {
+                (
+                    construction::build_with_assets(
+                        &generated,
+                        &definition,
+                        Default::default(),
+                        &qx_rendering::construction_assets::Sources::new(&root),
+                    )?,
+                    None,
+                    vec![],
+                    None,
+                )
+            };
         if let Some(s) = &supports {
             s.append_mesh(&mut mesh)?;
         }
@@ -136,6 +161,7 @@ fn load(inputs: &Inputs) -> Result<Loaded, String> {
             "supports":support_stats,"alignment":alignment,
             "reference_limitation":"exported spline reference offset unspecified; attachment distances are not certified connection errors",
             "construction":inputs.construction,"construction_note":"existing QUANTUM construction, not an imported NL2 track-family mesh",
+            "construction_segments":construction_report,
             "materials":mesh.materials,"available_materials":available,"material_warnings":materials.warnings,
             "material_library_error":material_library.err(),
             "mesh":{"components":mesh.components.len(),"vertices":mesh.stats.vertices,"triangles":mesh.stats.triangles,"rendered_triangles":mesh.stats.rendered_triangles,"instances":mesh.stats.instances,"bytes":mesh.stats.bytes,"bounds_m":{"min":mesh.bounds.min,"max":mesh.bounds.max}},
@@ -156,13 +182,16 @@ fn load(inputs: &Inputs) -> Result<Loaded, String> {
             markers,
             alignment_lines,
             materials: available,
+            construction_report,
+            boundary_markers,
+            focus_station_m,
         })
     };
     result().map_err(|e| format!("Diagnostic import: {e}"))
 }
 pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
     if args.len() < 2 {
-        return Err("usage: diagnostic-import <track.csv> <supports.xml|-> [--render <new-directory>] [--construction <generic-dual|box-spined-100>]".into());
+        return Err("usage: diagnostic-import <track.csv> <supports.xml|-> [--render <new-directory>] [--construction <generic-dual|box-spined-100> | --construction-map <map.json>]".into());
     }
     let mut inputs = Inputs {
         csv: args[0].clone().into(),
@@ -172,6 +201,7 @@ pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
             Some(args[1].clone().into())
         },
         construction: "generic-dual".into(),
+        construction_map: None,
     };
     let mut output = None;
     let (options, remainder) = args[2..].as_chunks::<2>();
@@ -181,19 +211,31 @@ pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
             Some("--construction") => {
                 inputs.construction = pair[1].to_str().ok_or("construction must be UTF-8")?.into()
             }
+            Some("--construction-map") if inputs.construction_map.is_none() => {
+                inputs.construction_map = Some(PathBuf::from(&pair[1]));
+            }
             _ => return Err("unknown or duplicate diagnostic import option".into()),
         }
     }
     if !remainder.is_empty() {
         return Err("diagnostic option requires a value".into());
     }
+    if inputs.construction_map.is_some() {
+        // The sidecar's explicit style/variant IDs are authoritative. The M1.3
+        // diagnostic registry contains only the verified Box-Spined-100 pair.
+        if args[2..].iter().any(|a| a == "--construction") {
+            return Err("choose --construction OR --construction-map, not both".into());
+        }
+        inputs.construction = "box-spined-100".into();
+    }
     let loaded = load(&inputs)?;
     println!("{}", serde_json::to_string_pretty(&loaded.report)?);
     let scene = loaded.scene.clone();
-    let mut surface = surface::DiagnosticSurface::new(inputs, loaded);
+    let mut surface = surface::DiagnosticSurface::new(inputs.clone(), loaded);
     if let Some(output) = output {
         // Never overwrite a source file, an existing evidence directory or a project.
         std::fs::create_dir(&output)?;
+        surface.comparison_camera = inputs.construction_map.is_some();
         let mut report = surface.loaded.as_ref().unwrap().report.clone();
         let overview = qx_rendering::render_offscreen(
             &scene,
@@ -212,6 +254,7 @@ pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
         )?;
         // Focus near an actual connector, with no modifications to source geometry.
         surface.closeup = true;
+        surface.structural_detail = inputs.construction_map.is_some();
         let detail = qx_rendering::render_offscreen(
             &scene,
             &mut surface,
@@ -221,6 +264,61 @@ pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
         )?;
         report["offscreen"] =
             serde_json::json!({"overview":overview,"alignment":alignment,"detail":detail});
+        if inputs.construction_map.is_some() {
+            let mut baseline_inputs = inputs.clone();
+            baseline_inputs.construction_map = None;
+            let baseline = load(&baseline_inputs)?;
+            let baseline_scene = baseline.scene.clone();
+            let mut before = surface::DiagnosticSurface::new(baseline_inputs, baseline);
+            before.comparison_camera = true;
+            let baseline_overview = qx_rendering::render_offscreen(
+                &baseline_scene,
+                &mut before,
+                &output.join("before-overview.png"),
+                1800,
+                1200,
+            )?;
+            let boundary = surface
+                .loaded
+                .as_ref()
+                .and_then(|l| l.focus_station_m)
+                .unwrap_or(scene.track.length_m() * 0.5);
+            let double_station = surface
+                .loaded
+                .as_ref()
+                .and_then(|l| l.construction_report.as_ref())
+                .and_then(|r| r["map"]["segments"].as_array())
+                .and_then(|a| a.iter().find(|s| s["variant_id"] == "diagnostic-double"))
+                .and_then(|s| Some((s["start_m"].as_f64()? + s["end_m"].as_f64()?) * 0.5))
+                .unwrap_or(boundary);
+            let mut comparisons = vec![];
+            for (label, station) in [("boundary", boundary), ("double", double_station)] {
+                before.closeup = true;
+                before.structural_detail = true;
+                before.evidence_station_m = Some(station);
+                surface.closeup = true;
+                surface.evidence_station_m = Some(station);
+                surface.show_alignment = false;
+                let a = qx_rendering::render_offscreen(
+                    &baseline_scene,
+                    &mut before,
+                    &output.join(format!("before-{label}.png")),
+                    1600,
+                    1100,
+                )?;
+                let b = qx_rendering::render_offscreen(
+                    &scene,
+                    &mut surface,
+                    &output.join(format!("after-{label}.png")),
+                    1600,
+                    1100,
+                )?;
+                comparisons.push(
+                    serde_json::json!({"view":label,"station_m":station,"before":a,"after":b}),
+                );
+            }
+            report["comparison"] = serde_json::json!({"baseline_overview":baseline_overview,"views":comparisons,"camera":"identical source bounds and source pose in before/after","baseline":before.loaded.as_ref().unwrap().report});
+        }
         std::fs::write(
             output.join("report.json"),
             serde_json::to_vec_pretty(&report)?,

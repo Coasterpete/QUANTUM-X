@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 mod appearance;
 pub mod compatibility;
 pub mod construction;
+pub mod construction_segments;
 pub mod library;
 pub mod materials;
 use std::{collections::HashSet, fmt};
