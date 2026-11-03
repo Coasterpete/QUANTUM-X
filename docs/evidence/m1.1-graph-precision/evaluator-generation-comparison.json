@@ -1,0 +1,52 @@
+[
+  {
+    "artifact": "centerline.csv",
+    "sha256": "E315C9182AF94634B352A04F8EC1BBD133475BDC9C2EB54BC370F775C109B0BD",
+    "identical": true
+  },
+  {
+    "artifact": "centerline.obj",
+    "sha256": "B82F4188469B6C5B490DF1A0B08BA22CFB87EF7FF6BB79E2D17327D330F5BB69",
+    "identical": true
+  },
+  {
+    "artifact": "connections.csv",
+    "sha256": "795BE6ECA5FAEC590A72D630218ABD29B18EEF5E47BD8B01D04BDEFDF31A14B4",
+    "identical": true
+  },
+  {
+    "artifact": "curve-joins.csv",
+    "sha256": "1EE04BB9457FEAC2A4EA3E1890912EE740091B3BA1ADD8F7CCAC55D0C4006989",
+    "identical": true
+  },
+  {
+    "artifact": "measurements.csv",
+    "sha256": "4183C3240CAA2DDE5F280FA44E4E651DD6D9958CD030FA2B1253951427C5D643",
+    "identical": true
+  },
+  {
+    "artifact": "numerical.csv",
+    "sha256": "0EF1EB1F38299F41E4B5FFCC176992E6921CF86AA74124BD398EF9E51369BD05",
+    "identical": true
+  },
+  {
+    "artifact": "project.qx.json",
+    "sha256": "0C4139788380FE989200B127D066E712A6DE0F4D2E7B01E070AD2EE16BE52A09",
+    "identical": true
+  },
+  {
+    "artifact": "reference-points.csv",
+    "sha256": "9EA3C1F0D815822361B00017BC2AECBB215ACA58629EAB731E30E78C35D9A8B7",
+    "identical": true
+  },
+  {
+    "artifact": "sections.csv",
+    "sha256": "4B2C0C8AFFD93932616012BF608E07D3F5FE4873595DB2A2EFC065E77FAB9FA3",
+    "identical": true
+  },
+  {
+    "artifact": "transitions.csv",
+    "sha256": "357A3AC63350D50354EBBB232AF59FF794D2B65409949643B0AEA85CD0888B00",
+    "identical": true
+  }
+]

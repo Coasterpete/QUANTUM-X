@@ -53,7 +53,7 @@ fn card_sized(
             ui.is_enabled(),
             active,
             format!(
-                "Section {}: {}. {}. {}",
+                "Region {}: {}. {}. {}",
                 index + 1,
                 section.name,
                 method(section),
@@ -91,7 +91,7 @@ fn card_sized(
         painter.text(
             rect.left_top() + egui::vec2(8., if timeline { 24. } else { 32. }),
             egui::Align2::LEFT_TOP,
-            format!("{} · {}", method(section), extent(section)),
+            format!("{} · {} committed", method(section), extent(section)),
             egui::FontId::monospace(13.),
             visuals.text_color(),
         );
@@ -110,7 +110,7 @@ pub(super) fn sequence(session: &mut Session, ui: &mut egui::Ui) {
                 let response = card_sized(ui, section, index, active, true, compact);
                 if response.clicked() { session.select(section.id); }
                 if response.hovered() { session.hovered = Some(section.id); }
-                response.on_hover_text(format!("Section ID {}. Click to select in both the timeline and Track Workspace. Apply or Cancel any pending section draft first.", section.id.0));
+                response.on_hover_text("Select in the timeline and Track Workspace. Apply or Cancel any pending region draft first.");
             }
         });
     });
@@ -153,7 +153,7 @@ pub(super) fn ordering(session: &mut Session, ui: &mut egui::Ui) {
             Icon::Earlier,
             "Earlier",
             ready && index > 0,
-            "Move selected section one position earlier. One undo step.",
+            "Move selected region one position earlier. One undo step.",
         )
         .clicked()
         {
@@ -164,7 +164,7 @@ pub(super) fn ordering(session: &mut Session, ui: &mut egui::Ui) {
             Icon::Later,
             "Later",
             ready && index + 1 < count,
-            "Move selected section one position later. One undo step.",
+            "Move selected region one position later. One undo step.",
         )
         .clicked()
         {

@@ -60,14 +60,23 @@ fn persisted_consist_poses_and_dynamics_are_distinct_and_deterministic() {
     assert!(articulation > 0.01);
     assert!(up.dot(Vec3::Y) < 0.);
     assert!(pose.joints.iter().all(|j| j.error_m < 0.03));
-    let (mut world, mut guides, initial) =
+    let (mut world, mut guides, mut attitudes, initial) =
         initialize(&train, &track, 30., Vec3::new(0., -9.81, 0.), 32, 2).unwrap();
-    let (mut replay, mut replay_guides) = (world.clone(), guides.clone());
+    let (mut replay, mut replay_guides, mut replay_attitudes) =
+        (world.clone(), guides.clone(), attitudes.clone());
     let mut max_joint_force: f64 = 0.;
     let mut max_guide_force: f64 = 0.;
     for _ in 0..120 {
-        let d = world.step_on_track(&track, &mut guides).unwrap();
-        assert_eq!(d, replay.step_on_track(&track, &mut replay_guides).unwrap());
+        let d = world
+            .step_on_track(&track, &mut guides, &mut attitudes)
+            .unwrap();
+        assert_eq!(
+            d,
+            replay
+                .step_on_track(&track, &mut replay_guides, &mut replay_attitudes)
+                .unwrap()
+        );
+        assert!(d.max_attitude_error_rad < 0.01);
         assert_eq!(d.joint_force_on_b_n.len(), 5);
         max_joint_force = max_joint_force.max(
             d.joint_force_on_b_n

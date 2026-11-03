@@ -1,0 +1,281 @@
+{
+  "schema_version": 7,
+  "metadata": {
+    "project_id": "qx-foundation-example-1",
+    "name": "M1.1 narrow C2 graph · synthetic test fixture",
+    "author": "QUANTUM-X contributors",
+    "description": "Five authored sections exercising force, world/rider-local geometry, both domains, banking, and construction geometry."
+  },
+  "initial": {
+    "position_m": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "reference_speed_mps": 20.0,
+    "gravity_mps2": 9.80665
+  },
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "construction": {
+    "version": 1,
+    "id": "validation-dual",
+    "strategy": "dual_rail",
+    "materials": [
+      {
+        "id": "running",
+        "base_color": [
+          0.62,
+          0.72,
+          0.8
+        ],
+        "metallic": 0.65,
+        "roughness": 0.28
+      },
+      {
+        "id": "structure",
+        "base_color": [
+          0.19,
+          0.34,
+          0.43
+        ],
+        "metallic": 0.5,
+        "roughness": 0.55
+      },
+      {
+        "id": "hardware",
+        "base_color": [
+          0.42,
+          0.5,
+          0.55
+        ],
+        "metallic": 0.45,
+        "roughness": 0.5
+      }
+    ],
+    "continuous": [
+      {
+        "id": "rail-left",
+        "role": "running",
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 12
+        },
+        "offset_m": [
+          0.0,
+          0.0,
+          -0.55
+        ],
+        "rotation_rad": 0.0,
+        "material": "running",
+        "visible": true,
+        "cap_ends": true
+      },
+      {
+        "id": "rail-right",
+        "role": "running",
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 12
+        },
+        "offset_m": [
+          0.0,
+          0.0,
+          0.55
+        ],
+        "rotation_rad": 0.0,
+        "material": "running",
+        "visible": true,
+        "cap_ends": true
+      },
+      {
+        "id": "spine",
+        "role": "structure",
+        "profile": {
+          "kind": "box",
+          "height_m": 0.28,
+          "width_m": 0.24
+        },
+        "offset_m": [
+          0.0,
+          -0.38,
+          0.0
+        ],
+        "rotation_rad": 0.0,
+        "material": "structure",
+        "visible": true,
+        "cap_ends": true
+      }
+    ],
+    "repeated": [
+      {
+        "id": "cross-tie",
+        "shape": {
+          "kind": "box",
+          "size_m": [
+            0.12,
+            0.22,
+            1.22
+          ]
+        },
+        "spacing_m": 1.2,
+        "start_m": 0.25,
+        "end_margin_m": 0.25,
+        "offset_m": [
+          0.0,
+          -0.16,
+          0.0
+        ],
+        "rotation_rad": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "alignment": "track_frame",
+        "material": "hardware",
+        "visible": true
+      }
+    ]
+  },
+  "sections": [
+    {
+      "id": 1,
+      "name": "Narrow C2 graph fixture",
+      "domain": "distance",
+      "extent": 1.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_metre",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "rider_local",
+        "pitch_rate": {
+          "unit": "radians_per_metre",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 1.0,
+              "start": 0.0,
+              "end": 0.0,
+              "amplitude": 0.0,
+              "function": {
+                "type": "nurbs",
+                "profile": {
+                  "degree": 3,
+                  "values": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "knots": [
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.5,
+                    0.5001,
+                    0.5002,
+                    0.5003,
+                    0.5004,
+                    0.5005,
+                    0.5006,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "weights": [
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "incoming": "free",
+                  "interior": "c2"
+                }
+              }
+            }
+          ]
+        },
+        "yaw_rate": {
+          "unit": "radians_per_metre",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 1.0,
+              "start": 0.0,
+              "end": 0.0,
+              "amplitude": 0.0,
+              "function": {
+                "type": "constant"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "heartline": {
+    "authored_reference": "track_centerline",
+    "rider_offset": {
+      "type": "constant",
+      "offset_m": {
+        "x": 0.0,
+        "y": 0.0,
+        "z": 0.0
+      }
+    },
+    "train_configuration_id": null
+  },
+  "trains": [],
+  "operations": {
+    "layout": "open",
+    "physical": {
+      "initial_speed_mps": 0.0,
+      "gravity_mps2": 9.81,
+      "rolling_resistance_coefficient": 0.0,
+      "air_density_kg_m3": 1.225,
+      "drag_area_m2": 0.0
+    },
+    "devices": []
+  },
+  "supports": []
+}

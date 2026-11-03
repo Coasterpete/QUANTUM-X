@@ -445,7 +445,7 @@ fn actual_save_modal_lists_both_drafts_cancel_retains_them_and_apply_saves_at_bo
         ui_frame(&mut f.s, &ctx, size, vec![]);
         ui_click(&mut f.s, &ctx, size, "Save");
         let texts = ui_frame(&mut f.s, &ctx, size, vec![]);
-        assert!(texts.iter().any(|(t, _)| t.contains("Section/graph 1")));
+        assert!(texts.iter().any(|(t, _)| t.contains("Region/graph 1")));
         assert!(texts.iter().any(|(t, _)| t.contains("Track construction")));
         assert_eq!(f.s.draft_request, Some(DraftRequest::Save));
         // Keyboard actions cannot bypass the active modal.

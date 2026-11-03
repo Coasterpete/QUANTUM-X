@@ -4,14 +4,15 @@ use super::{session::Session, train_playback::Action};
 pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, scene: &qx_rendering::InspectionScene) {
     ui.heading("Rigid-body playback · development controls");
     let active = s.playback.active();
-    ui.add_enabled(
-        !active,
-        egui::DragValue::new(&mut s.playback.initial_speed_mps)
-            .speed(0.1)
-            .range(-100. ..=100.)
-            .prefix("Initial speed m/s "),
-    );
-    let ready = s.visible_revision == s.revision && !s.visible_preview && s.draft_error.is_none();
+    super::operations_ui::physical(s, ui);
+    if s.expansion.operations != s.editor.project().operations {
+        super::expansion::actions(s, ui);
+    }
+    s.playback.initial_speed_mps = s.editor.project().operations.physical.initial_speed_mps;
+    let ready = s.visible_revision == s.revision
+        && !s.visible_preview
+        && s.draft_error.is_none()
+        && !s.expansion.dirty(s.editor.project());
     ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(
@@ -20,9 +21,14 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, scene: &qx_rendering:
             )
             .clicked()
         {
-            let station = s.train_station_m.unwrap_or(scene.track.length_m() * 0.5);
-            s.playback
-                .initialize(s.editor.project(), s.options, &scene.track, station);
+            match scene.train_track() {
+                Ok(track) => {
+                    let station = s.train_station_m.unwrap_or(track.length_m() * 0.5);
+                    s.playback
+                        .initialize(s.editor.project(), s.options, track, station);
+                }
+                Err(e) => s.playback.error = Some(e),
+            }
         }
         if ui
             .add_enabled(active, egui::Button::new("Return to inspection"))
@@ -66,6 +72,27 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, scene: &qx_rendering:
             p.ticks,
             p.ticks as f64 * qx_physics::FIXED_STEP_SECONDS
         ));
+        let t = &p.telemetry;
+        ui.monospace(format!("Measured longitudinal acceleration {:+.4} m/s²\nMass-averaged specific G: normal {:+.4} · lateral {:+.4} · longitudinal {:+.4}",t.longitudinal_acceleration_mps2,
+            t.local_specific_force_mps2.y/9.80665,t.local_specific_force_mps2.z/9.80665,t.local_specific_force_mps2.x/9.80665));
+        ui.monospace(format!("Velocity {:.3} m/s ({:.2} km/h) · traveled {:.3} m\nAcceleration {:.3} m/s² · specific force {:.3} N/kg\nDevice force {:.1} N · resistance {:.1} N", t.speed_mps,t.speed_mps*3.6,t.distance_traveled_m,t.acceleration_mps2.length(),t.specific_force_mps2.length(),t.applied_device_force_n,t.resistance_force_n));
+        ui.collapsing("Device command / response", |ui| {
+            for d in &t.devices {
+                ui.monospace(format!(
+                    "Device {} · {} occupied masses · command {:+.3} m/s² · {:.1}/{:.1} N{}",
+                    d.id,
+                    d.occupied_bodies,
+                    d.commanded_acceleration_mps2,
+                    d.applied_force_n,
+                    d.requested_force_n,
+                    if d.force_limited {
+                        " · force limited"
+                    } else {
+                        ""
+                    }
+                ));
+            }
+        });
         if let Some(d) = &p.diagnostics {
             ui.monospace(format!(
                 "Residuals: joints {:.6} m / guides {:.6} m / angular {:.6} rad",

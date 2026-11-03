@@ -1,0 +1,39 @@
+{
+  "adapters": [
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 312 line vertices, 10409 visible pixels; 1200x650; GPU upload 2.492 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.010 ms",
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 312 line vertices, 12515 visible pixels; 1200x650; GPU upload 1.888 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.005 ms",
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 312 line vertices, 12715 visible pixels; 1200x650; GPU upload 2.087 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.005 ms",
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 312 line vertices, 13056 visible pixels; 1200x650; GPU upload 4.249 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.007 ms",
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 328 line vertices, 111940 visible pixels; 1600x1000; GPU upload 4.148 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.008 ms",
+    "NVIDIA GeForce RTX 4070 Vulkan / 617.42; 328 line vertices, 113544 visible pixels; 1600x1000; GPU upload 4.303 ms, 116064 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.008 ms"
+  ],
+  "before_images": "explicit reconstruction of old grid/painter; identical data, size and view",
+  "comparison_size": [
+    1200,
+    650
+  ],
+  "comparison_view": [
+    0.0,
+    1.0,
+    -0.1,
+    0.8
+  ],
+  "conservative_bounds": [
+    -1.8947806286936007e-14,
+    0.6666666666667426
+  ],
+  "evaluator_peak": 0.6666666666666667,
+  "fit_view": [
+    0.0,
+    1.0,
+    -0.10000000000003317,
+    0.7666666666667568
+  ],
+  "fixture": "synthetic C2 cubic, not an owner-authored coaster",
+  "limited": false,
+  "native_gui_manually_tested": false,
+  "new_display_max": 0.6666666666666667,
+  "new_display_segments": 62,
+  "old_129_point_max": 0.0,
+  "old_513_point_max": 0.0
+}

@@ -387,7 +387,7 @@ pub fn generate_reference(
             || connection.curvature_vector_gap_per_m > 1e-8
             || connection.twist_rate_gap_rad_per_m.abs() > 1e-8
         {
-            result.warnings.push(format!("section {}: rate/speed jump; reference derivatives and design loads are one-sided, impulsive boundary acceleration is undefined", connection.section_id.0));
+            result.warnings.push(format!("region {}: rate/speed jump; reference derivatives and design loads are one-sided, impulsive boundary acceleration is undefined", connection.section_id.0));
         }
     }
     if track

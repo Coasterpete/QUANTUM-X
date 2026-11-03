@@ -478,7 +478,7 @@ fn precise_numeric_entry_and_split_remain_drafts_and_apply_as_single_undo_steps(
     let texts = precision_frame(&mut s, &ctx, vec![]);
     let pos = texts
         .iter()
-        .find(|(text, _)| text == "Split region (preserve shape)")
+        .find(|(text, _)| text == "Split transition (preserve shape)")
         .unwrap()
         .1
         .center();
@@ -553,10 +553,11 @@ fn hover_inspection_reports_evaluated_authored_values_in_the_visible_domain() {
         [1440., 960.],
         vec![egui::Event::PointerMoved(pos)],
     );
-    assert!(
-        text.iter()
-            .any(|(t, _)| *t == format!("{input:.6} m   {value:.6} g"))
-    );
+    assert!(text.iter().any(|(t, _)| *t
+        == format!(
+            "Station {input:.8} m · cursor {:.8} · curve {value:.8} g",
+            view.y.min + view.y.span() * 0.5
+        )));
     assert!(!s.draft_dirty());
     assert!(!s.editor.can_undo());
 }

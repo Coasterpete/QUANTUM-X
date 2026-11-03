@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Original synthetic fixture, MIT OR Apache-2.0. No private layout data. -->
+<root><supports>
+  <rasc type="2" center_rails_coord="1.11803398875" custom_track_index="0">
+    <subnode id="rail-A"><pos>101.223607 40.052786 -70</pos></subnode>
+    <colormode_mainspine/>
+  </rasc>
+  <freenode id="free-A"><pos>101 30 -68</pos></freenode>
+  <footernode id="foundation-A" contype="0" basetype="1">
+    <pos>101 25 -70</pos><rotation>0.3</rotation><height_above_terrain>0.1524</height_above_terrain>
+  </footernode>
+  <beam start="rail-A" end="foundation-A" type="1" size1="0.5">
+    <rotation>0.2</rotation><vertical/>
+    <start_extra_length>0.2</start_extra_length><end_extra_length>-0.1</end_extra_length>
+    <beamnode id="joint-A" pos="0.5" type="0"/>
+    <beamnode id="flange-A" pos="0.75" type="1"/>
+  </beam>
+  <beam start="joint-A" end="free-A" type="1" size1="0.25">
+    <beamnode id="nested-B" pos="0.25" type="0"/>
+  </beam>
+  <beam start="nested-B" end="foundation-A" type="1" size1="0.25"/>
+</supports></root>

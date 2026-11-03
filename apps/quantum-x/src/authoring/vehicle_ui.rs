@@ -51,21 +51,24 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui) {
                 }
                 for j in &mut train.connections {
                     ui.collapsing(format!("{} · angular mechanism",j.id),|ui| {
-                        let mut choice=match j.model {JointModel::Ball=>0,JointModel::Fixed {..}=>1,JointModel::Hinge {..}=>2};
+                        let mut choice=match j.model {JointModel::Ball=>0,JointModel::Fixed {..}=>1,JointModel::Hinge {..}=>2,JointModel::RollLock {..}=>3};
                         let old=choice;
-                        egui::ComboBox::from_id_salt(("joint type",&j.id)).selected_text(["Ball","Fixed","Hinge"][choice]).show_ui(ui,|ui| {
-                            for (i,label) in ["Ball","Fixed","Hinge"].into_iter().enumerate() {ui.selectable_value(&mut choice,i,label);}
+                        egui::ComboBox::from_id_salt(("joint type",&j.id)).selected_text(["Ball","Fixed","Hinge","Roll lock"][choice]).show_ui(ui,|ui| {
+                            for (i,label) in ["Ball","Fixed","Hinge","Roll lock"].into_iter().enumerate() {ui.selectable_value(&mut choice,i,label);}
                         });
                         if old!=choice {
-                            j.model=match choice {0=>JointModel::Ball,1=>JointModel::Fixed {frame_a:Quaternion::IDENTITY,frame_b:Quaternion::IDENTITY},_=>JointModel::Hinge {frame_a:Quaternion::IDENTITY,frame_b:Quaternion::IDENTITY,limits:None,drive:RotationDrive::Free}};
+                            j.model=match choice {0=>JointModel::Ball,1=>JointModel::Fixed {frame_a:Quaternion::IDENTITY,frame_b:Quaternion::IDENTITY},2=>JointModel::Hinge {frame_a:Quaternion::IDENTITY,frame_b:Quaternion::IDENTITY,limits:None,drive:RotationDrive::Free},_=>JointModel::RollLock {frame_a:Quaternion::IDENTITY,frame_b:Quaternion::IDENTITY}};
                             changed=true;
                         }
                         match &mut j.model {
                             JointModel::Ball=>{ui.small("Three free rotations; coincident anchors");}
-                            JointModel::Fixed {frame_a,frame_b} | JointModel::Hinge {frame_a,frame_b,..}=> {
+                            JointModel::Fixed {frame_a,frame_b} | JointModel::Hinge {frame_a,frame_b,..} | JointModel::RollLock {frame_a,frame_b}=> {
                                 changed|=rotation(ui,"Joint frame A quaternion",frame_a);
                                 changed|=rotation(ui,"Joint frame B quaternion",frame_b);
                             }
+                        }
+                        if matches!(j.model,JointModel::RollLock {..}) {
+                            ui.small("Roll about joint-local X is constrained; pitch and yaw stay free.");
                         }
                         if let JointModel::Hinge {limits,drive,..}=&mut j.model {
                             ui.small("Joint-local Z is the axis; X is the zero-angle reference.");

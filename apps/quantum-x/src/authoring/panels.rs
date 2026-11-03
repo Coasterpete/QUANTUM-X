@@ -55,6 +55,13 @@ pub(super) fn workspace(
     scene: &InspectionScene,
     display: &mut DisplayOptions,
 ) -> SurfaceOutput {
+    session.expansion.sync(session.editor.project());
+    session.poll_completion(ctx);
+    let before_expansion = (
+        session.expansion.operations.clone(),
+        session.expansion.supports.clone(),
+        session.expansion.completion.is_some(),
+    );
     let before_draft = session.draft.clone();
     let before_heartline = session.heartline_draft.clone();
     let before_initial = session.initial_draft.clone();
@@ -74,6 +81,8 @@ pub(super) fn workspace(
         ));
     }
     session.poll_file_dialog(ctx);
+    super::material_ui::poll(session, ctx);
+    session.material_ui.render_warnings = scene.materials.warnings.clone();
     super::train_playback::update(session, ctx);
     if let Some(message) = session.assets.poll(session.editor.project(), &session.path) {
         session.status = message;
@@ -90,7 +99,7 @@ pub(super) fn workspace(
     // Parse numeric/text events before accepting a keyboard transaction, even
     // when typing and Ctrl+Enter arrive together in one native input batch.
     if std::mem::take(&mut session.apply_section_requested) {
-        session.apply_draft();
+        session.apply_graph();
     }
     // File/history actions run after numeric widgets consume this input batch.
     session.run_ui_action();
@@ -142,38 +151,54 @@ pub(super) fn workspace(
     display.selected_car_bounds = None;
     display.inspection_marker =
         session.workbench.active == super::workbench::Profile::Track || session.development;
-    if session.workbench.active == super::workbench::Profile::Train {
-        let project = session.editor.project();
-        if project.heartline.authored_reference
-            == qx_geometry::heartline::AuthoredReference::TrackCenterline
-            && let Some(train) = project
-                .heartline
-                .train_configuration_id
-                .as_ref()
-                .and_then(|id| project.trains.iter().find(|t| &t.id == id))
-        {
-            let station = session
-                .train_station_m
-                .unwrap_or(scene.track.length_m() * 0.5)
-                .clamp(0., scene.track.length_m());
-            display.inspection_distance_m = Some(station);
-            let inspection = if let Some(snapshot) = &session.playback.snapshot {
-                Ok(snapshot.poses.clone())
-            } else {
-                qx_physics::consist::inspect(train, &scene.track, station)
-            };
-            if let Ok(inspection) = inspection {
-                super::train_preview::populate(
-                    train,
-                    &scene.track,
-                    &inspection,
-                    &mut session.assets,
-                    display,
-                );
-                if !session.development {
-                    display.overlay_lines.clear();
-                }
-            }
+    let graph_inspection = display.inspection_distance_m;
+    super::ride_camera::present(session, ctx, scene, display);
+    if session.workbench.active == super::workbench::Profile::Track && session.expansion.engineering
+    {
+        display.inspection_distance_m = graph_inspection;
+    }
+    if session.workbench.active != super::workbench::Profile::Train
+        && session.ride.mode == super::ride_camera::Mode::Free
+        && !session.playback.active()
+        && !session.ride.preview_playing
+    {
+        display.asset_instances.clear();
+        display.overlay_lines.clear();
+        display.train_bounds = None;
+        display.selected_car_bounds = None;
+    } else if !session.development {
+        display.overlay_lines.clear();
+    }
+    display.selected_support = (session.workbench.active == super::workbench::Profile::Track)
+        .then_some(session.expansion.structure)
+        .flatten()
+        .map(|id| (id, session.expansion.member));
+    let support_track = if session.expansion.structure.is_some() {
+        session
+            .expansion
+            .attachment_track(scene, session.visible_revision)
+            .ok()
+    } else {
+        None
+    };
+    if let Some(structure) = session
+        .expansion
+        .supports
+        .iter()
+        .find(|s| Some(s.id) == session.expansion.structure)
+        && let Some(node) = structure
+            .nodes
+            .iter()
+            .find(|n| Some(n.id) == session.expansion.node)
+        && let Some(track) = support_track
+        && let Ok(p) = node.position.resolve(&track)
+    {
+        for axis in [Vec3::X, Vec3::Y, Vec3::Z] {
+            display.overlay_lines.push(qx_rendering::OverlayLine {
+                start_m: p - axis * 0.35,
+                end_m: p + axis * 0.35,
+                color: [1., 1., 0.],
+            });
         }
     }
     let ui_frame = ctx.cumulative_frame_nr();
@@ -194,6 +219,7 @@ pub(super) fn workspace(
         );
     }
     if !ctx.egui_wants_keyboard_input()
+        && !session.project_prompt_open()
         && viewport.contains(ctx.pointer_hover_pos().unwrap_or(egui::Pos2::ZERO))
         && session.file_dialog.is_none()
         && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::F))
@@ -211,6 +237,10 @@ pub(super) fn workspace(
     }
     if std::mem::take(&mut session.assets.focus) {
         view_command = Some(ViewCommand::FocusSelectedCar);
+    }
+    if view_command.is_some() {
+        session.ride.mode = super::ride_camera::Mode::Free;
+        display.camera_view = None;
     }
     if session.file_dialog.is_none() {
         if session.draft_request.is_some() {
@@ -249,14 +279,23 @@ pub(super) fn workspace(
                     session.close_approved = true;
                 }
             });
+        } else {
+            super::workflow::resolution_dialog(session, ctx);
         }
     }
     if session.draft != before_draft
         || session.heartline_draft != before_heartline
         || session.initial_draft != before_initial
         || session.construction_draft != before_construction
+        || before_expansion
+            != (
+                session.expansion.operations.clone(),
+                session.expansion.supports.clone(),
+                session.expansion.completion.is_some(),
+            )
     {
-        if session.draft_dirty()
+        if session.expansion.dirty(session.editor.project())
+            || session.draft_dirty()
             || session.heartline_draft != session.editor.project().heartline
             || session.initial_draft != session.editor.project().initial
             || session.construction_draft != session.editor.project().construction
@@ -278,15 +317,21 @@ pub(super) fn workspace(
 }
 pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
     if session.track_tab != 1 {
-        ui.heading("Section List");
+        ui.heading("Region List");
         ui.push_id("section navigation", |ui| sections(session, ui));
         ui.separator();
     }
     if ui.available_width() < 330. {
-        let titles = ["Section", "Coaster Properties", "Reference", "Project"];
+        let titles = [
+            "Region",
+            "Coaster Properties",
+            "Reference",
+            "Project",
+            "Operations",
+        ];
         egui::ComboBox::from_id_salt("track context")
             .width(ui.available_width())
-            .selected_text(titles[session.track_tab.min(3)])
+            .selected_text(titles[session.track_tab.min(4)])
             .show_ui(ui, |ui| {
                 for (index, title) in titles.iter().enumerate() {
                     ui.selectable_value(&mut session.track_tab, index, *title);
@@ -294,7 +339,7 @@ pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
             });
     } else {
         ui.horizontal_wrapped(|ui| {
-            for (index, title) in ["Section", "Coaster", "Reference", "Project"]
+            for (index, title) in ["Region", "Coaster", "Reference", "Project", "Operations"]
                 .iter()
                 .enumerate()
             {
@@ -307,10 +352,10 @@ pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
             }
         });
     }
+    if session.track_tab == 4 {
+        super::operations_ui::show(session, ui);
+    }
     if session.track_tab == 0 {
-        ui.collapsing("Starting pose and design speed", |ui| {
-            basic_initial(session, ui)
-        });
         // Dynamic draft notices and the section list must never shift numeric
         // editor IDs: a retained keyboard focus could otherwise land on Cancel.
         ui.push_id(("section properties", session.selected.0), |ui| {
@@ -318,12 +363,22 @@ pub(super) fn track(session: &mut Session, ui: &mut egui::Ui) {
         });
         if matches!(session.draft.kind, SectionKind::Spline { .. }) {
             ui.collapsing("Advanced curve controls — existing representation", |ui| {
-                spline::controls(&mut session.draft, ui, &mut session.status)
+                spline::controls(
+                    &mut session.draft,
+                    ui,
+                    &mut session.status,
+                    session.workbench.snap,
+                )
             });
         }
-        ui.collapsing("Mechanism Segment Properties", |ui| {
-        ui.label("Lift, launch, brake and station mechanisms require a future document and operating model.");
-    });
+        ui.collapsing("Starting pose and project design speed", |ui| {
+            basic_initial(session, ui)
+        });
+        if session.development {
+            ui.collapsing("Mechanisms · development status", |ui| {
+                ui.label("Launch and brake force commands are available under Operations. Lift, station and block control systems are not implemented.");
+            });
+        }
     }
     if session.track_tab == 1 {
         super::coaster_properties::show(session, ui);
@@ -412,7 +467,7 @@ pub(super) fn shortcuts(session: &mut Session, ctx: &egui::Context) {
         && !ctx.egui_wants_keyboard_input()
         && ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Escape))
     {
-        session.cancel_section();
+        session.cancel_graph();
     }
 }
 fn sections(session: &mut Session, ui: &mut egui::Ui) {
@@ -443,14 +498,21 @@ fn sections(session: &mut Session, ui: &mut egui::Ui) {
                     response.scroll_to_me(Some(egui::Align::Center));
                 }
                 response.on_hover_text(format!(
-                    "Stable section ID {}. Selection is shared with the Transition Editor.",
-                    section.id.0
+                    "{}. Selection is shared with the Transition Editor.",
+                    section.name
                 ));
             }
         });
     ui.data_mut(|d| d.insert_temp(selection_id, session.selected.0));
+    ui.small(format!("Insert: {}", insertion_kind_name(session.new_kind)));
     ui.horizontal_wrapped(|ui| {
-        input_menu(ui, "Insert section…", |ui| insertion(session, ui));
+        input_menu(ui, "Insert Region…", |ui| insertion(session, ui));
+        for (before, label) in [(true, "Before"), (false, "After")] {
+            if ui.add_enabled(session.graph_drag.is_none(), egui::Button::new(label))
+                .on_hover_text("Insert the chosen Region type immediately. Use Insert Region… to choose Straight, Force-Based or Geometric.").clicked() {
+                insert_section(session, session.new_kind, before);
+            }
+        }
         ui.menu_button("Manage", |ui| {
             super::timeline::ordering(session, ui);
             if super::icons::button(
@@ -458,7 +520,7 @@ fn sections(session: &mut Session, ui: &mut egui::Ui) {
                 super::icons::Icon::Remove,
                 "Remove",
                 sections.len() > 1 && session.graph_drag.is_none(),
-                "Remove selected section. Undo restores it.",
+                "Remove selected region. Undo restores it.",
             )
             .clicked()
             {
@@ -467,24 +529,18 @@ fn sections(session: &mut Session, ui: &mut egui::Ui) {
         });
     });
     if session.draft_dirty() {
-        ui.strong(format!("Section {} · unapplied draft", session.selected.0));
+        ui.small(session.region_extent_status());
     }
 }
 pub(super) fn insertion(session: &mut Session, ui: &mut egui::Ui) {
-    const KINDS: [&str; 5] = [
-        "Force-vector",
-        "Rider-local geometric",
-        "World-geometric",
-        "Straight",
-        "Circular arc",
-    ];
+    ui.label("Choose a Region, then insert before or after the selection");
     choice_menu(
         ui,
         "new section type",
-        KINDS[session.new_kind.min(4)],
+        insertion_kind_name(session.new_kind),
         |ui| {
-            for (i, kind) in KINDS.iter().enumerate() {
-                ui.selectable_value(&mut session.new_kind, i, *kind);
+            for i in [3, 0, 1] {
+                ui.selectable_value(&mut session.new_kind, i, insertion_kind_name(i));
             }
         },
     );
@@ -495,30 +551,44 @@ pub(super) fn insertion(session: &mut Session, ui: &mut egui::Ui) {
                 super::icons::Icon::Insert,
                 label,
                 session.graph_drag.is_none(),
-                "Insert chosen section type relative to the selected section. One undo step.",
+                "Insert chosen region type relative to the selected region. One undo step.",
             )
             .clicked()
             {
-                insert_section(session, session.new_kind.min(4), before);
+                insert_section(session, session.new_kind.min(8), before);
                 ui.close();
             }
         }
     });
-    ui.collapsing("Advanced mathematical representations", |ui| {
+    ui.collapsing("Advanced Region types / coordinate frames", |ui| {
+        ui.selectable_value(&mut session.new_kind, 1, "Rider-local geometric");
+        ui.selectable_value(&mut session.new_kind, 2, "World-geometric");
+        ui.selectable_value(&mut session.new_kind, 4, "Circular arc");
         ui.small("Explicit complementary authoring. Existing curves retain their original representation.");
         for (kind, name) in [(5, "Bézier"), (6, "B-spline"), (7, "NURBS"), (8, "Catmull–Rom")] {
-            if ui.add_enabled(session.graph_drag.is_none(), egui::Button::new(format!("Insert {name} section"))).clicked() {
-                insert_section(session, kind, false);
-            }
+            ui.selectable_value(&mut session.new_kind, kind, name);
         }
     });
+}
+fn insertion_kind_name(kind: usize) -> &'static str {
+    [
+        "Force-Based",
+        "Geometric",
+        "World-geometric",
+        "Straight",
+        "Circular arc",
+        "Bézier",
+        "B-spline",
+        "NURBS",
+        "Catmull–Rom",
+    ][kind.min(8)]
 }
 pub(super) fn insert_section(session: &mut Session, kind: usize, before: bool) {
     if session.defer_section_action(super::workflow::PendingAction::Insert { kind, before }) {
         return;
     }
     let Some(id) = session.next_section_id else {
-        session.status = "Section IDs exhausted".into();
+        session.status = "Region IDs exhausted".into();
         return;
     };
     session.next_section_id = id.checked_add(1);
@@ -578,14 +648,14 @@ pub(super) fn insert_section(session: &mut Session, kind: usize, before: bool) {
             _ => qx_geometry::authoring::ChannelKey::Roll,
         });
         session.status = format!(
-            "Inserted {} section {} from the preceding endpoint. Edit its graph below; Fit Selection frames it.",
+            "Inserted {} region {} from the preceding endpoint. Edit its graph below; Fit Selection frames it.",
             method(&session.draft),
             id
         );
     }
 }
 pub(super) fn new_section(id: u64, kind: usize) -> Section {
-    let mut section = Section::straight(id, format!("Section {id}"), 10.);
+    let mut section = Section::straight(id, format!("Region {id}"), 10.);
     section.kind = match kind {
         0 => SectionKind::Force {
             normal_g: Channel::constant(Unit::G, 10., 1.),
@@ -629,18 +699,20 @@ pub(super) fn new_section(id: u64, kind: usize) -> Section {
                     parameterization: Parameterization::Centripetal,
                 },
             };
-            return Section::spline(id, format!("Section {id}"), curve);
+            return Section::spline(id, format!("Region {id}"), curve);
         }
         _ => SectionKind::Straight {},
     };
     section
 }
 fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
-    ui.strong(format!(
-        "Track Segment Properties · {} · {}",
-        session.selected.0,
-        method(&session.draft)
-    ));
+    ui.label(
+        super::theme::text(
+            format!("Region · {}", method(&session.draft)),
+            super::theme::ELECTRIC_PURPLE,
+        )
+        .strong(),
+    );
     if session.draft.domain != Domain::Normalized {
         let mut extent = session.draft.extent;
         ui.horizontal(|ui| {
@@ -648,10 +720,13 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
                 Domain::Time => "Duration (s)",
                 _ => "Length (m)",
             });
-            ui.add(
-                egui::DragValue::new(&mut extent)
-                    .speed(0.01)
-                    .max_decimals(12),
+            super::snap_ui::graph_number(
+                ui,
+                &mut extent,
+                "",
+                0.01,
+                session.workbench.snap,
+                super::snap::GraphAxis::Boundary(session.draft.domain),
             );
         });
         if extent != session.draft.extent {
@@ -661,30 +736,42 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
             }
         }
     }
+    if session.draft_dirty() {
+        ui.small(session.region_extent_status());
+    }
 
-    ui.text_edit_singleline(&mut session.draft.name);
+    ui.push_id("region name", |ui| {
+        ui.text_edit_singleline(&mut session.draft.name)
+    });
     ui.small(if session.draft_dirty() {
         "Unapplied draft · viewport previews valid inputs"
     } else {
         "Committed · edit values or the graph below"
     });
     section_commit(session, ui);
+    ui.push_id("region design speed", |ui| region_speed(session, ui));
     if let SectionKind::Arc {
         radius_m,
         plane_angle_rad,
     } = &mut session.draft.kind
     {
-        ui.add(
-            egui::DragValue::new(radius_m)
-                .speed(0.1)
-                .prefix("Radius m ")
-                .max_decimals(12),
+        super::snap_ui::number(
+            ui,
+            radius_m,
+            "Radius m ",
+            0.1,
+            session.workbench.snap,
+            super::snap::Space::Local,
+            &[],
         );
-        ui.add(
-            egui::DragValue::new(plane_angle_rad)
-                .speed(0.01)
-                .prefix("Plane rad ")
-                .max_decimals(12),
+        super::snap_ui::number(
+            ui,
+            plane_angle_rad,
+            "Plane rad ",
+            0.01,
+            session.workbench.snap,
+            super::snap::Space::Angle,
+            &[],
         );
     }
     ui.small("Authored channels · edit selected transition");
@@ -727,23 +814,7 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
             });
         });
     }
-    ui.collapsing("Advanced section settings", |ui| {
-        let mut override_speed = session.draft.reference_speed_mps.is_some();
-        if ui
-            .checkbox(&mut override_speed, "Section design-speed override")
-            .changed()
-        {
-            session.draft.reference_speed_mps =
-                override_speed.then_some(session.editor.project().initial.reference_speed_mps);
-        }
-        if let Some(speed) = &mut session.draft.reference_speed_mps {
-            ui.add(
-                egui::DragValue::new(speed)
-                    .speed(0.1)
-                    .max_decimals(12)
-                    .suffix(" m/s"),
-            );
-        }
+    ui.collapsing("Advanced Region settings", |ui| {
         let mut strict = session.draft.incoming_boundary == BoundaryPolicy::RequireContinuousRates;
         if ui
             .checkbox(&mut strict, "Require continuous incoming rates")
@@ -757,14 +828,37 @@ fn section_properties(session: &mut Session, ui: &mut egui::Ui) {
         }
     });
 }
+fn region_speed(session: &mut Session, ui: &mut egui::Ui) {
+    let mut override_speed = session.draft.reference_speed_mps.is_some();
+    if ui
+        .checkbox(&mut override_speed, "Region design-speed override")
+        .changed()
+    {
+        session.draft.reference_speed_mps =
+            override_speed.then_some(session.editor.project().initial.reference_speed_mps);
+    }
+    if let Some(speed) = &mut session.draft.reference_speed_mps {
+        ui.add(
+            egui::DragValue::new(speed)
+                .speed(0.1)
+                .max_decimals(12)
+                .suffix(" m/s"),
+        );
+    } else {
+        ui.small(format!(
+            "Design speed: {:.6} m/s · inherited from project",
+            session.editor.project().initial.reference_speed_mps
+        ));
+    }
+}
 fn section_commit(session: &mut Session, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         if super::icons::button(
             ui,
             super::icons::Icon::Apply,
-            "Apply section",
+            "Apply region",
             session.draft_dirty(),
-            "Commit section draft · Ctrl+Enter",
+            "Commit region draft · Ctrl+Enter",
         )
         .clicked()
         {
@@ -775,7 +869,7 @@ fn section_commit(session: &mut Session, ui: &mut egui::Ui) {
             super::icons::Icon::Cancel,
             "Cancel draft",
             session.draft_dirty(),
-            "Restore committed section · Esc",
+            "Restore committed region · Esc",
         )
         .clicked()
         {
@@ -864,7 +958,7 @@ pub(super) fn heartline(session: &mut Session, ui: &mut egui::Ui) {
     if let Some(id) = &mut settings.train_configuration_id {
         ui.text_edit_singleline(id);
     }
-    ui.small("Offset changes retain all authored section data. No automatic fitting or layout shift is applied.");
+    ui.small("Offset changes retain all authored region data. No automatic fitting or layout shift is applied.");
     if ui.button("Apply reference settings").clicked() {
         session.execute(vec![Command::SetHeartline(session.heartline_draft.clone())]);
     }
