@@ -127,7 +127,8 @@ fn actual_playback_buttons_drive_worker_and_render_the_same_physical_snapshots()
     assert_eq!(s.playback.snapshot.as_ref().unwrap().ticks, paused);
     let p = s.playback.snapshot.as_ref().unwrap();
     assert_ne!(p.poses, first);
-    assert_eq!(display.asset_instances.len(), 12);
+    // Every independent component, including spherical-ended drawbars, is presented.
+    assert_eq!(display.asset_instances.len(), p.poses.components.len());
     for (instance, pose) in display.asset_instances.iter().zip(&p.poses.components) {
         let t = instance.transform[3];
         assert!((Vec3::new(t[0], t[1], t[2]) - pose.pose.position_m).length() < 1e-9);
@@ -137,6 +138,48 @@ fn actual_playback_buttons_drive_worker_and_render_the_same_physical_snapshots()
     assert_eq!(s.playback.snapshot.as_ref().unwrap().poses, first);
     click(&mut s, &ctx, "Return to inspection");
     assert!(!s.playback.active());
+    assert_eq!(s.editor.project(), &original);
+}
+#[test]
+fn ride_mode_component_and_preview_buttons_work_in_the_normal_train_workspace() {
+    let mut s = session();
+    let original = s.editor.project().clone();
+    let ctx = egui::Context::default();
+    for _ in 0..4 {
+        frame(&mut s, &ctx, vec![]);
+    }
+    assert!(!s.development);
+    click(&mut s, &ctx, "Free Camera");
+    click(&mut s, &ctx, "Rider POV");
+    assert_eq!(s.ride.mode, super::ride_camera::Mode::Rider);
+    click(&mut s, &ctx, "First car body");
+    click(&mut s, &ctx, "seat-2");
+    let display = frame(&mut s, &ctx, vec![]).1;
+    assert!(display.camera_view.is_some());
+    assert_eq!(s.ride.component.as_deref(), Some("seat-2"));
+    let before = s.train_station_m.unwrap_or(50.);
+    click(&mut s, &ctx, "Play preview");
+    std::thread::sleep(Duration::from_millis(20));
+    frame(&mut s, &ctx, vec![]);
+    assert!(s.train_station_m.unwrap() > before);
+    click(&mut s, &ctx, "Pause preview");
+    assert!(!s.ride.preview_playing);
+    s.workbench.active = Profile::Track;
+    assert!(frame(&mut s, &ctx, vec![]).1.camera_view.is_none());
+    s.workbench.active = Profile::Train;
+    assert!(frame(&mut s, &ctx, vec![]).1.camera_view.is_some());
+    frame(
+        &mut s,
+        &ctx,
+        vec![egui::Event::Key {
+            key: egui::Key::F6,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Default::default(),
+        }],
+    );
+    assert_eq!(s.ride.mode, super::ride_camera::Mode::Front);
     assert_eq!(s.editor.project(), &original);
 }
 #[test]

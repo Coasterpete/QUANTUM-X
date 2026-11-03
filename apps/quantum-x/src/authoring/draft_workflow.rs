@@ -38,6 +38,7 @@ impl Session {
 
     pub fn project_prompt_open(&self) -> bool {
         self.draft_request.is_some()
+            || self.pending_action.is_some()
             || self.confirm_replace.is_some()
             || self.open_dialog_requested
             || self.close_requested
@@ -53,7 +54,7 @@ impl Session {
         let mut names = Vec::new();
         if self.draft_dirty() {
             names.push(format!(
-                "Section/graph {} — {} (Track Workspace / Transition Editor)",
+                "Region/graph {} — {} (Track Workspace / Transition Editor)",
                 self.selected.0, self.draft.name
             ));
         }
@@ -80,13 +81,21 @@ impl Session {
         if self.assets.draft_dirty(p) {
             names.push("Train visual correction (Train Workspace / Configuration)".into());
         }
+        if self.expansion.dirty(p) {
+            names.push("Layout completion, track devices, physical settings and supports".into());
+        }
         names
     }
 
     pub fn pane_title(&self, pane: Pane) -> String {
         let pending = match pane {
             Pane::Track => self.has_drafts(),
-            Pane::Transition => self.draft_dirty(),
+            Pane::Support => self.expansion.supports != self.editor.project().supports,
+            Pane::Transition => {
+                self.draft_dirty()
+                    || (self.graph_device().is_some()
+                        && self.expansion.operations != self.editor.project().operations)
+            }
             Pane::Configuration => {
                 self.heartline_draft != self.editor.project().heartline
                     || self.assets.draft_dirty(self.editor.project())
@@ -125,6 +134,13 @@ impl Session {
         if !self.has_drafts() {
             return true;
         }
+        if self.expansion.completion.is_some()
+            && (self.draft_dirty() || self.initial_draft != self.editor.project().initial)
+        {
+            self.resolution_error =
+                Some("Track draft changed; cancel it or solve a new connector.".into());
+            return false;
+        }
         let mut candidate = self.preview_project();
         if self.assets.draft_dirty(self.editor.project())
             && let Some(a) = &self.assets.draft
@@ -148,7 +164,13 @@ impl Session {
             return false;
         }
         let p = self.editor.project();
-        let mut commands = Vec::new();
+        let mut commands = match self.expansion.commands(p) {
+            Ok(commands) => commands,
+            Err(e) => {
+                self.resolution_error = Some(e);
+                return false;
+            }
+        };
         if self.draft_dirty() {
             commands.push(Command::ReplaceSection {
                 section: self.draft.clone(),
@@ -176,13 +198,21 @@ impl Session {
             self.resolution_error = Some(self.status.clone());
             return false;
         }
+        self.expansion.completion = None;
+        self.expansion.sync(self.editor.project());
         self.pending_action = None;
         self.assets.draft = None;
+        self.style_construction_base = None;
         self.resolution_error = None;
         true
     }
 
     pub fn cancel_all_drafts(&mut self) {
+        self.expansion.completion_job = None;
+        self.expansion.operations = self.editor.project().operations.clone();
+        self.expansion.supports = self.editor.project().supports.clone();
+        self.expansion.completion = None;
+        self.style_construction_base = None;
         self.assets.draft = None;
         self.graph_drag = None;
         self.sync_draft();

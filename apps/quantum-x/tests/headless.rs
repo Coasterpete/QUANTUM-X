@@ -3,7 +3,7 @@ use std::{path::PathBuf, process::Command};
 // startup stalled on native Windows; serialize workflows without skipping checks.
 static CLI_WORKFLOW: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[test]
-fn identity_and_library_cli_report_planned_content_and_reject_invalid_indexes() {
+fn identity_and_library_cli_report_verified_construction_and_reject_invalid_indexes() {
     let _workflow = CLI_WORKFLOW.lock().unwrap();
     let binary = env!("CARGO_BIN_EXE_quantum-x");
     let version = Command::new(binary).arg("--version").output().unwrap();
@@ -26,10 +26,17 @@ fn identity_and_library_cli_report_planned_content_and_reject_invalid_indexes() 
     assert_eq!(report["train_families"], 14);
     let entries = report["entries"].as_array().unwrap();
     assert_eq!(entries.len(), 28);
-    assert!(
-        entries
-            .iter()
-            .all(|e| e["status"] == "planned" && e["content_ready"] == false)
+    assert!(entries.iter().all(
+        |e| if e["style_id"] == "box-spined-100" && e["kind"] == "track" {
+            e["status"] == "available" && e["content_ready"] == true
+        } else {
+            e["status"] == "planned" && e["content_ready"] == false
+        }
+    ));
+    assert_eq!(report["construction_checks"][0]["style"], "box-spined-100");
+    assert_eq!(
+        report["construction_checks"][0]["source_geometry_verified"],
+        true
     );
     let root = temporary();
     std::fs::create_dir_all(root.join("catalog")).unwrap();

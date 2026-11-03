@@ -320,6 +320,12 @@ impl NurbsProfile {
     }
     /// Add degrees of freedom without changing shape, for local endpoint constraints.
     pub fn refine_for_edit(&mut self) -> Result<()> {
+        // Three protected controls at each end and at least one interior
+        // ordinate are sufficient. Do not reinsert the original editing knots
+        // after a timing handle has deliberately moved them.
+        if self.values.len() >= 7 {
+            return self.validate();
+        }
         for u in [0.2, 0.4, 0.6, 0.8] {
             if !self.knots.contains(&u) {
                 self.insert_knot(u)?;

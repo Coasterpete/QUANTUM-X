@@ -1,5 +1,6 @@
-//! Sequential angular impulses for fixed and revolute joints. Linear anchors are
-//! enforced by the companion ball joint. No body orientation is prescribed.
+//! Sequential angular impulses for fixed, revolute and roll-reference joints.
+//! Linear anchors are enforced by the companion ball joint. No body orientation
+//! is prescribed.
 use crate::{Body, Result};
 use qx_document::train::mechanism::{JointModel, RotationDrive};
 use qx_geometry::math::{Frame, Quaternion, Vec3, rotation_between};
@@ -36,7 +37,8 @@ impl AngularJoint {
             JointModel::Fixed { frame_a, frame_b }
             | JointModel::Hinge {
                 frame_a, frame_b, ..
-            } => (*frame_a, *frame_b),
+            }
+            | JointModel::RollLock { frame_a, frame_b } => (*frame_a, *frame_b),
             JointModel::Ball => return Err("ball joint has no angular constraint".into()),
         };
         Ok((
@@ -44,12 +46,17 @@ impl AngularJoint {
             Frame::new(b.pose.orientation.compose(fb)).map_err(|e| e.to_string())?,
         ))
     }
-    /// Signed principal hinge angle, (-pi, pi]. Free rotation itself is unlimited;
-    /// limits and position motors deliberately use a bounded principal range.
+    /// Signed principal joint angle in (-pi, pi]. Hinges use the lateral axis;
+    /// roll-lock joints use the longitudinal axis. Free rotation itself is
+    /// unlimited; limits and position motors deliberately use a bounded range.
     pub fn angle_rad(&self, bodies: &[Body]) -> Result<f64> {
         self.validate(bodies.len())?;
         let (a, b) = self.frames(&bodies[self.body_a], &bodies[self.body_b])?;
-        Ok(angle(a.orientation().conjugate().compose(b.orientation())))
+        let relative = a.orientation().conjugate().compose(b.orientation());
+        Ok(match self.model {
+            JointModel::RollLock { .. } => roll_constraint(a, b)?.1,
+            _ => angle(relative),
+        })
     }
     pub(crate) fn motor(&self, bodies: &mut [Body], dt: f64) -> Result<Vec3> {
         let JointModel::Hinge {
@@ -87,15 +94,24 @@ impl AngularJoint {
         limit_impulse: &mut f64,
     ) -> Result<Vec3> {
         let (fa, fb) = self.frames(&bodies[self.body_a], &bodies[self.body_b])?;
+        let relative = fa
+            .orientation()
+            .conjugate()
+            .compose(fb.orientation())
+            .rotation_vector()
+            .map_err(|e| e.to_string())?;
+        if matches!(self.model, JointModel::RollLock { .. }) {
+            // The twist coordinate and its exact angular Jacobian must agree.
+            // Using rotation_vector().x with the tangent Jacobian couples free
+            // pitch/yaw into roll and can stall assembly on a changing bank.
+            let (n, error) = roll_constraint(fa, fb)?;
+            let p = angular_impulse(bodies, self.body_a, self.body_b, n, error, dt)?;
+            apply(bodies, self.body_a, self.body_b, p);
+            return Ok(p);
+        }
         let fixed = matches!(self.model, JointModel::Fixed { .. });
         let error = if fixed {
-            fa.local_to_world(
-                fa.orientation()
-                    .conjugate()
-                    .compose(fb.orientation())
-                    .rotation_vector()
-                    .map_err(|e| e.to_string())?,
-            )
+            fa.local_to_world(relative)
         } else {
             rotation_between(fa.lateral(), fb.lateral())
                 .and_then(|q| q.rotation_vector())
@@ -149,6 +165,7 @@ impl AngularJoint {
                 .rotation_vector()
                 .map_err(|e| e.to_string())?
                 .length(),
+            JointModel::RollLock { .. } => roll_constraint(a, b)?.1.abs(),
             JointModel::Hinge { limits, .. } => {
                 let swing = rotation_between(a.lateral(), b.lateral())
                     .and_then(|q| q.rotation_vector())
@@ -165,6 +182,27 @@ fn angle(q: Quaternion) -> f64 {
     let a = 2. * q.z.atan2(q.w);
     (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
 }
+fn roll(q: Quaternion) -> f64 {
+    let a = 2. * q.x.atan2(q.w);
+    (a + std::f64::consts::PI).rem_euclid(std::f64::consts::TAU) - std::f64::consts::PI
+}
+/// Swing/twist decomposition about joint-local X. The gradient acts on the
+/// relative world angular velocity of B minus A. It is generally *not* the
+/// tangent when the joint has articulated in pitch/yaw. A reversed longitudinal
+/// axis is a real coordinate singularity and must not report zero residual.
+pub(crate) fn roll_constraint(a: Frame, b: Frame) -> Result<(Vec3, f64)> {
+    let q = a.orientation().conjugate().compose(b.orientation());
+    let d = q.w * q.w + q.x * q.x;
+    if d < 1e-12 {
+        return Err("roll joint is singular: longitudinal axes are opposed".into());
+    }
+    let gradient = a.local_to_world(Vec3::new(
+        1.,
+        (q.w * q.z + q.x * q.y) / d,
+        (q.x * q.z - q.w * q.y) / d,
+    ));
+    Ok((gradient, roll(q)))
+}
 fn angular_impulse(
     bodies: &[Body],
     a: usize,
@@ -180,4 +218,37 @@ fn angular_impulse(
 fn apply(bodies: &mut [Body], a: usize, b: usize, p: Vec3) {
     bodies[a].angular_velocity_radps = bodies[a].angular_velocity_radps - bodies[a].inv_inertia(p);
     bodies[b].angular_velocity_radps = bodies[b].angular_velocity_radps + bodies[b].inv_inertia(p);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn twist_jacobian_matches_independent_world_rotation_differences() {
+        let a = Frame::new(Quaternion::axis_angle(Vec3::new(1., 2., 3.), 1.1).unwrap()).unwrap();
+        for swing in [0., 0.5, 1.8] {
+            let q = a
+                .orientation()
+                .compose(Quaternion::axis_angle(Vec3::new(0., 2., -1.), swing).unwrap())
+                .compose(Quaternion::axis_angle(Vec3::X, 0.2).unwrap());
+            let b = Frame::new(q).unwrap();
+            let (gradient, _) = roll_constraint(a, b).unwrap();
+            for n in [Vec3::X, Vec3::Y, Vec3::Z] {
+                let h = 1e-6;
+                let plus = Frame::new(Quaternion::axis_angle(n, h).unwrap().compose(q)).unwrap();
+                let minus = Frame::new(Quaternion::axis_angle(n, -h).unwrap().compose(q)).unwrap();
+                let derivative = (roll_constraint(a, plus).unwrap().1
+                    - roll_constraint(a, minus).unwrap().1)
+                    / (2. * h);
+                assert!((derivative - gradient.dot(n)).abs() < 1e-8);
+            }
+        }
+        let b = Frame::new(
+            a.orientation()
+                .compose(Quaternion::axis_angle(Vec3::Y, std::f64::consts::PI).unwrap()),
+        )
+        .unwrap();
+        assert!(roll_constraint(a, b).unwrap_err().contains("singular"));
+    }
 }

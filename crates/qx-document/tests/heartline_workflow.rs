@@ -76,6 +76,8 @@ fn v1_v2_migration_and_v3_strict_settings_are_preserved() {
         .unwrap()
         .remove("unknown");
     value.as_object_mut().unwrap().remove("construction");
+    value.as_object_mut().unwrap().remove("operations");
+    value.as_object_mut().unwrap().remove("supports");
     value["schema_version"] = 2.into();
     assert!(persistence::from_json(&value.to_string(), &catalog).is_err());
     value["schema_version"] = 3.into();

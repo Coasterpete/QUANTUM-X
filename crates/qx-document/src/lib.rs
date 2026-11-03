@@ -3,6 +3,7 @@ pub mod command;
 pub mod editing;
 pub mod insertion;
 pub mod library;
+pub mod operations;
 pub mod persistence;
 pub mod region_edit;
 pub mod sample;
@@ -16,7 +17,7 @@ use qx_style::{Catalog, StyleSelection};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 #[derive(Debug)]
 pub struct DocumentError(pub String);
 impl fmt::Display for DocumentError {
@@ -91,6 +92,10 @@ pub struct Project {
     pub heartline: HeartlineSettings,
     #[serde(default)]
     pub trains: Vec<train::Train>,
+    #[serde(default)]
+    pub operations: operations::Operations,
+    #[serde(default)]
+    pub supports: Vec<qx_geometry::supports::Structure>,
 }
 /// Nominal configuration, independent of visual track styles and future seat assets.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -132,6 +137,21 @@ impl Project {
             )?;
         }
         self.construction.validate()?;
+        self.operations.validate()?;
+        require(self.supports.len() <= 256, "too many support structures")?;
+        let mut support_ids = std::collections::HashSet::new();
+        let section_ids: Vec<_> = self.sections.iter().map(|s| s.id).collect();
+        require(
+            self.supports.iter().map(|s| s.members.len()).sum::<usize>() <= 32768,
+            "project support member budget exceeded",
+        )?;
+        for support in &self.supports {
+            require(
+                support_ids.insert(support.id),
+                "duplicate support structure ID",
+            )?;
+            support.validate(&section_ids)?;
+        }
         Ok(())
     }
     pub fn generate(
@@ -140,7 +160,9 @@ impl Project {
         options: GenerationOptions,
     ) -> Result<GeneratedTrack> {
         self.validate(catalog)?;
-        Ok(generate(&self.initial, &self.sections, options)?)
+        let track = generate(&self.initial, &self.sections, options)?;
+        self.operations.validate_track(&track)?;
+        Ok(track)
     }
     /// Returns rider geometry for track authoring, or constrained physical track
     /// geometry for rider authoring. The authored source remains unmodified.

@@ -1,15 +1,27 @@
+pub(crate) mod box_spined_scenario;
+#[cfg(test)]
+mod box_spined_tests;
 mod coaster_properties;
+mod color_ui;
 mod commands;
 mod construction_ui;
 #[cfg(test)]
 mod correction_tests;
+mod device_curve_ui;
 mod draft_workflow;
+mod engineering_ui;
+mod expansion;
+pub(crate) mod expansion_scenario;
+#[cfg(test)]
+mod expansion_tests;
 mod files;
 mod graph;
 mod graph_canvas;
+mod graph_domain;
 #[cfg(test)]
 mod graph_drag_tests;
 mod graph_gesture;
+mod graph_precision;
 mod graph_regions;
 mod graph_view;
 mod icons;
@@ -31,18 +43,33 @@ mod m81_tests;
 mod m82_scenario;
 #[cfg(test)]
 mod m82_tests;
+pub(crate) mod material_editor_scenario;
+pub(crate) mod material_scenario;
+#[cfg(test)]
+mod material_tests;
+mod material_ui;
+mod operations_ui;
 mod panels;
 mod plot;
 mod previews;
 #[cfg(test)]
 mod save_tests;
 mod scenario;
+pub(crate) mod selection_scenario;
+mod support_ui;
 pub fn track_scenario(output: PathBuf) -> Result<(), Box<dyn Error>> {
     m7_scenario::run(output)
 }
 mod project_library;
 mod recent;
+mod ride_camera;
+pub(crate) mod ride_quality;
+pub(crate) mod ride_scenario;
 mod session;
+mod snap;
+#[cfg(test)]
+mod snap_tests;
+mod snap_ui;
 mod spline;
 pub(crate) mod startup;
 mod startup_pages;
@@ -63,6 +90,8 @@ pub(crate) mod ui_reference_scenario;
 mod vehicle_ui;
 mod workbench;
 mod workflow;
+#[cfg(test)]
+mod workflow_corrections_tests;
 pub(crate) mod workflow_scenario;
 use qx_geometry::solver::GenerationOptions;
 use qx_rendering::{DisplayOptions, EditorSurface, InspectionScene, SurfaceOutput};
@@ -116,7 +145,7 @@ pub fn render(
             .iter()
             .any(|s| s.id.0 == id)
         {
-            return Err("render selection refers to an absent section ID".into());
+            return Err("render selection refers to an absent region ID".into());
         }
         session.select(SectionId(id));
         session.channel = match channel {
@@ -128,7 +157,7 @@ pub fn render(
             _ => return Err("render channel must be roll, normal, lateral, pitch or yaw".into()),
         };
         if !qx_document::editing::channel_keys(&session.draft).contains(&session.channel) {
-            return Err("selected section does not support this authored channel".into());
+            return Err("selected region does not support this authored channel".into());
         }
         graph_canvas::fit(&mut session);
     }
@@ -140,7 +169,13 @@ pub fn render(
 }
 impl EditorSurface for Session {
     fn select_section(&mut self, id: qx_geometry::authoring::SectionId) {
+        self.expansion.structure = None;
         self.select(id);
+    }
+    fn select_support(&mut self, structure: u64, member: u64) {
+        self.expansion.structure = Some(structure);
+        self.expansion.member = Some(member);
+        self.expansion.node = None;
     }
     fn inspect_station(&mut self, point: Option<(qx_geometry::authoring::SectionId, f64)>) {
         self.viewport_inspection = point;

@@ -14,6 +14,8 @@ pub struct Vertex {
     pub position: [f32; 3],
     pub normal: [f32; 3],
     pub uv: [f32; 2],
+    /// glTF tangent and handedness; zero means derive a frame from UV gradients.
+    pub tangent: [f32; 4],
 }
 #[derive(Debug)]
 pub struct Texture {
@@ -24,7 +26,7 @@ pub struct Texture {
     pub wrap_t: gltf::texture::WrappingMode,
     pub nearest: bool,
 }
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Material {
     pub color: [f32; 4],
     pub metallic: f32,
@@ -32,10 +34,55 @@ pub struct Material {
     pub alpha_cutoff: Option<f32>,
     pub double_sided: bool,
     pub texture: Option<Arc<Texture>>,
+    pub normal: Option<Arc<Texture>>,
+    pub metallic_map: Option<crate::material_library::ScalarTexture>,
+    pub roughness_map: Option<crate::material_library::ScalarTexture>,
+    pub occlusion: Option<crate::material_library::ScalarTexture>,
+    pub emissive_map: Option<Arc<Texture>>,
+    pub emissive: [f32; 3],
+    pub normal_scale: f32,
+    pub normal_y: f32,
+    pub occlusion_strength: f32,
+    pub uv_transform: [f32; 4],
+}
+impl Material {
+    pub fn textures(&self) -> [Option<&Arc<Texture>>; 6] {
+        [
+            self.texture.as_ref(),
+            self.normal.as_ref(),
+            self.metallic_map.as_ref().map(|m| &m.texture),
+            self.roughness_map.as_ref().map(|m| &m.texture),
+            self.occlusion.as_ref().map(|m| &m.texture),
+            self.emissive_map.as_ref(),
+        ]
+    }
+}
+impl Default for Material {
+    fn default() -> Self {
+        Self {
+            color: [1.; 4],
+            metallic: 0.,
+            roughness: 1.,
+            alpha_cutoff: None,
+            double_sided: false,
+            texture: None,
+            normal: None,
+            metallic_map: None,
+            roughness_map: None,
+            occlusion: None,
+            emissive_map: None,
+            emissive: [0.; 3],
+            normal_scale: 1.,
+            normal_y: 1.,
+            occlusion_strength: 1.,
+            uv_transform: [1., 1., 0., 0.],
+        }
+    }
 }
 #[derive(Debug)]
 pub struct Primitive {
     pub vertices: Vec<Vertex>,
+    pub has_uv: bool,
     pub indices: Vec<u32>,
     pub material: Material,
     pub bounds: [[f64; 3]; 2],
@@ -208,8 +255,12 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
         reader.limits(limits);
         let image = reader
             .decode()
-            .map_err(|e| format!("Texture decode failed: {e}"))?
-            .into_rgba8();
+            .map_err(|e| format!("Texture decode failed: {e}"))?;
+        check(
+            image.color().bits_per_pixel() / image.color().channel_count() as u16 <= 8,
+            "Only 8-bit PNG/JPEG GLB maps are supported; source was preserved",
+        )?;
+        let image = image.into_rgba8();
         decoded_bytes += image.as_raw().len();
         check(
             decoded_bytes <= 128 * 1024 * 1024,
@@ -285,6 +336,15 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
                     "TEXCOORD_0 must be float or unsigned VEC2 with matching vertex count",
                 )?;
             }
+            if let Some(t) = p.get(&gltf::Semantic::Tangents) {
+                check(
+                    t.data_type() == gltf::accessor::DataType::F32
+                        && !t.normalized()
+                        && t.dimensions() == gltf::accessor::Dimensions::Vec4
+                        && t.count() == position.count(),
+                    "TANGENT must be float VEC4 with matching vertex count",
+                )?;
+            }
             if let Some(i) = p.indices() {
                 check(
                     i.dimensions() == gltf::accessor::Dimensions::Scalar
@@ -348,21 +408,50 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
                 material.alpha_mode() != gltf::material::AlphaMode::Blend,
                 "Alpha BLEND is unsupported; use OPAQUE or MASK",
             )?;
-            check(
-                material.normal_texture().is_none()
-                    && material.occlusion_texture().is_none()
-                    && material.emissive_texture().is_none(),
-                "Normal, occlusion and emissive textures are unsupported in the basic train renderer",
-            )?;
-            check(
-                material.emissive_factor() == [0.; 3],
-                "Emissive materials are unsupported in the basic train renderer",
-            )?;
             let pbr = material.pbr_metallic_roughness();
+            let normal_tex = material.normal_texture();
+            let ao_tex = material.occlusion_texture();
+            let emissive_tex = material.emissive_texture();
+            let mr_tex = pbr.metallic_roughness_texture();
+            let mut map_uvs = vec![];
+            if let Some(t) = &normal_tex {
+                map_uvs.push(t.tex_coord());
+            }
+            if let Some(t) = &ao_tex {
+                map_uvs.push(t.tex_coord());
+            }
+            if let Some(t) = &emissive_tex {
+                map_uvs.push(t.tex_coord());
+            }
+            if let Some(t) = &mr_tex {
+                map_uvs.push(t.tex_coord());
+            }
             check(
-                pbr.metallic_roughness_texture().is_none(),
-                "Metallic/roughness textures are unsupported; use material factors",
+                map_uvs
+                    .iter()
+                    .all(|uv| *uv == 0 && p.get(&gltf::Semantic::TexCoords(0)).is_some()),
+                "PBR maps require TEXCOORD_0; additional UV sets are not supported",
             )?;
+            check(
+                normal_tex
+                    .as_ref()
+                    .is_none_or(|t| t.scale().is_finite() && (0. ..=4.).contains(&t.scale()))
+                    && ao_tex.as_ref().is_none_or(|t| {
+                        t.strength().is_finite() && (0. ..=1.).contains(&t.strength())
+                    })
+                    && material
+                        .emissive_factor()
+                        .iter()
+                        .all(|v| v.is_finite() && (0. ..=1.).contains(v)),
+                "Invalid normal, occlusion or emissive factors",
+            )?;
+            let scalar = |texture: &gltf::texture::Info<'_>, channel| {
+                crate::material_library::ScalarTexture {
+                    texture: textures[texture.texture().index()].clone(),
+                    channel,
+                    invert: false,
+                }
+            };
             let tex = pbr.base_color_texture();
             check(
                 tex.as_ref().is_none_or(|t| {
@@ -387,8 +476,22 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
                         .is_none_or(|v| v.is_finite() && (0. ..=1.).contains(&v)),
                 "Material metallic, roughness and cutoff factors must be in [0,1]",
             )?;
+            let tangents: Vec<_> = reader
+                .read_tangents()
+                .map(Iterator::collect)
+                .unwrap_or_else(|| vec![[0.; 4]; positions.len()]);
+            check(tangents.len() == positions.len(), "Tangent count mismatch")?;
             let mut vertices = Vec::with_capacity(positions.len());
-            for ((position, normal), uv) in positions.into_iter().zip(normals).zip(uv) {
+            for (((position, normal), uv), tangent) in
+                positions.into_iter().zip(normals).zip(uv).zip(tangents)
+            {
+                check(
+                    tangent.iter().all(|v| v.is_finite())
+                        && (tangent == [0.; 4]
+                            || ((tangent[3].abs() - 1.).abs() < 1e-5
+                                && glam::Vec3::from_slice(&tangent).length_squared() > 1e-12)),
+                    "Invalid tangent or handedness",
+                )?;
                 check(
                     position
                         .iter()
@@ -401,16 +504,27 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
                     .try_normalize()
                     .ok_or("Zero/degenerate mesh normal; recalculate normals in Blender")?
                     .to_array();
+                if p.get(&gltf::Semantic::Tangents).is_some() {
+                    let t = glam::Vec3::from_slice(&tangent);
+                    check(
+                        (t.length_squared() - 1.).abs() <= 1e-3
+                            && t.dot(glam::Vec3::from(normal)).abs() <= 1e-3
+                            && (tangent[3].abs() - 1.).abs() <= 1e-5,
+                        "Tangent must be normalized, perpendicular to normal, with handedness +1 or -1",
+                    )?;
+                }
                 vertices.push(Vertex {
                     position,
                     normal,
                     uv,
+                    tangent,
                 });
             }
             ids.push(primitives.len());
             let bounds = vertex_bounds(&vertices);
             primitives.push(Primitive {
                 vertices,
+                has_uv: p.get(&gltf::Semantic::TexCoords(0)).is_some(),
                 indices,
                 bounds,
                 material: Material {
@@ -421,6 +535,23 @@ pub fn import_glb(bytes: &[u8]) -> Result<Model, String> {
                     alpha_cutoff: (material.alpha_mode() == gltf::material::AlphaMode::Mask)
                         .then(|| material.alpha_cutoff().unwrap_or(0.5)),
                     texture: tex.map(|t| textures[t.texture().index()].clone()),
+                    normal: normal_tex
+                        .as_ref()
+                        .map(|t| textures[t.texture().index()].clone()),
+                    normal_scale: normal_tex.as_ref().map_or(1., |t| t.scale()),
+                    metallic_map: mr_tex.as_ref().map(|t| scalar(t, 2)),
+                    roughness_map: mr_tex.as_ref().map(|t| scalar(t, 1)),
+                    occlusion: ao_tex
+                        .as_ref()
+                        .map(|t| crate::material_library::ScalarTexture {
+                            texture: textures[t.texture().index()].clone(),
+                            channel: 0,
+                            invert: false,
+                        }),
+                    occlusion_strength: ao_tex.as_ref().map_or(1., |t| t.strength()),
+                    emissive_map: emissive_tex.map(|t| textures[t.texture().index()].clone()),
+                    emissive: material.emissive_factor(),
+                    ..Default::default()
                 },
             });
         }
@@ -579,13 +710,13 @@ impl Model {
                 .map(|p| {
                     p.vertices.len() * std::mem::size_of::<Vertex>()
                         + p.indices.len() * 4
-                        + p.material.texture.as_ref().map_or(0, |t| {
-                            if seen.insert(Arc::as_ptr(t)) {
-                                t.rgba.len()
-                            } else {
-                                0
-                            }
-                        })
+                        + p.material
+                            .textures()
+                            .into_iter()
+                            .flatten()
+                            .filter(|t| seen.insert(Arc::as_ptr(t)))
+                            .map(|t| t.rgba.len())
+                            .sum::<usize>()
                 })
                 .sum::<usize>()
     }
@@ -607,7 +738,8 @@ impl Model {
                 vertices.push(Vertex {
                     position: ((normal + u * x + v * y) * 0.5).to_array(),
                     normal: normal.to_array(),
-                    uv: [0.; 2],
+                    uv: [(x + 1.) * 0.5, (1. - y) * 0.5],
+                    tangent: [0.; 4],
                 });
             }
             indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -615,15 +747,17 @@ impl Model {
         Self {
             primitives: vec![Primitive {
                 vertices,
+                has_uv: true,
                 indices,
                 bounds: [[-0.5; 3], [0.5; 3]],
                 material: Material {
-                    color: [0.35, 0.42, 0.48, 1.],
-                    metallic: 0.1,
-                    roughness: 0.7,
+                    color: [0.35, 0.35, 0.35, 1.],
+                    metallic: 0.,
+                    roughness: 0.9,
                     alpha_cutoff: None,
                     double_sided: false,
                     texture: None,
+                    ..Default::default()
                 },
             }],
             nodes: vec![Node {

@@ -228,6 +228,10 @@ fn graph_endpoint_drag_changes_solver_input_as_one_undo_transaction() {
             pressed: false,
             modifiers: egui::Modifiers::NONE,
         }]);
+        assert_eq!(session.editor.project(), &original);
+        assert!(session.draft_dirty());
+        assert!(!session.editor.can_undo());
+        assert!(session.apply_draft());
         assert_ne!(session.editor.project().sections[1], original.sections[1]);
         assert!(session.editor.can_undo());
         session.undo(false);

@@ -21,19 +21,128 @@ pub(super) fn apply(session: &mut Session) -> bool {
     if session.style_draft != p.style {
         commands.push(Command::SetStyle(session.style_draft.clone()));
     }
-    commands.is_empty() || session.execute(commands)
+    if session.style_construction_base.is_some() {
+        if session.visible_revision != session.revision || session.draft_error.is_some() {
+            session.status =
+                "Wait for a valid construction preview before applying the style.".into();
+            return false;
+        }
+        commands.push(Command::SetConstruction(session.construction_draft.clone()));
+    }
+    let applied = commands.is_empty() || session.execute(commands);
+    if applied {
+        session.style_construction_base = None;
+    }
+    applied
+}
+
+/// Selection changes visual construction only. The generation worker verifies
+/// source bytes and the complete path before Apply becomes available.
+pub(super) fn select_style(session: &mut Session, selection: StyleSelection) -> Result<(), String> {
+    let construction = if selection.is_unassigned() {
+        None
+    } else {
+        let style = session
+            .catalog
+            .validate_selection(&selection)
+            .map_err(|e| e.to_string())?;
+        if style.status == qx_style::DevelopmentStatus::Planned {
+            None
+        } else {
+            let entry = session
+                .library
+                .entry(LibraryKind::Track, &style.id)
+                .ok_or("Track style is not registered")?;
+            if style.status == qx_style::DevelopmentStatus::Available && !entry.content_ready {
+                return Err(format!(
+                    "Track construction unavailable: {}",
+                    entry.issues.join("; ")
+                ));
+            }
+            Some(entry.manifest.as_ref().and_then(|m|m.construction.clone()).ok_or("Track construction is missing; restore this style's source assets and reload the project")?)
+        }
+    };
+    if let Some(mut construction) = construction {
+        let base = session
+            .style_construction_base
+            .clone()
+            .unwrap_or_else(|| session.construction_draft.clone());
+        construction
+            .reuse_component_appearances(&session.construction_draft)
+            .map_err(|e| e.to_string())?;
+        session.style_construction_base = Some(base);
+        session.construction_draft = construction;
+    } else if let Some(base) = session.style_construction_base.take() {
+        session.construction_draft = base;
+    }
+    session.style_draft = selection;
+    session.refresh_view();
+    Ok(())
 }
 
 pub(super) fn cancel(session: &mut Session) {
+    if let Some(base) = session.style_construction_base.take() {
+        session.construction_draft = base;
+    }
     session.metadata_draft = session.editor.project().metadata.clone();
     session.style_draft = session.editor.project().style.clone();
     session.style_family = session.style_draft.family_id.clone();
+    session.refresh_view();
 }
 
 pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     ui.heading("Coaster Properties");
+    ui.horizontal_wrapped(|ui| {
+        ui.selectable_value(
+            &mut session.material_ui.appearance_tab,
+            false,
+            "Identity & style",
+        );
+        ui.selectable_value(
+            &mut session.material_ui.appearance_tab,
+            true,
+            "Track appearance",
+        );
+    });
+    if session.material_ui.appearance_tab {
+        let changed = session.construction_draft != session.editor.project().construction;
+        let valid = session.construction_draft.validate().is_ok();
+        let mut apply = false;
+        let mut cancel = false;
+        ui.horizontal_wrapped(|ui| {
+            apply = ui
+                .add_enabled(
+                    changed && valid,
+                    egui::Button::new(if session.style_construction_base.is_some() {
+                        "Apply style and appearance"
+                    } else {
+                        "Apply appearance"
+                    }),
+                )
+                .clicked();
+            cancel = ui
+                .add_enabled(
+                    changed,
+                    egui::Button::new(if session.style_construction_base.is_some() {
+                        "Cancel style"
+                    } else {
+                        "Cancel appearance"
+                    }),
+                )
+                .clicked();
+        });
+        super::material_ui::show(session, ui);
+        if apply {
+            super::material_ui::apply(session);
+        } else if cancel {
+            super::material_ui::cancel(session);
+        }
+        return;
+    }
     let changed = session.metadata_draft != session.editor.project().metadata
-        || session.style_draft != session.editor.project().style;
+        || session.style_draft != session.editor.project().style
+        || (session.style_construction_base.is_some()
+            && session.construction_draft != session.editor.project().construction);
     // Validate only these fields while drawing. Full document validation belongs
     // at the existing transaction boundary, not every properties redraw.
     let validation = session.metadata_draft.validate().and_then(|()| {
@@ -42,6 +151,11 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
             .validate(&session.catalog)
             .map_err(Into::into)
     });
+    let construction_ready = session.style_construction_base.is_none()
+        || (session.visible_revision == session.revision && session.draft_error.is_none());
+    if !construction_ready {
+        ui.small("Checking source geometry and updating construction… Apply is available after a valid preview.");
+    }
     if let Err(error) = &validation {
         ui.colored_label(super::theme::ERROR, error.to_string());
     }
@@ -49,7 +163,10 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     let mut cancel_requested = false;
     ui.horizontal_wrapped(|ui| {
         if ui
-            .add_enabled(changed && validation.is_ok(), egui::Button::new("Apply"))
+            .add_enabled(
+                changed && validation.is_ok() && construction_ready,
+                egui::Button::new("Apply"),
+            )
             .clicked()
         {
             apply_requested = true;
@@ -112,6 +229,7 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         .catalog
         .validate_selection(&session.style_draft)
         .ok();
+    let previous_selection = session.style_draft.clone();
     egui::ComboBox::from_id_salt("coaster numbered style")
         .selected_text(selected.map_or("Unassigned", |s| s.name.as_str()))
         .show_ui(ui, |ui| {
@@ -131,6 +249,14 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
                 );
             }
         });
+    if session.style_draft != previous_selection {
+        let selection = session.style_draft.clone();
+        session.style_draft = previous_selection;
+        if let Err(error) = select_style(session, selection) {
+            session.status = error.clone();
+            session.draft_error = Some(error);
+        }
+    }
     if let Ok(style) = session
         .catalog
         .validate_selection(&session.style_draft)
@@ -138,7 +264,12 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
     {
         ui.strong(format!("{} - {}", style.name, style.status.label()));
         ui.label(&style.description);
-        ui.small("Catalog assignment records design intent. Planned styles have no production models. Construction is configured separately below.");
+        ui.small(if style.status == qx_style::DevelopmentStatus::Planned {
+            "Planned style: records design intent; construction is not replaced."
+        } else { "Registered construction previews in the viewport. Apply keeps the style and component appearance together." });
+        if style.status == qx_style::DevelopmentStatus::InDevelopment {
+            ui.colored_label(super::theme::ORANGE, "Construction in development. Review the unresolved details in the style description before applying.");
+        }
         preview(session, &style, ui);
         ui.collapsing("Train compatibility", |ui| {
             ui.small("Catalog declarations describe intended compatibility; they do not validate vehicle dynamics.");
@@ -158,14 +289,19 @@ pub(super) fn show(session: &mut Session, ui: &mut egui::Ui) {
         ui.label("Unassigned - track and graph authoring remain available.");
         ui.small("Choose a final construction style when ready. Train compatibility is unknown until a style is assigned.");
     }
-    ui.small("Apply creates one undoable transaction. Style assignment preserves authored geometry, construction and train settings.");
+    ui.small("Apply creates one undoable transaction. Authored regions, transition profiles, reference geometry and train settings are preserved.");
     if ui.button("Open Train Workspace").clicked() {
         session.workbench.active = Profile::Train;
     }
     ui.separator();
-    ui.collapsing("Track construction", |ui| {
-        super::construction_ui::controls(session, ui);
+    ui.collapsing("Advanced construction", |ui| {
+        super::construction_ui::assembly_controls(session, ui);
     });
+    if session.development {
+        ui.collapsing("Advanced construction · development", |ui| {
+            super::construction_ui::controls(session, ui);
+        });
+    }
     if session.development {
         ui.collapsing("Library diagnostics - development", |ui| {
             super::library_ui::tracks(session, ui);
@@ -224,6 +360,6 @@ fn preview(session: &mut Session, style: &qx_style::Style, ui: &mut egui::Ui) {
     ui.small(if entry.is_some_and(|e| e.content_ready) {
         "Library content resolves; asset quality and mechanical validation are separate."
     } else {
-        "Production content unavailable. Empty folders are not completed assets."
+        "Content readiness and unresolved assembly details are shown in the style description."
     });
 }

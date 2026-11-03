@@ -39,10 +39,12 @@ pub(super) fn button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, help: 
         .add_enabled(
             enabled,
             Button::image_and_text(
-                Image::from_bytes(uri, bytes).fit_to_exact_size(egui::Vec2::splat(16.)),
-                egui::RichText::new(label).color(color),
+                Image::from_bytes(uri, bytes)
+                    .fit_to_exact_size(egui::Vec2::splat(16.))
+                    .tint(color),
+                super::theme::text(label, color),
             )
-            .image_tint_follows_text_color(true),
+            .image_tint_follows_text_color(false),
         )
         .on_hover_text(help);
     if label.is_empty() {

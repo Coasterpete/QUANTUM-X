@@ -365,11 +365,11 @@ pub fn generate(
             ensure(
                 section.incoming_boundary != BoundaryPolicy::RequireContinuousRates,
                 format!(
-                    "section {} requires continuous curvature/twist/reference speed at its start",
+                    "region {} requires continuous curvature/twist/reference speed at its start",
                     section.id.0
                 ),
             )?;
-            result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(0.0),code:"section_rate_jump",message:"pose is continuous; curvature, twist, or reference speed jumps at the section boundary".into()});
+            result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(0.0),code:"section_rate_jump",message:"pose is continuous; curvature, twist, or reference speed jumps at the region boundary".into()});
         }
         let mut knots = vec![0.0, section.extent];
         for (name, channel) in section.channels() {
@@ -399,7 +399,7 @@ pub fn generate(
             let count_float = (interval_m / options.max_step_m).ceil().max(4.0);
             ensure(
                 count_float <= options.max_samples.saturating_sub(result.samples.len()) as f64,
-                format!("section {} exceeds generation sample budget", section.id.0),
+                format!("region {} exceeds generation sample budget", section.id.0),
             )?;
             let count = count_float as usize;
             for i in 0..count {
@@ -471,7 +471,7 @@ pub fn generate(
 }
 fn section_error(section: &Section, x: f64, e: GeometryError) -> GeometryError {
     GeometryError(format!(
-        "section {} ({}) at input {x}: {e}",
+        "region {} ({}) at input {x}: {e}",
         section.id.0, section.name
     ))
 }
@@ -511,7 +511,7 @@ pub(crate) fn record_connection(
             section.incoming_boundary != BoundaryPolicy::RequireContinuousRates
                 || ((old - omega).length() <= 1e-8 && (speed - old_speed).abs() <= 1e-8),
             format!(
-                "section {} requires continuous incoming rates: curvature gap {:.10} /m, twist gap {:.10} rad/m, design-speed gap {:.10} m/s. Edit the incoming profiles/speed, or explicitly allow a rate jump; the pose is inherited unchanged",
+                "region {} requires continuous incoming rates: curvature gap {:.10} /m, twist gap {:.10} rad/m, design-speed gap {:.10} m/s. Edit the incoming profiles/speed, or explicitly allow a rate jump; the pose is inherited unchanged",
                 section.id.0,
                 curvature_vector_gap_per_m,
                 twist_rate_gap_rad_per_m,

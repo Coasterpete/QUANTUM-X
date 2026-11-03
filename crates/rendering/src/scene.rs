@@ -7,19 +7,31 @@ pub struct SectionLabel {
 }
 #[derive(Clone)]
 pub struct InspectionScene {
+    pub materials: std::sync::Arc<crate::material_library::LoadedMaterials>,
     pub mesh: Option<std::sync::Arc<qx_geometry::construction::TrackMesh>>,
     pub mesh_ms: f64,
     pub solver_ms: f64,
     pub name: String,
     pub track: GeneratedTrack,
+    /// Derived physical rail path for rider-reference authoring, shared by train
+    /// inspection/playback and the construction mesh. Authored data stays intact.
+    pub physical_track: Option<std::sync::Arc<GeneratedTrack>>,
     pub labels: Vec<SectionLabel>,
     pub reference: Option<qx_geometry::heartline::ReferenceTrack>,
     pub authored_reference: qx_geometry::heartline::AuthoredReference,
 }
 impl InspectionScene {
+    pub fn train_track(&self) -> Result<&GeneratedTrack, String> {
+        if self.authored_reference == qx_geometry::heartline::AuthoredReference::TrackCenterline {
+            Ok(&self.track)
+        } else {
+            self.physical_track.as_deref().ok_or_else(|| "Physical track reference could not be generated from this rider-authored path. Check Reference diagnostics and offset settings, then Apply or Cancel the draft.".into())
+        }
+    }
     /// A non-document surface (welcome/setup) has no authored or generated track.
     pub fn empty() -> Self {
         Self {
+            materials: Default::default(),
             mesh: None,
             mesh_ms: 0.,
             solver_ms: 0.,
@@ -35,6 +47,7 @@ impl InspectionScene {
             },
             labels: vec![],
             reference: None,
+            physical_track: None,
             authored_reference: qx_geometry::heartline::AuthoredReference::TrackCenterline,
         }
     }
@@ -53,6 +66,26 @@ impl InspectionScene {
         section: Option<usize>,
         display: &DisplayOptions,
     ) -> (Vec3, Vec3) {
+        if section.is_some()
+            && let Some((structure, member)) = display.selected_support
+            && let Some(mesh) = &self.mesh
+        {
+            let mut bounds = None::<qx_geometry::construction::Bounds>;
+            for c in &mesh.components {
+                if support_id(&c.id)
+                    .is_some_and(|(s, m)| s == structure && member.is_none_or(|v| v == m))
+                {
+                    if let Some(b) = &mut bounds {
+                        b.union(c.bounds);
+                    } else {
+                        bounds = Some(c.bounds);
+                    }
+                }
+            }
+            if let Some(b) = bounds {
+                return (b.min, b.max);
+            }
+        }
         self.filtered_bounds(section, display.reference, Some(display))
     }
     fn filtered_bounds(
@@ -99,11 +132,15 @@ impl InspectionScene {
                 if !c.visible
                     || display.is_some_and(|d| {
                         d.mode == DisplayMode::Technical
-                            || !match c.role {
-                                qx_style::construction::Role::Running => d.running,
-                                qx_style::construction::Role::Structure => d.structure,
-                                qx_style::construction::Role::Hardware => d.hardware,
-                            }
+                            || !(if c.id.starts_with("support/") {
+                                d.supports
+                            } else {
+                                match c.role {
+                                    qx_style::construction::Role::Running => d.running,
+                                    qx_style::construction::Role::Structure => d.structure,
+                                    qx_style::construction::Role::Hardware => d.hardware,
+                                }
+                            })
                     })
                 {
                     continue;
@@ -186,6 +223,88 @@ impl InspectionScene {
         }
         hit
     }
+    /// Ray/triangle selection against visible solids; nearest track hardware
+    /// occludes a support. Only explicit viewport clicks invoke this work.
+    pub(crate) fn pick_support(
+        &self,
+        camera: &crate::camera::Camera,
+        origin: Vec3,
+        viewport: egui::Rect,
+        pointer: egui::Pos2,
+        display: &DisplayOptions,
+    ) -> Option<(u64, u64)> {
+        if display.mode == DisplayMode::Technical {
+            return None;
+        }
+        let (eye, ray) = camera.projection(origin, viewport).ray(pointer)?;
+        let mut nearest = f64::INFINITY;
+        let mut selected = None;
+        for c in &self.mesh.as_ref()?.components {
+            if !c.visible
+                || !(if c.id.starts_with("support/") {
+                    display.supports
+                } else {
+                    match c.role {
+                        qx_style::construction::Role::Running => display.running,
+                        qx_style::construction::Role::Structure => display.structure,
+                        qx_style::construction::Role::Hardware => display.hardware,
+                    }
+                })
+            {
+                continue;
+            }
+            let count = if c.placements.is_empty() {
+                1
+            } else {
+                c.placements.len()
+            };
+            for i in 0..count {
+                let point = |index: u32| {
+                    let p = c.mesh.vertices[index as usize].position_m;
+                    if c.placements.is_empty() {
+                        p
+                    } else {
+                        c.placements[i].position_m + c.placements[i].frame.local_to_world(p)
+                    }
+                };
+                for triangle in c.mesh.indices.as_chunks::<3>().0 {
+                    let a = point(triangle[0]);
+                    let b = point(triangle[1]);
+                    let cpoint = point(triangle[2]);
+                    let edge = b - a;
+                    let other = cpoint - a;
+                    let p = ray.cross(other);
+                    let det = edge.dot(p);
+                    if det.abs() < 1e-12 {
+                        continue;
+                    }
+                    let t = eye - a;
+                    let u = t.dot(p) / det;
+                    if !(0. ..=1.).contains(&u) {
+                        continue;
+                    }
+                    let q = t.cross(edge);
+                    let v = ray.dot(q) / det;
+                    if v < 0. || u + v > 1. {
+                        continue;
+                    }
+                    let distance = other.dot(q) / det;
+                    if distance >= 0. && distance < nearest {
+                        nearest = distance;
+                        selected = support_id(&c.id);
+                    }
+                }
+            }
+        }
+        selected
+    }
+}
+fn support_id(id: &str) -> Option<(u64, u64)> {
+    let mut fields = id.split('/');
+    if fields.next() != Some("support") {
+        return None;
+    }
+    Some((fields.next()?.parse().ok()?, fields.next()?.parse().ok()?))
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -228,6 +347,8 @@ pub struct OverlayLine {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct DisplayOptions {
+    pub selected_support: Option<(u64, Option<u64>)>,
+    pub camera_view: Option<crate::CameraView>,
     pub asset_instances: Vec<crate::asset::AssetInstance>,
     pub train_bounds: Option<(Vec3, Vec3)>,
     pub selected_car_bounds: Option<(Vec3, Vec3)>,
@@ -235,8 +356,10 @@ pub struct DisplayOptions {
     pub mode: DisplayMode,
     pub running: bool,
     pub structure: bool,
+    pub supports: bool,
     pub hardware: bool,
     pub boundaries: bool,
+    /// Color-preserving silhouette in rendered modes; selected edges in wireframe.
     pub highlights: bool,
     pub grid: bool,
     pub grid_spacing: f64,
@@ -256,12 +379,15 @@ impl Default for DisplayOptions {
     fn default() -> Self {
         Self {
             asset_instances: vec![],
+            selected_support: None,
+            camera_view: None,
             train_bounds: None,
             selected_car_bounds: None,
             overlay_lines: Vec::new(),
             mode: DisplayMode::RenderedCenterline,
             running: true,
             structure: true,
+            supports: true,
             hardware: true,
             boundaries: true,
             highlights: true,
@@ -504,6 +630,7 @@ mod tests {
     };
     fn scene() -> InspectionScene {
         InspectionScene {
+            materials: Default::default(),
             mesh: None,
             mesh_ms: 0.,
             solver_ms: 0.,
@@ -519,6 +646,7 @@ mod tests {
             .unwrap(),
             labels: vec![],
             reference: None,
+            physical_track: None,
             authored_reference: qx_geometry::heartline::AuthoredReference::TrackCenterline,
         }
     }
@@ -585,5 +713,71 @@ mod tests {
                 > 100
         );
         assert_eq!(s.track, before);
+    }
+    #[test]
+    fn support_ray_selection_and_fit_use_the_actual_solid_member() {
+        use qx_geometry::supports::*;
+        let mut scene = scene();
+        let mut structure = Structure::empty(12);
+        structure.nodes = vec![
+            Node {
+                id: 1,
+                name: "base".into(),
+                position: NodePosition::World {
+                    position_m: Vec3::new(5., -5., 0.),
+                    foundation: true,
+                },
+            },
+            Node {
+                id: 2,
+                name: "head".into(),
+                position: NodePosition::World {
+                    position_m: Vec3::new(5., -1., 0.),
+                    foundation: false,
+                },
+            },
+        ];
+        structure.members.push(Member {
+            id: 7,
+            start_node: 1,
+            end_node: 2,
+            profile: MemberProfile::Rectangular {
+                width_m: 0.5,
+                height_m: 0.5,
+            },
+            roll_rad: 0.,
+        });
+        let mut mesh =
+            qx_geometry::construction::build(&scene.track, &Default::default(), Default::default())
+                .unwrap();
+        append_mesh(&scene.track, &[structure], &mut mesh).unwrap();
+        scene.mesh = Some(std::sync::Arc::new(mesh));
+        let display = DisplayOptions {
+            selected_support: Some((12, Some(7))),
+            ..Default::default()
+        };
+        let (lo, hi) = scene.display_bounds(Some(0), &display);
+        assert!((lo.y + 5.).abs() < 1e-10 && (hi.y + 1.).abs() < 1e-10);
+        let viewport = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
+        let mut camera = crate::camera::Camera::default();
+        camera.fit(lo, hi, 4. / 3.);
+        let pointer = camera
+            .project(Vec3::new(5., -3., 0.), Vec3::ZERO, viewport)
+            .unwrap();
+        assert_eq!(
+            scene.pick_support(&camera, Vec3::ZERO, viewport, pointer, &display),
+            Some((12, 7))
+        );
+        assert!(
+            scene
+                .pick_support(
+                    &camera,
+                    Vec3::ZERO,
+                    viewport,
+                    egui::pos2(-1., -1.),
+                    &display
+                )
+                .is_none()
+        );
     }
 }

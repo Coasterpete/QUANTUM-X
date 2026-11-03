@@ -35,7 +35,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $workspace 'product.json') -Destination $destination
     $assetsDestination = Join-Path $destination 'assets'
     New-Item -ItemType Directory -Path $assetsDestination | Out-Null
-    foreach ($folder in @('catalog', 'tracks', 'trains', 'development')) {
+    foreach ($folder in @('catalog', 'tracks', 'trains', 'development', 'materials')) {
         Copy-Item -LiteralPath (Join-Path $workspace "assets/$folder") -Destination $assetsDestination -Recurse
     }
     # Ship the existing numerical fixtures, never generate a demonstration ride.
@@ -80,13 +80,19 @@ File > Return to Welcome Screen respects unsaved changes and unapplied drafts.
 Use quantum-x.exe edit [project.qx.json] for the direct development editor workflow.
 The public executable and quantum-x.exe also accept all development CLI commands.
 Keep the assets folder beside both executables. Projects remain .qx.json files.
-Library styles are planned; no production models or engineering validation are supplied.
+Box Spined-100 integrates the owner's original swept spine and rigid cross-ties.
+Its configurable 1.10 m rail centers / 0.13 m diameter / 1.50 m tie pitch are provisional.
+Other track styles and all finished train models remain Planned. No engineering validation is claimed.
 Run .\quantum-x.exe --self-check for a noninteractive catalog/identity check.
 Run '.\QUANTUM Dynamics.exe' --startup-check for a noninteractive startup-state check.
 Welcome and Editor follow the owner's colorful, high-contrast Inkscape references.
 Setup configures the application; Editor offers New/Open when no project is open.
 View > Development tools exposes experimental train tools and diagnostics.
-News, support generators and ride operations are unavailable in this Alpha build.
+Track Workspace > Operations provides topology, bounded completion, launches/brakes and physical settings.
+Engineering plots use the Transition pane. Support Workspace edits solids and generates editable timber.
+All construction/operation changes require Apply or Cancel and support undo and schema-7 saving.
+Experimental playback applies dimensioned forces at 240 Hz; stations, lifts, blocks and structural analysis remain unavailable.
+News is unavailable in this Alpha build.
 This unsigned portable folder has no installer, updater or file associations.
 "@ | Set-Content -LiteralPath (Join-Path $destination 'README.txt') -Encoding utf8
     $distribution = [ordered]@{
@@ -98,7 +104,7 @@ This unsigned portable folder has no installer, updater or file associations.
         sha256 = (Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
         icon_resource_id = $iconCheck.resource_id
         icon_source_sha256 = $iconCheck.source_icon_sha256
-        content = 'development; planned catalog; no production train/track assets'
+        content = 'development; original Box Spined-100 visual construction; provisional configurable assembly dimensions; other styles planned; no finished trains'
         startup = 'welcome; no automatic document'
         sample_projects = $sampleCount
         templates = $templateCount

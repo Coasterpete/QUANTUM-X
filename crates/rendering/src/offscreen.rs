@@ -21,7 +21,21 @@ pub fn render_offscreen(
     if !(640..=4096).contains(&width) || !(480..=4096).contains(&height) {
         return Err("offscreen size must be 640..4096 by 480..4096".into());
     }
-    pollster::block_on(render(scene, surface, path, width, height))
+    render_offscreen_with_input(scene, surface, path, width, height, &mut |_, _| vec![])
+}
+/// Automated input to this offscreen egui context only; never desktop input.
+pub fn render_offscreen_with_input(
+    scene: &InspectionScene,
+    surface: &mut dyn EditorSurface,
+    path: &Path,
+    width: u32,
+    height: u32,
+    input: &mut dyn FnMut(&egui::Context, usize) -> Vec<egui::Event>,
+) -> Result<String, String> {
+    if !(640..=4096).contains(&width) || !(480..=4096).contains(&height) {
+        return Err("offscreen size must be 640..4096 by 480..4096".into());
+    }
+    pollster::block_on(render(scene, surface, path, width, height, input))
 }
 async fn render(
     scene: &InspectionScene,
@@ -29,6 +43,7 @@ async fn render(
     path: &Path,
     width: u32,
     height: u32,
+    input: &mut dyn FnMut(&egui::Context, usize) -> Vec<egui::Event>,
 ) -> Result<String, String> {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter = instance
@@ -66,7 +81,7 @@ async fn render(
     let depth = device
         .create_texture(&wgpu::TextureDescriptor {
             format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             ..texture_descriptor
         })
         .create_view(&Default::default());
@@ -77,9 +92,12 @@ async fn render(
     let mut output = None;
     let mut pending_free = vec![];
     // Font installation, nested command rows and dock sizing settle on successive passes.
-    for _ in 0..4 {
+    for pass in 0..8 {
+        // Offscreen evidence captures settled presentation rather than popup fades.
+        ctx.style_mut_of(egui::Theme::Dark, |style| style.animation_time = 0.);
         let mut next = ctx.run_pass(
             egui::RawInput {
+                events: input(&ctx, pass),
                 screen_rect: Some(egui::Rect::from_min_size(
                     egui::Pos2::ZERO,
                     // The target is physical pixels; egui consumes logical points.
@@ -122,6 +140,7 @@ async fn render(
     let origin = (min + max) * 0.5;
     let mut camera = Camera::default();
     camera.fit(min, max, viewport.width() as f64 / viewport.height() as f64);
+    camera.attached = display.camera_view.map(|v| v.validate()).transpose()?;
     let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice(
@@ -146,6 +165,7 @@ async fn render(
         }],
     });
     let mut mesh = crate::mesh_gpu::MeshGpu::new(&device, format);
+    let selection = crate::selection::SelectionGpu::new(&device, format, [width, height], &depth);
     mesh.upload(&device, &queue, scene, origin)?;
     mesh.upload(&device, &queue, scene, origin)?;
     if scene.mesh.is_some() && mesh.uploads != 1 {
@@ -246,23 +266,67 @@ async fn render(
             pass.draw(0..grid_count, 0..1);
             mesh.draw(&mut pass, &display);
             assets.draw(&mut pass);
-            pass.set_vertex_buffer(0, buffer.slice(..));
-            pass.set_pipeline(if display.mode == crate::DisplayMode::Technical {
-                &pipeline
-            } else {
-                &grid_pipeline
-            });
-            pass.set_bind_group(
-                0,
-                if display.mode == crate::DisplayMode::Technical {
-                    &bind
-                } else {
-                    &grid_bind
-                },
-                &[],
-            );
-            pass.draw(grid_count..lines.len() as u32, 0..1);
         }
+    }
+    if has_geometry {
+        selection.draw(
+            &mut encoder,
+            &view,
+            &depth,
+            &mesh,
+            &display,
+            [
+                viewport.left(),
+                viewport.top(),
+                viewport.width(),
+                viewport.height(),
+            ],
+        );
+        // Technical overlays stay above selection, including axes and markers
+        // that deliberately do not write depth in rendered display modes.
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("headless technical overlays"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                view: &depth,
+                depth_ops: Some(wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                }),
+                stencil_ops: None,
+            }),
+            ..Default::default()
+        });
+        pass.set_viewport(
+            viewport.left(),
+            viewport.top(),
+            viewport.width(),
+            viewport.height(),
+            0.,
+            1.,
+        );
+        pass.set_scissor_rect(
+            viewport.left() as u32,
+            viewport.top() as u32,
+            viewport.width() as u32,
+            viewport.height() as u32,
+        );
+        pass.set_vertex_buffer(0, buffer.slice(..));
+        let technical = display.mode == crate::DisplayMode::Technical;
+        pass.set_pipeline(if technical { &pipeline } else { &grid_pipeline });
+        pass.set_bind_group(0, if technical { &bind } else { &grid_bind }, &[]);
+        pass.draw(
+            crate::scene::grid_vertex_count(&display)..lines.len() as u32,
+            0..1,
+        );
     }
     {
         let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -415,7 +479,12 @@ async fn render(
             serde_json::json!({"component":a.component_id,"corners":points})
         })
         .collect();
-    let metadata = serde_json::json!({"viewport":[viewport.left(),viewport.top(),viewport.width(),viewport.height()],"size":[width,height],"train_fit":display.train_bounds.is_some(),"camera_target":camera.target.to_array(),"camera_distance":camera.distance,"unique_glb_resources":assets.uploads,"unique_glb_textures":assets.texture_uploads,"asset_upload_ms":asset_upload_ms,"primitive_instances":assets.instance_count,"projected_bounds":projected});
+    let metadata = serde_json::json!({"popup_open":ctx.any_popup_open(),"viewport":[viewport.left(),viewport.top(),viewport.width(),viewport.height()],"size":[width,height],"train_fit":display.train_bounds.is_some(),"camera_target":camera.target.to_array(),"camera_distance":camera.distance,"unique_glb_resources":assets.uploads,"unique_glb_textures":assets.texture_uploads,"asset_upload_ms":asset_upload_ms,"primitive_instances":assets.instance_count,"projected_bounds":projected});
+    let mut metadata = metadata;
+    metadata["attached_camera"] = camera
+        .attached
+        .map(|v| serde_json::json!({"eye_m":v.eye_m,"forward":v.forward,"up":v.up}))
+        .unwrap_or(serde_json::Value::Null);
     std::fs::write(
         path.with_extension("capture.json"),
         serde_json::to_vec_pretty(&metadata).map_err(|e| e.to_string())?,
