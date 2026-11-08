@@ -12,6 +12,7 @@ pub mod math;
 pub mod profile;
 pub mod profile_plot;
 mod profile_transition;
+pub mod rail_geometry;
 pub mod solver;
 pub mod source_profile;
 mod spline_track;

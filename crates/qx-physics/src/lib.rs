@@ -3,12 +3,16 @@
 
 mod angular;
 mod assembly;
+pub mod assembly_diagnostics;
 mod body;
+pub mod bogie_fitting;
+mod chord;
 pub use angular::AngularJoint;
 pub mod inspection;
 mod playback;
 mod solver;
 pub mod train;
+pub mod wheel_geometry;
 
 pub use body::{Body, MassProperties, Pose};
 pub use playback::{Simulation, TrackSimulation};

@@ -93,6 +93,35 @@ pub fn inspect(train: &Train, track: &GeneratedTrack, station_m: f64) -> Result<
     crate::assembly::assemble(train, track, seed)
 }
 
+/// Opt-in developer observations of the identical assembly solve. The supplied
+/// report is reset for each call and retained on errors, including seed failures.
+/// Nothing is written to the train, track, playback state or persisted schema.
+pub fn inspect_with_diagnostics(
+    train: &Train,
+    track: &GeneratedTrack,
+    station_m: f64,
+    diagnostics: &mut crate::assembly_diagnostics::AssemblyDiagnostics,
+) -> Result<ConsistInspection> {
+    use crate::assembly_diagnostics::{AssemblyPhase, AssemblyTermination};
+    *diagnostics = Default::default();
+    let result = seed(train, track, station_m).and_then(|seed| {
+        crate::assembly::assemble_with_diagnostics(train, track, seed, diagnostics)
+    });
+    match &result {
+        Ok(_) => {
+            diagnostics.phase = AssemblyPhase::Complete;
+            diagnostics.termination = AssemblyTermination::Converged;
+        }
+        Err(e) => {
+            if diagnostics.termination != AssemblyTermination::SweepLimit {
+                diagnostics.termination = AssemblyTermination::Aborted;
+            }
+            diagnostics.error = Some(e.clone());
+        }
+    }
+    result
+}
+
 /// Unclosed placement for explicitly labeled development diagnostics only.
 /// Never use this result to initialize physics or attach a ride camera.
 pub fn diagnostic_seed(

@@ -3,6 +3,9 @@
 //! this module nor its station variables is used to advance physical motion.
 use crate::{
     Pose, Result,
+    assembly_diagnostics::{
+        self, AssemblyDiagnostics, AssemblyPhase, AssemblyTermination, ChordDiagnostics,
+    },
     consist::{ConsistInspection, JointResidual},
 };
 use qx_document::train::{
@@ -16,6 +19,9 @@ use qx_geometry::{
 use std::collections::HashMap;
 
 const TOLERANCE: f64 = 1e-5;
+const MAX_SWEEPS: u32 = 2400;
+const UNRELAXED_SWEEPS: u32 = 64;
+const RELAXATION: f64 = 1.85;
 
 fn frame(p: Pose) -> Frame {
     Frame::new(p.orientation).expect("validated assembly rotation")
@@ -55,56 +61,50 @@ fn rotate_about(p: &mut Pose, pivot_m: Vec3, v: Vec3) -> Result<()> {
     Ok(())
 }
 
-/// Nearest forward chord root, never a remote branch of a loop. Explicitly
-/// bounded work and open endpoints; no extrapolation or implicit circuit wrap.
-fn chord(track: &GeneratedTrack, center: f64, length: f64) -> Result<(f64, f64)> {
-    if !length.is_finite() || length < 1e-8 {
-        return Err("coincident rigid pivots cannot define a chord".into());
-    }
-    let max = (4. * length).min(2. * center.min(track.length_m() - center));
-    let residual = |span: f64| -> Result<f64> {
-        let a = track
-            .sample_at_distance(center - span * 0.5)
-            .map_err(|e| e.to_string())?;
-        let b = track
-            .sample_at_distance(center + span * 0.5)
-            .map_err(|e| e.to_string())?;
-        Ok((b.position_m - a.position_m).length() - length)
-    };
-    let mut lo = 0.;
-    for n in 1..=96 {
-        let hi = max * n as f64 / 96.;
-        if residual(hi)? >= 0. {
-            let mut hi = hi;
-            for _ in 0..48 {
-                let mid = (lo + hi) * 0.5;
-                if residual(mid)? < 0. {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            return Ok((center - (lo + hi) * 0.25, center + (lo + hi) * 0.25));
-        }
-        lo = hi;
-    }
-    Err(format!(
-        "no local rigid chord of {length:.6} m at station {center:.6}; curvature or open endpoint is incompatible"
-    ))
+/// Bounded, increasing-span search on the sampler's piecewise cubic centerline.
+/// Assembly retains open endpoints; circuit intent is not present in this API.
+pub(crate) fn chord<const TRACE: bool>(
+    track: &GeneratedTrack,
+    center: f64,
+    length: f64,
+    diagnostics: &mut ChordDiagnostics,
+) -> Result<(f64, f64)> {
+    crate::chord::solve::<TRACE>(track, center, length, false, diagnostics)
 }
 
-struct Guide {
-    body: usize,
-    local: Vec3,
-    station: f64,
+pub(crate) struct Guide {
+    pub(crate) body: usize,
+    pub(crate) local: Vec3,
+    pub(crate) station: f64,
     initial: f64,
 }
 
 pub(crate) fn assemble(
     train: &Train,
     track: &GeneratedTrack,
-    mut result: ConsistInspection,
+    result: ConsistInspection,
 ) -> Result<ConsistInspection> {
+    assemble_inner::<false>(train, track, result, &mut AssemblyDiagnostics::default())
+}
+
+pub(crate) fn assemble_with_diagnostics(
+    train: &Train,
+    track: &GeneratedTrack,
+    result: ConsistInspection,
+    diagnostics: &mut AssemblyDiagnostics,
+) -> Result<ConsistInspection> {
+    assemble_inner::<true>(train, track, result, diagnostics)
+}
+
+fn assemble_inner<const TRACE: bool>(
+    train: &Train,
+    track: &GeneratedTrack,
+    mut result: ConsistInspection,
+    diagnostics: &mut AssemblyDiagnostics,
+) -> Result<ConsistInspection> {
+    if TRACE {
+        diagnostics.phase = AssemblyPhase::ChordSeed;
+    }
     if train
         .components
         .iter()
@@ -158,8 +158,19 @@ pub(crate) fn assemble(
             continue;
         }
         let center = (stations[rear.0] + stations[front.0]) * 0.5;
-        let (rs, fs) = chord(track, center, (front.1 - rear.1).length())
-            .map_err(|e| format!("car {}: {e}", car.body_id))?;
+        let mut chord_diagnostics = ChordDiagnostics::default();
+        let chord_result = chord::<TRACE>(
+            track,
+            center,
+            (front.1 - rear.1).length(),
+            &mut chord_diagnostics,
+        );
+        if TRACE {
+            chord_diagnostics.component_id = Some(car.body_id.clone());
+            chord_diagnostics.error = chord_result.as_ref().err().cloned();
+            diagnostics.chords.push(chord_diagnostics);
+        }
+        let (rs, fs) = chord_result.map_err(|e| format!("car {}: {e}", car.body_id))?;
         for (i, s) in [(rear.0, rs), (front.0, fs)] {
             let sample = track.sample_at_distance(s).map_err(|e| e.to_string())?;
             poses[i].position_m = sample.position_m;
@@ -208,6 +219,9 @@ pub(crate) fn assemble(
     }
     // Mounts describe initialization, not hidden welds. Re-evaluate them after
     // chord fitting, then constrain only actual authored mechanical connections.
+    if TRACE {
+        diagnostics.phase = AssemblyPhase::MountAndGuideSeed;
+    }
     for _ in 0..poses.len() {
         for (i, c) in train.components.iter().enumerate() {
             if let Some(Placement::Mounted {
@@ -271,11 +285,29 @@ pub(crate) fn assemble(
         .map(|c| (c.dimensions_m.length() * 0.5).max(0.25))
         .collect();
     let mut attitudes = crate::consist::rail_attitudes(train, &stations);
+    if TRACE {
+        diagnostics.phase = AssemblyPhase::Projection;
+        diagnostics.guide_count = guides.len();
+        diagnostics.rail_attitude_count = attitudes.len();
+        match assembly_diagnostics::measure(train, track, &poses, &guides, &attitudes, 0) {
+            Ok(sample) => diagnostics.seed_residuals = Some(sample),
+            Err(e) => diagnostics.measurement_error = Some(e),
+        }
+    }
     // Local position-based assembly uses unit translation weights and rotation
     // weights scaled by component extent. These are numerical weights, not mass,
     // springs, forces or a physical timestep. Every iterate remains rigid.
     let mut worst = (String::new(), f64::INFINITY);
-    for iteration in 0..2400 {
+    for iteration in 0..MAX_SWEEPS {
+        // Settle large local seed errors with the original projection first.
+        // Over-relax the same constraint rows to accelerate slow chain modes;
+        // keep the original displacement/rotation clamps and acceptance gates.
+        // These numerical settings affect initialization only, never dynamics.
+        let omega = if iteration < UNRELAXED_SWEEPS {
+            1.0
+        } else {
+            RELAXATION
+        };
         if poses.iter().any(|p| !p.position_m.is_finite()) {
             return Err("assembly position overflow; check physical dimensions and anchors".into());
         }
@@ -289,7 +321,7 @@ pub(crate) fn assemble(
                 let gb = rb.cross(n);
                 let wa = 1. / (radii[a] * radii[a]);
                 let wb = 1. / (radii[b] * radii[b]);
-                let d = (e / (2. + ga.dot(ga) * wa + gb.dot(gb) * wb)).clamp(-0.2, 0.2);
+                let d = (omega * e / (2. + ga.dot(ga) * wa + gb.dot(gb) * wb)).clamp(-0.2, 0.2);
                 poses[a].position_m = poses[a].position_m + n * d;
                 poses[b].position_m = poses[b].position_m - n * d;
                 rotate(&mut poses[a], ga * (d * wa))?;
@@ -301,7 +333,7 @@ pub(crate) fn assemble(
                 let fb =
                     Frame::new(poses[b].orientation.compose(frame_b)).map_err(|e| e.to_string())?;
                 let (axis, error) = crate::angular::roll_constraint(fa, fb)?;
-                let correction = axis * (error / (2. * axis.dot(axis)));
+                let correction = axis * (omega * error / (2. * axis.dot(axis)));
                 let pa = point(poses[a], j.anchor_a_m);
                 let pb = point(poses[b], j.anchor_b_m);
                 rotate_about(&mut poses[a], pa, correction)?;
@@ -324,8 +356,8 @@ pub(crate) fn assemble(
                         .and_then(|q| q.rotation_vector())
                         .map_err(|e| e.to_string())?
                 };
-                rotate(&mut poses[a], error * 0.5)?;
-                rotate(&mut poses[b], error * (-0.5))?;
+                rotate(&mut poses[a], error * (omega * 0.5))?;
+                rotate(&mut poses[b], error * (-omega * 0.5))?;
                 if let JointModel::Hinge {
                     limits: Some(l), ..
                 } = j.model
@@ -334,8 +366,8 @@ pub(crate) fn assemble(
                         .rem_euclid(std::f64::consts::TAU)
                         - std::f64::consts::PI;
                     let e = theta - theta.clamp(l.min_rad, l.max_rad);
-                    rotate(&mut poses[a], fa.lateral() * (e * 0.5))?;
-                    rotate(&mut poses[b], fa.lateral() * (-e * 0.5))?;
+                    rotate(&mut poses[a], fa.lateral() * (e * omega * 0.5))?;
+                    rotate(&mut poses[b], fa.lateral() * (-e * omega * 0.5))?;
                 }
             }
         }
@@ -364,7 +396,7 @@ pub(crate) fn assemble(
                 let e = (poses[i].position_m + r - s.position_m).dot(n);
                 let grad = r.cross(n);
                 let w = 1. / (radii[i] * radii[i]);
-                let d = (e / (1. + grad.dot(grad) * w)).clamp(-0.2, 0.2);
+                let d = (omega * e / (1. + grad.dot(grad) * w)).clamp(-0.2, 0.2);
                 poses[i].position_m = poses[i].position_m - n * d;
                 rotate(&mut poses[i], grad * (-d * w))?;
             }
@@ -380,10 +412,32 @@ pub(crate) fn assemble(
             let rail = Frame::new(poses[i].orientation.compose(attitude.local_frame))
                 .map_err(|e| e.to_string())?;
             let (axis, error) = crate::angular::roll_constraint(s.frame, rail)?;
-            rotate_about(&mut poses[i], pivot_m, axis * (-error / axis.dot(axis)))?;
+            rotate_about(
+                &mut poses[i],
+                pivot_m,
+                axis * (-omega * error / axis.dot(axis)),
+            )?;
         }
-        if iteration % 8 != 0 {
+        if TRACE {
+            diagnostics.projection_sweeps = iteration + 1;
+        }
+        // Always assess the terminal iterate, rather than reporting sweep 2393
+        // after actually completing 2400 sweeps.
+        if iteration % 8 != 0 && iteration + 1 != MAX_SWEEPS {
             continue;
+        }
+        if TRACE {
+            match assembly_diagnostics::measure(
+                train,
+                track,
+                &poses,
+                &guides,
+                &attitudes,
+                iteration + 1,
+            ) {
+                Ok(sample) => diagnostics.convergence_checks.push(sample),
+                Err(e) => diagnostics.measurement_error = Some(e),
+            }
         }
         worst = (String::new(), 0.);
         for j in &train.connections {
@@ -391,6 +445,9 @@ pub(crate) fn assemble(
                 - point(poses[ids[j.component_b.as_str()]], j.anchor_b_m))
             .length();
             let e = gap;
+            if !e.is_finite() {
+                return Err("assembly connection residual overflow".into());
+            }
             if e > worst.1 {
                 worst = (format!("connection {}", j.id), e);
             }
@@ -433,6 +490,9 @@ pub(crate) fn assemble(
                     }
                     JointModel::Ball => 0.,
                 };
+                if !e.is_finite() {
+                    return Err("assembly angular residual overflow".into());
+                }
                 if e > worst.1 {
                     worst = (format!("angular joint {} (rad)", j.id), e);
                 }
@@ -444,6 +504,9 @@ pub(crate) fn assemble(
                 .map_err(|e| e.to_string())?
                 .position_m;
             let e = (point(poses[g.body], g.local) - target).length();
+            if !e.is_finite() {
+                return Err("assembly guide residual overflow".into());
+            }
             if e > worst.1 {
                 worst = (format!("guide on {}", train.components[g.body].id), e);
             }
@@ -459,6 +522,9 @@ pub(crate) fn assemble(
             )
             .map_err(|e| e.to_string())?;
             let e = crate::angular::roll_constraint(s.frame, rail)?.1.abs();
+            if !e.is_finite() {
+                return Err("assembly attitude residual overflow".into());
+            }
             if e > worst.1 {
                 worst = (
                     format!("body attitude {} (rad)", train.components[attitude.body].id),
@@ -470,7 +536,23 @@ pub(crate) fn assemble(
             break;
         }
     }
+    if TRACE {
+        match assembly_diagnostics::measure(
+            train,
+            track,
+            &poses,
+            &guides,
+            &attitudes,
+            diagnostics.projection_sweeps,
+        ) {
+            Ok(sample) => diagnostics.terminal_residuals = Some(sample),
+            Err(e) => diagnostics.measurement_error = Some(e),
+        }
+    }
     if worst.1 > TOLERANCE {
+        if TRACE {
+            diagnostics.termination = AssemblyTermination::SweepLimit;
+        }
         let unit = if worst.0.ends_with("(rad)") {
             "rad"
         } else {

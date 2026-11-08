@@ -502,7 +502,11 @@ pub(crate) fn scalar_impulse(velocity: f64, error: f64, denominator: f64, dt: f6
 
 /// World angular change per metre of the authored rail frame. Use one-sided
 /// differences at open ends and wrapped differences only for verified circuits.
-fn track_frame_derivative(track: &GeneratedTrack, s: f64, circuit: bool) -> Result<Vec3> {
+pub(crate) fn track_frame_derivative(
+    track: &GeneratedTrack,
+    s: f64,
+    circuit: bool,
+) -> Result<Vec3> {
     let h = 0.001_f64.min(track.length_m() * 0.25);
     let (lo, hi, span) = if circuit {
         (
