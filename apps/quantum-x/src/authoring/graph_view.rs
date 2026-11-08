@@ -27,11 +27,11 @@ impl View {
         [self.x.min, self.x.max, self.y.min, self.y.max]
     }
     pub fn exact(bounds: [f64; 4], extent: f64) -> Result<Self, &'static str> {
-        Axis::new(0., extent).ok_or("Section domain must have a finite, positive extent.")?;
+        Axis::new(0., extent).ok_or("Region domain must have a finite, positive extent.")?;
         let x = Axis::new(bounds[0], bounds[1]).ok_or("X bounds must be finite and From < To.")?;
         let y = Axis::new(bounds[2], bounds[3]).ok_or("Y bounds must be finite and From < To.")?;
         if x.min < 0. || x.max > extent || x.span() < min_x_span(extent) {
-            return Err("X range must stay inside the section domain and have a resolvable span.");
+            return Err("X range must stay inside the region domain and have a resolvable span.");
         }
         if y.min < -MAX_Y || y.max > MAX_Y || y.span() < min_y_span(y) {
             return Err(
@@ -61,11 +61,9 @@ impl View {
         channel.validate().ok()?;
         let (mut min, mut max) = (f64::INFINITY, f64::NEG_INFINITY);
         for t in &channel.transitions {
-            for i in 0..=512 {
-                let value = t.evaluate(t.length * (i as f64 / 512.)).ok()?.value;
-                min = min.min(value);
-                max = max.max(value);
-            }
+            let bounds = qx_geometry::profile_plot::bounds(t).ok()?;
+            min = min.min(bounds[0]);
+            max = max.max(bounds[1]);
         }
         let constant_margin: f64 = match channel.unit {
             Unit::RadiansPerMetre => 0.05,
@@ -83,11 +81,21 @@ impl View {
         Self::exact(view.bounds(), channel.length()).ok()
     }
     pub fn zoom(self, anchor: (f64, f64), factor: f64, extent: f64) -> Self {
-        if !factor.is_finite() || factor <= 0. || Self::exact(self.bounds(), extent).is_err() {
+        self.zoom_axes(anchor, (factor, factor), extent)
+    }
+    pub fn zoom_axes(self, anchor: (f64, f64), factors: (f64, f64), extent: f64) -> Self {
+        if !factors.0.is_finite()
+            || !factors.1.is_finite()
+            || factors.0 <= 0.
+            || factors.1 <= 0.
+            || Self::exact(self.bounds(), extent).is_err()
+        {
             return self;
         }
-        let fx = factor.clamp(min_x_span(extent) / self.x.span(), extent / self.x.span());
-        let fy = factor.clamp(
+        let fx = factors
+            .0
+            .clamp(min_x_span(extent) / self.x.span(), extent / self.x.span());
+        let fy = factors.1.clamp(
             min_y_span(self.y) / self.y.span(),
             2. * MAX_Y / self.y.span(),
         );
@@ -128,9 +136,16 @@ pub(super) struct State {
     pub view: View,
     active: Option<(u64, u8)>,
     domain: Option<(Domain, Unit)>,
-    saved: BTreeMap<(u64, u8), ((Domain, Unit), View)>,
+    extent: f64,
+    saved: BTreeMap<(u64, u8), SavedView>,
     pub range_edit: [f64; 4],
     pub error: Option<&'static str>,
+}
+#[derive(Clone, Copy)]
+struct SavedView {
+    units: (Domain, Unit),
+    view: View,
+    extent: f64,
 }
 impl State {
     pub fn set(&mut self, view: View) {
@@ -143,26 +158,43 @@ impl State {
         let units = (domain, channel.unit);
         if self.active != Some(context) || self.domain != Some(units) {
             if let (Some(old), Some(units)) = (self.active, self.domain) {
-                self.saved.insert(old, (units, self.view));
+                self.saved.insert(
+                    old,
+                    SavedView {
+                        units,
+                        view: self.view,
+                        extent: self.extent,
+                    },
+                );
             }
             let restored = self
                 .saved
                 .get(&context)
-                .filter(|(u, _)| *u == units)
-                .map(|(_, v)| *v);
+                .filter(|saved| saved.units == units)
+                .map(|saved| (saved.view, saved.extent));
+            self.extent = restored.map_or(channel.length(), |(_, extent)| extent);
             self.set(
                 restored
+                    .map(|(v, _)| v)
                     .unwrap_or_else(|| View::fit(channel).unwrap_or_else(|| View::reset(channel))),
             );
             self.active = Some(context);
             self.domain = Some(units);
         }
-        // Extent edits/undo constrain X, without refitting Y or altering drafts.
-        if let Some(x) = self.view.x.within(0., channel.length())
+        // A full-domain view follows both growth and shrinkage. A deliberately
+        // zoomed view retains its range, constrained to the new extent. Y stays.
+        let full_domain = self.view.x.min == 0. && self.view.x.max == self.extent;
+        let x = if full_domain {
+            Axis::new(0., channel.length())
+        } else {
+            self.view.x.within(0., channel.length())
+        };
+        if let Some(x) = x
             && x != self.view.x
         {
             self.set(View { x, ..self.view });
         }
+        self.extent = channel.length();
     }
     pub fn apply_range(&mut self, extent: f64) {
         match View::exact(self.range_edit, extent) {
@@ -172,9 +204,17 @@ impl State {
     }
 }
 pub(super) fn sync(session: &mut Session) {
-    let domain = session.draft.domain;
-    let channel = session.draft.channel_mut(session.channel).unwrap();
-    session
-        .graph_view
-        .activate(session.selected.0, session.channel as u8, domain, channel);
+    let mut section = session.graph_section();
+    let domain = section.domain;
+    let id = session.graph_id().0;
+    let key = if session.graph_device().is_some() {
+        5
+    } else {
+        session.channel as u8
+    };
+    let channel = section.channel_mut(session.graph_key()).unwrap();
+    if session.graph_device().is_some() {
+        channel.unit = Unit::MetresPerSecondSquared;
+    }
+    session.graph_view.activate(id, key, domain, channel);
 }

@@ -198,7 +198,7 @@ fn strict_downstream_failure_is_atomic_and_reports_measured_constraint() {
     panels::insert_section(&mut s, 4, false);
     assert_eq!(s.editor.project(), &before);
     assert!(s.status.contains("curvature gap"), "{}", s.status);
-    assert!(s.status.contains("section 2"));
+    assert!(s.status.contains("region 2"));
     s.undo(false); // Strict-policy change was the preceding successful operation.
     assert_eq!(
         s.editor.project().sections[1].incoming_boundary,
@@ -344,10 +344,10 @@ fn actual_workbench_insertion_and_pending_resolution_buttons_work_at_both_sizes(
         frame(&mut s, &ctx, size, vec![]);
         frame(&mut s, &ctx, size, vec![]);
         s.draft.name = "Pending owner value".into();
-        click(&mut s, &ctx, size, "Insert section…");
+        click(&mut s, &ctx, size, "Insert Region…");
         click(&mut s, &ctx, size, "Insert after");
         assert!(s.pending_action.is_some());
-        click(&mut s, &ctx, size, "Apply & continue");
+        click(&mut s, &ctx, size, "Apply & Continue");
         assert_eq!(s.selected, SectionId(2));
         assert_eq!(s.editor.project().sections[0].name, "Pending owner value");
         assert_eq!(s.channel, ChannelKey::Normal);
@@ -357,6 +357,204 @@ fn actual_workbench_insertion_and_pending_resolution_buttons_work_at_both_sizes(
         let (_, texts, _) = frame(&mut s, &ctx, size, vec![]);
         assert!(texts.iter().any(|(t, _)| t == "Start"));
     }
+}
+
+#[test]
+fn region_insertion_modal_choices_preserve_document_and_replay_history() {
+    for size in [egui::vec2(1440., 960.), egui::vec2(960., 640.)] {
+        for before in [true, false] {
+            for choice in [
+                "Apply & Continue",
+                "Discard Draft & Continue",
+                "Keep Editing",
+            ] {
+                let mut s = blank();
+                let original = s.editor.project().clone();
+                let ctx = egui::Context::default();
+                frame(&mut s, &ctx, size, vec![]);
+                frame(&mut s, &ctx, size, vec![]);
+                s.draft = editing::resize(&s.draft, 12.345678901234).unwrap();
+                s.draft.name = "Owner precision draft".into();
+                let draft = s.draft.clone();
+                let status_height = super::commands::status_height(&s);
+                click(&mut s, &ctx, size, "Insert Region…");
+                click(
+                    &mut s,
+                    &ctx,
+                    size,
+                    if before {
+                        "Insert before"
+                    } else {
+                        "Insert after"
+                    },
+                );
+                // run_pass deliberately executes one layout pass; let the new
+                // modal finish egui's sizing pass before checking its anchor.
+                for _ in 0..3 {
+                    frame(&mut s, &ctx, size, vec![]);
+                }
+                assert!(s.project_prompt_open());
+                assert_eq!(s.editor.project(), &original);
+                assert_eq!(s.next_section_id, Some(2));
+                assert_eq!(super::commands::status_height(&s), status_height);
+                let modal = ctx
+                    .read_response(egui::Id::unique("resolve region draft"))
+                    .unwrap();
+                assert!(modal.rect.contains(ctx.content_rect().center()));
+                assert!(
+                    (modal.rect.center() - ctx.content_rect().center()).length() < 2.,
+                    "modal {:?}, content {:?}",
+                    modal.rect,
+                    ctx.content_rect()
+                );
+                // Global commands cannot commit or navigate behind the decision.
+                key(&mut s, &ctx, size, egui::Key::Enter, Modifiers::CTRL);
+                key(&mut s, &ctx, size, egui::Key::Num2, Modifiers::CTRL);
+                key(&mut s, &ctx, size, egui::Key::N, Modifiers::CTRL);
+                assert_eq!(s.editor.project(), &original);
+                assert_eq!(s.draft, draft);
+                assert_eq!(s.workbench.active, super::workbench::Profile::Track);
+                assert!(s.startup_request.is_none());
+                assert!(s.pending_action.is_some());
+                click(&mut s, &ctx, size, choice);
+                assert!(s.pending_action.is_none());
+                if choice == "Keep Editing" {
+                    assert_eq!(s.editor.project(), &original);
+                    assert_eq!(s.draft, draft);
+                    assert_eq!(s.next_section_id, Some(2));
+                    assert!(!s.editor.can_undo());
+                    assert!(!s.editor.can_redo());
+                    continue;
+                }
+                assert_eq!(s.selected, SectionId(2));
+                assert_eq!(s.editor.project().sections.len(), 2);
+                assert_eq!(
+                    s.editor.project().sections[usize::from(!before)].name,
+                    "Region 2"
+                );
+                let applied = choice == "Apply & Continue";
+                assert_eq!(
+                    s.editor.project().sections[usize::from(before)],
+                    if applied {
+                        draft.clone()
+                    } else {
+                        original.sections[0].clone()
+                    }
+                );
+                let inserted = s.editor.project().clone();
+                let generated = inserted.generate(&s.catalog, s.options).unwrap();
+                let json = persistence::to_json(&inserted, &s.catalog).unwrap();
+                let reopened = persistence::from_json(&json, &s.catalog).unwrap();
+                assert!(json.contains("\"sections\""));
+                assert!(!json.contains("\"regions\""));
+                assert_eq!(reopened, inserted);
+                assert_eq!(reopened.generate(&s.catalog, s.options).unwrap(), generated);
+                s.undo(false);
+                assert_eq!(s.editor.project().sections.len(), 1);
+                if applied {
+                    assert_eq!(s.editor.project().sections[0], draft);
+                    s.undo(false);
+                }
+                assert_eq!(s.editor.project(), &original);
+                assert!(!s.editor.can_undo());
+                s.undo(true);
+                if applied {
+                    assert_eq!(s.editor.project().sections, vec![draft]);
+                    s.undo(true);
+                }
+                assert_eq!(s.editor.project(), &inserted);
+                assert!(!s.editor.can_redo());
+            }
+        }
+    }
+}
+
+#[test]
+fn region_modal_invalid_apply_retains_draft_and_discard_preserves_other_settings() {
+    let mut s = blank();
+    let original = s.editor.project().clone();
+    s.metadata_draft.description = "Unrelated staged description".into();
+    s.initial_draft.position_m.y = 2.5;
+    s.construction_draft = qx_style::construction::TrackConstruction::generic_single();
+    let construction = s.construction_draft.clone();
+    s.draft.roll_rate.transitions[0].length = 9.;
+    let draft = s.draft.clone();
+    let ctx = egui::Context::default();
+    let size = egui::vec2(960., 640.);
+    frame(&mut s, &ctx, size, vec![]);
+    frame(&mut s, &ctx, size, vec![]);
+    click(&mut s, &ctx, size, "Insert Region…");
+    click(&mut s, &ctx, size, "Insert after");
+    click(&mut s, &ctx, size, "Apply & Continue");
+    assert!(s.pending_action.is_some());
+    assert_eq!(s.editor.project(), &original);
+    assert_eq!(s.draft, draft);
+    assert!(!s.editor.can_undo());
+    let (_, texts, _) = frame(&mut s, &ctx, size, vec![]);
+    assert!(
+        texts
+            .iter()
+            .any(|(text, _)| text.contains("region 1") && text.contains("cover"))
+    );
+    click(&mut s, &ctx, size, "Discard Draft & Continue");
+    assert!(s.pending_action.is_none());
+    assert_eq!(s.editor.project().sections.len(), 2);
+    assert_eq!(s.editor.project().sections[0], original.sections[0]);
+    assert_eq!(s.editor.project().metadata, original.metadata);
+    assert_eq!(s.editor.project().initial, original.initial);
+    assert_eq!(s.editor.project().construction, original.construction);
+    assert_eq!(s.metadata_draft.description, "Unrelated staged description");
+    assert_eq!(s.initial_draft.position_m.y, 2.5);
+    assert_eq!(s.construction_draft, construction);
+}
+
+#[test]
+fn region_modal_escape_backdrop_and_default_keyboard_action_keep_the_draft() {
+    for dismissal in ["Escape", "Backdrop", "Enter"] {
+        let mut s = blank();
+        let original = s.editor.project().clone();
+        s.draft.name = "Retained owner draft".into();
+        let draft = s.draft.clone();
+        let ctx = egui::Context::default();
+        let size = egui::vec2(960., 640.);
+        panels::insert_section(&mut s, 0, false);
+        frame(&mut s, &ctx, size, vec![]);
+        frame(&mut s, &ctx, size, vec![]);
+        match dismissal {
+            "Backdrop" => click_at(&mut s, &ctx, size, egui::pos2(2., 2.)),
+            "Enter" => key(&mut s, &ctx, size, egui::Key::Enter, Modifiers::NONE),
+            _ => key(&mut s, &ctx, size, egui::Key::Escape, Modifiers::NONE),
+        }
+        assert!(s.pending_action.is_none(), "{dismissal}");
+        assert_eq!(s.editor.project(), &original, "{dismissal}");
+        assert_eq!(s.draft, draft, "{dismissal}");
+        assert!(!s.editor.can_undo());
+    }
+}
+
+#[test]
+fn region_names_are_defaults_and_existing_authored_names_are_preserved() {
+    assert_eq!(blank_project().sections[0].name, "Region 1");
+    for kind in 0..=8 {
+        assert_eq!(panels::new_section(42, kind).name, "Region 42");
+    }
+    let mut project = blank_project();
+    project.sections[0].name = "Section 1 — owner saved name".into();
+    let mut s = Session::new(
+        project.clone(),
+        None,
+        qx_style::Catalog::built_in().unwrap(),
+    )
+    .unwrap();
+    let ctx = egui::Context::default();
+    let size = egui::vec2(960., 640.);
+    frame(&mut s, &ctx, size, vec![]);
+    let (_, texts, _) = frame(&mut s, &ctx, size, vec![]);
+    assert!(texts.iter().any(|(text, _)| text == "Region List"));
+    assert_eq!(s.editor.project(), &project);
+    assert_eq!(s.draft.name, project.sections[0].name);
+    let json = persistence::to_json(&project, &s.catalog).unwrap();
+    assert_eq!(persistence::from_json(&json, &s.catalog).unwrap(), project);
 }
 
 #[test]
@@ -586,7 +784,15 @@ fn select_transition(s: &mut Session, ctx: &egui::Context, size: egui::Vec2, ind
     let label = texts
         .iter()
         .find(|(t, _)| t.starts_with(&format!("{} · ", index + 1)) && t.contains("(ID "))
-        .unwrap()
+        .unwrap_or_else(|| {
+            panic!(
+                "missing transition choice {index}, current {}, channel {:?}, popup {}: {:?}",
+                s.transition,
+                s.channel,
+                ctx.any_popup_open(),
+                texts
+            )
+        })
         .0
         .clone();
     click_last(s, ctx, size, &label);
@@ -607,14 +813,14 @@ fn values(s: &mut Session, ctx: &egui::Context, size: egui::Vec2, start: &str, e
         click_last(s, ctx, size, "Quintic smoothstep");
         click_last(s, ctx, size, "NURBS");
     }
-    let viewport = frame(s, ctx, size, vec![]).0.viewport;
-    click_at(s, ctx, size, viewport.center());
+    // Explicit popup dismissal does not depend on the viewport center staying
+    // outside a parameter popover as its contents/layout evolve.
+    key(s, ctx, size, egui::Key::Escape, Modifiers::NONE);
 }
 fn split(s: &mut Session, ctx: &egui::Context, size: egui::Vec2) {
     click_last(s, ctx, size, "Transitions");
-    click_last(s, ctx, size, "Split region (preserve shape)");
-    let viewport = frame(s, ctx, size, vec![]).0.viewport;
-    click_at(s, ctx, size, viewport.center());
+    click_last(s, ctx, size, "Split transition (preserve shape)");
+    key(s, ctx, size, egui::Key::Escape, Modifiers::NONE);
 }
 
 #[test]
@@ -624,7 +830,7 @@ fn complete_hill_can_be_authored_through_real_workbench_widgets_and_saved() {
     let size = egui::vec2(1440., 960.);
     frame(&mut s, &ctx, size, vec![]);
     frame(&mut s, &ctx, size, vec![]);
-    click(&mut s, &ctx, size, "Insert section…");
+    click(&mut s, &ctx, size, "Insert Region…");
     click(&mut s, &ctx, size, "Insert after");
     type_after_label(&mut s, &ctx, size, "Length (m)", "80");
     assert_eq!(s.draft.extent, 80.);
@@ -820,8 +1026,8 @@ fn typing_and_ctrl_enter_in_one_input_batch_commit_the_new_numeric_value() {
 #[test]
 fn insertion_type_submenu_keeps_its_parent_and_creates_the_chosen_method() {
     for (kind, label) in [
-        (0, "Force-vector"),
-        (1, "Rider-local geometric"),
+        (0, "Force-Based"),
+        (1, "Geometric"),
         (2, "World-geometric"),
         (3, "Straight"),
         (4, "Circular arc"),
@@ -831,8 +1037,17 @@ fn insertion_type_submenu_keeps_its_parent_and_creates_the_chosen_method() {
         let size = egui::vec2(960., 640.);
         frame(&mut s, &ctx, size, vec![]);
         frame(&mut s, &ctx, size, vec![]);
-        click_last(&mut s, &ctx, size, "Insert section…");
-        click_last(&mut s, &ctx, size, "Force-vector");
+        click_last(&mut s, &ctx, size, "Insert Region…");
+        if kind == 2 || kind == 4 {
+            click_last(
+                &mut s,
+                &ctx,
+                size,
+                "Advanced Region types / coordinate frames",
+            );
+        } else {
+            click_last(&mut s, &ctx, size, "Force-Based");
+        }
         click_last(&mut s, &ctx, size, label);
         assert_eq!(s.new_kind, kind);
         click_last(&mut s, &ctx, size, "Insert after");
@@ -888,8 +1103,7 @@ fn amplitude_hermite_slopes_transition_order_and_removal_work_through_controls()
         s.draft, authored,
         "reselecting the active function must not erase Hermite derivatives"
     );
-    let viewport = frame(&mut s, &ctx, size, vec![]).0.viewport;
-    click_at(&mut s, &ctx, size, viewport.center());
+    key(&mut s, &ctx, size, egui::Key::Escape, Modifiers::NONE);
     key(&mut s, &ctx, size, egui::Key::Enter, Modifiers::CTRL);
     let normal = s.draft.channel_mut(ChannelKey::Normal).unwrap().clone();
     assert!((normal.evaluate(5.).unwrap().value - 1.375).abs() < 1e-12);
@@ -927,12 +1141,12 @@ fn amplitude_hermite_slopes_transition_order_and_removal_work_through_controls()
             .collect::<Vec<_>>(),
         vec![ids[1], ids[0]]
     );
-    click_at(&mut s, &ctx, size, viewport.center());
+    key(&mut s, &ctx, size, egui::Key::Escape, Modifiers::NONE);
     key(&mut s, &ctx, size, egui::Key::Enter, Modifiers::CTRL);
     let reordered = s.editor.project().clone();
     click_last(&mut s, &ctx, size, "Transitions");
     click_last(&mut s, &ctx, size, "Remove and extend neighbor");
-    click_at(&mut s, &ctx, size, viewport.center());
+    key(&mut s, &ctx, size, egui::Key::Escape, Modifiers::NONE);
     key(&mut s, &ctx, size, egui::Key::Enter, Modifiers::CTRL);
     let removed = s.editor.project().clone();
     assert_eq!(
@@ -975,7 +1189,7 @@ fn train_preview_station_survives_hover_and_does_not_edit_document() {
     let original = s.editor.project().clone();
     let ctx = egui::Context::default();
     let (_, _, first) = frame(&mut s, &ctx, egui::vec2(1440., 960.), vec![]);
-    assert_eq!(first.inspection_distance_m, Some(30.));
+    assert_eq!(first.inspection_distance_m, Some(30.), "{:?}", s.ride.error);
     assert!(!first.overlay_lines.is_empty());
     s.train_station_m = Some(40.);
     let (_, _, second) = frame(&mut s, &ctx, egui::vec2(1440., 960.), vec![]);

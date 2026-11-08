@@ -1,4 +1,4 @@
-//! Presentation preferences only: no document, history, solver or support objects.
+//! User preferences only: no document, history, solver or support objects.
 use egui_tiles::{Container, Linear, LinearDir, Tile, TileId, Tiles, Tree};
 use qx_rendering::WindowPreferences;
 use serde::{Deserialize, Serialize};
@@ -235,6 +235,8 @@ pub(super) struct Workbench {
     pub active: Profile,
     pub layouts: [Layout; 2],
     pub window: WindowPreferences,
+    #[serde(default)]
+    pub snap: super::snap::Settings,
 }
 impl Default for Workbench {
     fn default() -> Self {
@@ -243,6 +245,7 @@ impl Default for Workbench {
             active: Profile::Track,
             layouts: [Layout::new(Profile::Track), Layout::new(Profile::Train)],
             window: WindowPreferences::default(),
+            snap: Default::default(),
         }
     }
 }
@@ -256,6 +259,7 @@ impl Workbench {
             return Err("unsupported workbench preferences version".into());
         }
         value.window.sanitize();
+        value.snap.validate()?;
         for p in [Profile::Track, Profile::Train] {
             value.layouts[p.index()].validate(p)?;
         }
@@ -361,6 +365,7 @@ impl PreferenceStore {
         }
         self.checked = Instant::now();
         let result = (|| -> Result<(), String> {
+            value.snap.validate()?;
             let bytes = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
             if bytes.len() > 256 * 1024 {
                 return Err("workbench preferences exceed 256 KiB".into());
@@ -521,11 +526,22 @@ mod tests {
         store.save(&value, true);
         assert!(store.error.is_none());
         value.active = Profile::Train;
+        value.snap.enabled = true;
+        value.snap.graph.station_m = 2.5;
+        value.snap.graph.vertical = false;
+        value.snap.spatial.angle_degrees = 7.5;
         value.layouts[1].float(Pane::Summary);
         store.save(&value, true);
+        let saved = fs::read(&path).unwrap();
+        let mut invalid = value.clone();
+        invalid.snap.graph.station_m = f64::NAN;
+        store.save(&invalid, true);
+        assert!(store.error.is_some());
+        assert_eq!(fs::read(&path).unwrap(), saved);
         let (reopened, store) = PreferenceStore::load_path(Some(path.clone()));
         assert!(store.error.is_none());
         assert_eq!(reopened.active, Profile::Train);
+        assert_eq!(reopened.snap, value.snap);
         assert_eq!(reopened.layouts[1].floating.len(), 1);
         fs::write(&path, b"invalid original preferences").unwrap();
         let (value, mut store) = PreferenceStore::load_path(Some(path.clone()));

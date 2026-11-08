@@ -7,4 +7,6 @@ edition = "2024"
 [dependencies]
 qx-style = { path = "../qx-style" }
 serde.workspace = true
+# Already in Cargo.lock through SVG loading; MIT OR Apache-2.0, no I/O/entity resolver.
+roxmltree = "0.20"
 

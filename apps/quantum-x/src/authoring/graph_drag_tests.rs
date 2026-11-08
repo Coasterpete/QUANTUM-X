@@ -105,6 +105,7 @@ impl Harness {
                         profile.refine_for_edit().unwrap();
                         for index in 3..profile.values.len() - 3 {
                             let target = super::graph_gesture::Target {
+                                device: None,
                                 section: SectionId(2),
                                 channel: self.session.channel,
                                 transition: t.id,
@@ -232,7 +233,7 @@ impl Harness {
 }
 
 #[test]
-fn multi_frame_drag_holds_value_and_applies_total_displacement_once() {
+fn multi_frame_drag_stages_total_displacement_until_explicit_apply_once() {
     let mut h = Harness::new(ChannelKey::Normal, 1., false);
     let pos = h.target(1, Some(true));
     let start = h.value(0, true);
@@ -270,6 +271,10 @@ fn multi_frame_drag_holds_value_and_applies_total_displacement_once() {
     assert!(h.session.visible_preview);
     h.release(pos - egui::vec2(0., 28.));
     assert!((h.value(0, true) - expected).abs() < 1e-10);
+    assert!(h.session.draft_dirty());
+    assert_eq!(h.session.editor.project(), &original);
+    assert!(!h.session.editor.can_undo());
+    assert!(h.session.apply_draft());
     assert!(!h.session.draft_dirty());
     assert_eq!(
         h.session.revision, revision,
@@ -307,7 +312,7 @@ fn both_channels_all_endpoint_sides_at_five_scales_and_three_dock_layouts() {
                     h.move_to(pos);
                     assert_eq!(
                         h.cursor,
-                        egui::CursorIcon::ResizeVertical,
+                        egui::CursorIcon::Move,
                         "{key:?} {scale} {layout} {index} {end} pos {pos:?}, canvas {:?}, response {:?}",
                         h.canvas(),
                         h.ctx.read_response(egui::Id::unique((
@@ -344,6 +349,9 @@ fn both_channels_all_endpoint_sides_at_five_scales_and_three_dock_layouts() {
                     );
                     assert_eq!(h.session.selected, SectionId(2));
                     assert_eq!(h.session.workbench.active, Profile::Track);
+                    assert!(h.session.draft_dirty());
+                    assert_eq!(h.session.editor.project(), &original);
+                    assert!(h.session.apply_draft());
                     assert!(!h.session.draft_dirty(), "{}", h.session.status);
                     h.session.undo(false);
                     assert_eq!(h.session.editor.project(), &original);
@@ -380,7 +388,8 @@ fn diamond_drags_only_the_two_neighbor_lengths_at_every_scale_and_layout() {
                     h.session.draft, expected,
                     "{key:?} scale {scale}, layout {layout}"
                 );
-                assert!(!h.session.draft_dirty());
+                assert!(h.session.draft_dirty());
+                assert!(!h.session.editor.can_undo());
                 assert_eq!(h.session.transition, 0);
             }
         }
@@ -421,7 +430,9 @@ fn capture_survives_graph_exit_pointer_gone_and_release_over_another_pane() {
             );
             assert!(h.session.graph_drag.is_none());
             assert_eq!(h.session.selected, SectionId(2));
-            assert!(!h.session.draft_dirty());
+            assert!(h.session.draft_dirty());
+            assert_eq!(h.session.editor.project(), &original);
+            assert!(h.session.apply_draft());
             h.session.undo(false);
             assert_eq!(h.session.editor.project(), &original);
         }
@@ -623,7 +634,7 @@ fn strict_connection_failure_on_release_rolls_back_without_a_history_entry() {
     assert_eq!(h.session.draft, before);
     let error = h.session.graph_feedback.as_ref().unwrap();
     assert!(
-        error.contains("curvature gap") && error.contains("section 3"),
+        error.contains("curvature gap") && error.contains("region 3"),
         "{error}"
     );
     assert!(!h.session.editor.can_undo());
@@ -651,6 +662,8 @@ fn preview_role_change_is_reused_even_when_worker_has_not_published_yet() {
     h.move_to(pos - egui::vec2(0., 22.));
     let revision = h.session.revision;
     h.release(pos - egui::vec2(0., 22.));
+    assert!(h.session.draft_dirty());
+    assert!(h.session.apply_draft());
     assert_eq!(h.session.revision, revision);
     h.wait();
     assert_eq!(h.session.visible_revision, revision);
@@ -680,6 +693,15 @@ fn crossing_adjacent_endpoint_and_boundary_targets_cannot_change_drag_identity()
         let final_pos = neighbor - egui::vec2(0., 20.);
         h.release(final_pos);
         let mut expected = before;
+        let xfactor =
+            h.session.graph_view.view.x.span() / graph_canvas::plot_rect(h.canvas()).width() as f64;
+        expected = graph_canvas::boundary(
+            &expected,
+            key,
+            0,
+            30. + (final_pos.x - pos.x) as f64 * xfactor,
+        )
+        .unwrap();
         expected.channel_mut(key).unwrap().transitions[0].end -=
             (final_pos.y - pos.y) as f64 * factor;
         assert_eq!(h.session.draft, expected);
@@ -731,7 +753,8 @@ fn gesture_keeps_press_scale_when_workspace_resizes_and_finishes_without_visible
     h.release(pos - egui::vec2(0., 28.));
     assert!((h.value(0, true) - (value + 28. * factor)).abs() < 1e-12);
     assert!(h.session.graph_drag.is_none());
-    assert!(!h.session.draft_dirty());
+    assert!(h.session.draft_dirty());
+    assert!(!h.session.editor.can_undo());
 }
 
 #[test]
@@ -800,6 +823,9 @@ fn nurbs_shared_boundary_drag_keeps_c2_and_is_one_reversible_history_transaction
         h.press(pos);
         h.move_to(pos - egui::vec2(0., 10.));
         h.release(pos - egui::vec2(0., 10.));
+        assert!(h.session.draft_dirty());
+        assert_eq!(h.session.editor.project(), &before);
+        assert!(h.session.apply_draft());
         assert!(!h.session.draft_dirty(), "{}", h.session.status);
         let edited = h.session.editor.project().clone();
         assert_ne!(before, edited);
@@ -833,6 +859,8 @@ fn m7_real_graph_gestures_regenerate_solids_and_reuse_accepted_preview() {
         assert!(h.session.visible_preview);
         let revision = h.session.revision;
         h.release(pos - egui::vec2(0., 8.));
+        assert!(h.session.visible_preview);
+        assert!(h.session.apply_draft());
         assert!(!h.session.visible_preview);
         assert_eq!(h.session.revision, revision);
         assert!(std::sync::Arc::ptr_eq(
@@ -1012,4 +1040,411 @@ fn live_shift_precision_uses_rolling_deltas_without_modifier_jumps() {
     h.move_to(pos - egui::vec2(0., 40.));
     assert!((h.value(0, true) - start - 22. * scale).abs() < 1e-8);
     h.release(pos - egui::vec2(0., 40.));
+}
+
+#[test]
+fn snap_graph_axes_toggle_independently_without_touching_other_authored_values() {
+    for horizontal in [false, true] {
+        for vertical in [false, true] {
+            let mut h = Harness::new(ChannelKey::Normal, 1., false);
+            h.session.workbench.snap.enabled = true;
+            h.session.workbench.snap.graph.horizontal = horizontal;
+            h.session.workbench.snap.graph.vertical = vertical;
+            h.session.workbench.snap.graph.force_g = 0.2;
+            h.session.workbench.snap.graph.station_m = 2.5;
+            let original = h.session.editor.project().clone();
+            let pos = h.target(1, Some(true));
+            let start = h.value(0, true);
+            let scale = h.session.graph_view.view.y.span()
+                / graph_canvas::plot_rect(h.canvas()).height() as f64;
+            let moved = pos - egui::vec2(0., 17.25);
+            let raw = start + (pos.y - moved.y) as f64 * scale;
+            h.press(pos);
+            h.move_to(moved);
+            let expected = if vertical {
+                (raw / 0.2).round() * 0.2
+            } else {
+                raw
+            };
+            assert!((h.value(0, true) - expected).abs() < 1e-12);
+            assert_eq!(h.session.editor.project(), &original);
+            h.release(moved);
+            let committed = h.session.editor.project().clone();
+            h.session.undo(false);
+            assert_eq!(h.session.editor.project(), &original);
+            h.session.undo(true);
+            assert_eq!(h.session.editor.project(), &committed);
+            h.frame(vec![]);
+            let before = h.session.draft.clone();
+            let pos = h.target(1, None);
+            let scale = h.session.graph_view.view.x.span()
+                / graph_canvas::plot_rect(h.canvas()).width() as f64;
+            let moved = pos + egui::vec2(19.25, 33.);
+            let raw = before
+                .clone()
+                .channel_mut(ChannelKey::Normal)
+                .unwrap()
+                .transitions[0]
+                .length
+                + (moved.x - pos.x) as f64 * scale;
+            h.press(pos);
+            h.move_to(moved);
+            h.release(moved);
+            let expected = if horizontal {
+                (raw / 2.5).round() * 2.5
+            } else {
+                raw
+            };
+            assert_eq!(
+                h.session.draft,
+                graph_canvas::boundary(&before, ChannelKey::Normal, 0, expected).unwrap()
+            );
+        }
+    }
+}
+
+#[test]
+fn snap_graph_bypass_and_master_toggle_restore_raw_stationary_gesture_without_drift() {
+    let mut h = Harness::new(ChannelKey::Normal, 1., false);
+    h.session.workbench.snap.enabled = true;
+    h.session.workbench.snap.graph.force_g = 0.25;
+    let pos = h.target(1, Some(true));
+    let start = h.value(0, true);
+    let scale =
+        h.session.graph_view.view.y.span() / graph_canvas::plot_rect(h.canvas()).height() as f64;
+    let moved = pos - egui::vec2(0., 21.125);
+    let raw = start + (pos.y - moved.y) as f64 * scale;
+    h.press(pos);
+    h.move_to(moved);
+    let snapped = (raw / 0.25).round() * 0.25;
+    assert_eq!(h.value(0, true), snapped);
+    for _ in 0..5 {
+        h.frame_modifiers(vec![], Modifiers::ALT);
+        assert!((h.value(0, true) - raw).abs() < 1e-12);
+        h.frame_modifiers(vec![], Modifiers::NONE);
+        assert_eq!(h.value(0, true), snapped);
+    }
+    h.session.workbench.snap.enabled = false;
+    h.frame(vec![]);
+    assert!((h.value(0, true) - raw).abs() < 1e-12);
+    h.release(moved);
+    assert!((h.value(0, true) - raw).abs() < 1e-12);
+}
+
+#[test]
+fn snap_nurbs_shape_handle_preserves_endpoint_jets_and_history_after_zoom_and_pan() {
+    let mut h = Harness::new(ChannelKey::Normal, 1., false);
+    let length = h.session.draft.extent;
+    h.session
+        .draft
+        .channel_mut(ChannelKey::Normal)
+        .unwrap()
+        .transitions = vec![qx_geometry::transition::Transition::nurbs(
+        1, length, 1., 1.5,
+    )];
+    assert!(h.session.apply_draft());
+    graph_canvas::fit(&mut h.session);
+    h.session.workbench.snap.enabled = true;
+    h.session.workbench.snap.graph.force_g = 0.05;
+    let original = h.session.editor.project().clone();
+    let zoomed = h
+        .session
+        .graph_view
+        .view
+        .zoom((length / 2., 1.25), 0.8, length)
+        .pan((1., 0.01), length);
+    h.session.graph_view.set(zoomed);
+    for _ in 0..3 {
+        h.frame(vec![]);
+    }
+    assert_eq!(h.session.editor.project(), &original);
+    let (_, control, rect) = h.controls[0];
+    let pos = rect.center();
+    let mut shape = if let qx_geometry::transition::Function::Nurbs { profile } = &h
+        .session
+        .draft
+        .channel_mut(ChannelKey::Normal)
+        .unwrap()
+        .transitions[0]
+        .function
+    {
+        profile.clone()
+    } else {
+        unreachable!()
+    };
+    shape.refine_for_edit().unwrap();
+    let start = shape.values[control];
+    let scale = zoomed.y.span() / graph_canvas::plot_rect(h.canvas()).height() as f64;
+    let moved = pos - egui::vec2(0., 14.25);
+    let raw = start + (pos.y - moved.y) as f64 * scale;
+    h.press(pos);
+    h.move_to(moved);
+    h.release(moved);
+    let expected = (raw / 0.05).round() * 0.05;
+    let c = h.session.draft.channel_mut(ChannelKey::Normal).unwrap();
+    if let qx_geometry::transition::Function::Nurbs { profile } = &c.transitions[0].function {
+        assert!((profile.values[control] - expected).abs() < 1e-12);
+    } else {
+        panic!("lost NURBS representation")
+    }
+    let mut old = original.sections[1].clone();
+    let old = &old.channel_mut(ChannelKey::Normal).unwrap().transitions[0];
+    let current = &c.transitions[0];
+    for x in [0., length] {
+        let a = current.evaluate(x).unwrap();
+        let b = old.evaluate(x).unwrap();
+        assert!((a.value - b.value).abs() < 1e-12);
+        assert!((a.derivative - b.derivative).abs() < 1e-12);
+        assert!((a.second_derivative - b.second_derivative).abs() < 1e-12);
+    }
+    assert!(h.session.draft_dirty());
+    assert!(h.session.apply_draft());
+    let applied = h.session.editor.project().clone();
+    assert_ne!(applied, original);
+    h.session.undo(false);
+    assert_eq!(h.session.editor.project(), &original);
+    h.session.undo(true);
+    assert_eq!(h.session.editor.project(), &applied);
+}
+
+#[test]
+fn precision_plateau_and_two_axis_points_snap_in_authored_units_at_different_zoom_levels() {
+    use super::graph_gesture::{Kind, Target};
+    for zoom in [1., 0.5] {
+        let mut h = Harness::new(ChannelKey::Roll, 1., false);
+        h.session.draft.roll_rate = qx_geometry::transition::Channel::constant(
+            qx_geometry::transition::Unit::RadiansPerMetre,
+            60.,
+            0.,
+        );
+        assert!(h.session.apply_draft());
+        let original = h.session.editor.project().clone();
+        for label in ["Transitions", "Entrance → plateau → exit"] {
+            for _ in 0..3 {
+                h.frame(vec![]);
+            }
+            let pos = h
+                .text_positions
+                .iter()
+                .find(|(text, _)| text == label)
+                .expect("working transition creation command")
+                .1;
+            h.press(pos);
+            h.release(pos);
+        }
+        h.key(egui::Key::Escape, Modifiers::NONE);
+        assert_eq!(h.session.transition, 1);
+        assert_eq!(h.session.draft.roll_rate.transitions.len(), 3);
+        graph_canvas::fit(&mut h.session);
+        let view = h
+            .session
+            .graph_view
+            .view
+            .zoom_axes((30., 0.), (zoom, 1.), 60.);
+        h.session.graph_view.set(view);
+        h.session.workbench.snap.enabled = true;
+        h.session.workbench.snap.graph.station_m = 2.5;
+        h.session.workbench.snap.graph.rate_rad_per_m = 0.005;
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        let target = Target {
+            device: None,
+            section: SectionId(2),
+            channel: ChannelKey::Roll,
+            transition: 2,
+            kind: Kind::Plateau,
+        };
+        let pos = h.ctx.read_response(target.id()).unwrap().rect.center();
+        let scale = view.y.span() / graph_canvas::plot_rect(h.canvas()).height() as f64;
+        let moved = pos - egui::vec2(0., (0.021 / scale) as f32);
+        h.press(pos);
+        h.move_to(moved);
+        h.release(moved);
+        let c = &h.session.draft.roll_rate;
+        assert!(
+            (c.transitions[1].start - 0.02).abs() < 1e-12,
+            "{:?}",
+            h.session.graph_feedback
+        );
+        assert!(qx_document::region_edit::is_plateau(&c.transitions[1]));
+        assert!(c.continuity().unwrap().is_empty());
+        assert_eq!(h.session.editor.project(), &original);
+        assert!(h.session.draft_dirty());
+        for _ in 0..2 {
+            h.frame(vec![]);
+        }
+        let pos = h.target(1, Some(true));
+        let plot = graph_canvas::plot_rect(h.canvas());
+        let xs = view.x.span() / plot.width() as f64;
+        let ys = view.y.span() / plot.height() as f64;
+        let moved = pos + egui::vec2((1.38 / xs) as f32, (-0.006 / ys) as f32);
+        h.press(pos);
+        h.move_to(moved);
+        h.release(moved);
+        let c = &h.session.draft.roll_rate;
+        assert!(
+            (c.transitions[0].length - 22.5).abs() < 1e-10,
+            "{:?}",
+            h.session.graph_feedback
+        );
+        assert!((c.transitions[1].start - 0.025).abs() < 1e-12);
+        assert_eq!(c.transitions[1].start, c.transitions[1].end);
+        assert!(qx_document::region_edit::is_plateau(&c.transitions[1]));
+        assert!(c.continuity().unwrap().is_empty());
+        assert_eq!(c.transitions[0].start, 0.);
+        assert_eq!(c.transitions[2].end, 0.);
+        assert_eq!(h.session.editor.project(), &original);
+        let staged = h.session.draft.clone();
+        assert!(h.session.apply_draft());
+        let edited = h.session.editor.project().clone();
+        assert_eq!(edited.sections[1], staged);
+        h.session.undo(false);
+        assert_eq!(h.session.editor.project(), &original);
+        h.session.undo(true);
+        assert_eq!(h.session.editor.project(), &edited);
+        h.session.draft =
+            qx_document::region_edit::plateau_level(&staged, ChannelKey::Roll, 1, 0.02137).unwrap();
+        h.session.draft =
+            qx_document::region_edit::boundary(&h.session.draft, ChannelKey::Roll, 0, 21.37)
+                .unwrap();
+        let unsnapped = h.session.draft.clone();
+        h.session.transition = 1;
+        for _ in 0..3 {
+            h.frame(vec![]);
+        }
+        let pos = h.ctx.read_response(target.id()).unwrap().rect.center();
+        h.press(pos);
+        h.move_to(pos + egui::vec2(20., 0.));
+        h.release(pos + egui::vec2(20., 0.));
+        assert_eq!(
+            h.session.draft, unsnapped,
+            "horizontal-only motion cannot quantize a plateau's value"
+        );
+        let pos = h.target(1, None);
+        h.press(pos);
+        h.move_to(pos + egui::vec2(0., 20.));
+        h.release(pos + egui::vec2(0., 20.));
+        assert_eq!(
+            h.session.draft, unsnapped,
+            "vertical-only motion cannot quantize a boundary's station"
+        );
+        h.session.cancel_section();
+        assert_eq!(h.session.draft, staged);
+        let json = qx_document::persistence::to_json(&edited, &h.session.catalog).unwrap();
+        let reopened = qx_document::persistence::from_json(&json, &h.session.catalog).unwrap();
+        assert_eq!(
+            reopened
+                .generate(&h.session.catalog, h.session.options)
+                .unwrap(),
+            edited
+                .generate(&h.session.catalog, h.session.options)
+                .unwrap()
+        );
+    }
+}
+
+#[test]
+fn precision_two_axis_easing_handles_and_axis_specific_wheel_are_view_and_draft_safe() {
+    use super::graph_gesture::{Kind, Target};
+    let mut h = Harness::new(ChannelKey::Normal, 1., false);
+    h.session.transition = 0;
+    h.session.workbench.snap.enabled = true;
+    h.session.workbench.snap.graph.station_m = 0.25;
+    h.session.workbench.snap.graph.force_g = 0.01;
+    for _ in 0..3 {
+        h.frame(vec![]);
+    }
+    let target = Target {
+        device: None,
+        section: SectionId(2),
+        channel: ChannelKey::Normal,
+        transition: 1,
+        kind: Kind::Control { index: 3 },
+    };
+    let pos = h
+        .ctx
+        .read_response(target.id())
+        .expect(
+            "polynomial functions expose shape handles without requiring an advanced conversion",
+        )
+        .rect
+        .center();
+    let coords = super::graph_precision::coordinates(&h.session, target).unwrap();
+    let before = h.session.draft.clone();
+    let original = h.session.editor.project().clone();
+    let view = h.session.graph_view.view;
+    let plot = graph_canvas::plot_rect(h.canvas());
+    let moved = pos
+        + egui::vec2(
+            (0.6 / view.x.span() * plot.width() as f64) as f32,
+            (-0.027 / view.y.span() * plot.height() as f64) as f32,
+        );
+    h.press(pos);
+    h.move_to(moved);
+    h.release(moved);
+    let edited = super::graph_precision::coordinates(&h.session, target).unwrap();
+    assert!(
+        (edited.0 - ((coords.0 + 0.6) / 0.25).round() * 0.25).abs() < 1e-10,
+        "{:?}",
+        h.session.graph_feedback
+    );
+    assert!((edited.1 - ((coords.1 + 0.027) / 0.01).round() * 0.01).abs() < 1e-10);
+    let old = before
+        .clone()
+        .channel_mut(ChannelKey::Normal)
+        .unwrap()
+        .transitions[0]
+        .clone();
+    let new = h
+        .session
+        .draft
+        .clone()
+        .channel_mut(ChannelKey::Normal)
+        .unwrap()
+        .transitions[0]
+        .clone();
+    for end in [false, true] {
+        let a = old.evaluate(if end { old.length } else { 0. }).unwrap();
+        let b = new.evaluate(if end { new.length } else { 0. }).unwrap();
+        assert!(
+            (a.value - b.value).abs() < 1e-10
+                && (a.derivative - b.derivative).abs() < 1e-10
+                && (a.second_derivative - b.second_derivative).abs() < 1e-10
+        );
+    }
+    assert_eq!(h.session.editor.project(), &original);
+    let draft = h.session.draft.clone();
+    let center = plot.center();
+    for (mods, x_only) in [
+        (Modifiers::CTRL | Modifiers::SHIFT, true),
+        (Modifiers::CTRL | Modifiers::ALT, false),
+    ] {
+        let before = h.session.graph_view.view;
+        h.frame_modifiers(
+            vec![
+                Event::PointerMoved(center),
+                Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Line,
+                    delta: egui::vec2(0., 1.),
+                    modifiers: mods,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                },
+            ],
+            mods,
+        );
+        let after = h.session.graph_view.view;
+        if x_only {
+            assert!(after.x.span() < before.x.span());
+            assert_eq!(after.y, before.y);
+        } else {
+            assert!(after.y.span() < before.y.span());
+            assert_eq!(after.x, before.x);
+        }
+        assert_eq!(h.session.draft, draft);
+        assert_eq!(h.session.editor.project(), &original);
+    }
+    h.session.cancel_section();
+    assert_eq!(h.session.draft, original.sections[1]);
 }

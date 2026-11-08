@@ -56,6 +56,8 @@ fn old_version_and_asset_paths_are_checked() {
     let p = foundation_project();
     let mut old = serde_json::to_value(&p).unwrap();
     old["schema_version"] = 4.into();
+    old.as_object_mut().unwrap().remove("operations");
+    old.as_object_mut().unwrap().remove("supports");
     old.as_object_mut().unwrap().remove("trains");
     assert_eq!(
         persistence::from_json(&old.to_string(), &catalog).unwrap(),

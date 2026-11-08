@@ -1,5 +1,7 @@
 //! Renderer-independent f64 procedural construction. No source sample is changed.
 //! Profiles live in (N,L); hardware uses local (T,N,L). Repeated meshes are shared.
+pub mod segmented;
+
 use crate::{
     Result, ensure,
     math::{Frame, Quaternion, Vec3},
@@ -8,6 +10,26 @@ use crate::{
 use qx_style::construction::{
     Alignment, HardwareShape, Material, Profile, Role, TrackConstruction,
 };
+
+/// Importers live outside the numerical engine. A resolver must return exact
+/// source geometry, or fail explicitly; there is no substitute-mesh fallback.
+pub trait ConstructionAssets {
+    fn section(&self, path: &str, scale: [f64; 3]) -> Result<Profile>;
+    fn hardware(&self, path: &str, scale: [f64; 3]) -> Result<Mesh>;
+}
+struct NoAssets;
+impl ConstructionAssets for NoAssets {
+    fn section(&self, path: &str, _: [f64; 3]) -> Result<Profile> {
+        Err(crate::GeometryError(format!(
+            "Unresolved construction source: {path}"
+        )))
+    }
+    fn hardware(&self, path: &str, _: [f64; 3]) -> Result<Mesh> {
+        Err(crate::GeometryError(format!(
+            "unresolved component asset: {path}; provide a construction source resolver"
+        )))
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshVertex {
@@ -217,6 +239,36 @@ fn cap_triangles(p: &[[f64; 2]]) -> Result<Vec<[usize; 3]>> {
     out.push([ring[0], ring[1], ring[2]]);
     Ok(out)
 }
+pub(crate) fn member_solid(a: Vec3, b: Vec3, profile: &Profile, roll: f64) -> Result<Mesh> {
+    let length = (b - a).length();
+    ensure(
+        length.is_finite() && (1e-5..=1e5).contains(&length),
+        "support member is degenerate or too long",
+    )?;
+    let frame = Frame::new(crate::math::rotation_between(Vec3::X, b - a)?)?;
+    let samples = [
+        CenterlineSample {
+            distance_m: 0.,
+            design_time_s: 0.,
+            position_m: a,
+            frame,
+        },
+        CenterlineSample {
+            distance_m: length,
+            design_time_s: 0.,
+            position_m: b,
+            frame,
+        },
+    ];
+    let mut budget = Budget {
+        limits: MeshLimits::default(),
+        vertices: 0,
+        indices: 0,
+        instances: 0,
+        bytes: 0,
+    };
+    sweep(&samples, profile, Vec3::ZERO, roll, true, &mut budget)
+}
 fn sweep(
     samples: &[CenterlineSample],
     profile: &Profile,
@@ -225,6 +277,17 @@ fn sweep(
     caps: bool,
     budget: &mut Budget,
 ) -> Result<Mesh> {
+    sweep_with_caps(samples, profile, offset, rotation, [caps; 2], budget)
+}
+fn sweep_with_caps(
+    samples: &[CenterlineSample],
+    profile: &Profile,
+    offset: Vec3,
+    rotation: f64,
+    caps: [bool; 2],
+    budget: &mut Budget,
+) -> Result<Mesh> {
+    let cap_count = caps.iter().filter(|c| **c).count();
     let points = profile
         .points()
         .map_err(|e| crate::GeometryError(e.to_string()))?;
@@ -232,11 +295,11 @@ fn sweep(
     let rings = samples.len();
     let count = rings
         .checked_mul(n * 2)
-        .and_then(|v| v.checked_add(if caps { n * 2 } else { 0 }))
+        .and_then(|v| v.checked_add(cap_count * n))
         .ok_or_else(|| crate::GeometryError("vertex count overflow".into()))?;
     let index_count = (rings - 1)
         .checked_mul(n * 6)
-        .and_then(|v| v.checked_add(if caps { (n - 2) * 6 } else { 0 }))
+        .and_then(|v| v.checked_add(cap_count * (n - 2) * 3))
         .ok_or_else(|| crate::GeometryError("index count overflow".into()))?;
     budget.reserve(count, index_count, 0)?;
     let mut vertices = allocated(count)?;
@@ -290,9 +353,12 @@ fn sweep(
             indices.extend_from_slice(&[a, b, c, b, d, c]);
         }
     }
-    if caps {
+    if cap_count > 0 {
         let triangles = cap_triangles(&points)?;
-        for (i, sign) in [(0, -1.), (rings - 1, 1.)] {
+        for (end, (i, sign)) in [(0, -1.), (rings - 1, 1.)].into_iter().enumerate() {
+            if !caps[end] {
+                continue;
+            }
             let base = vertices.len() as u32;
             for (j, point) in points.iter().enumerate() {
                 vertices.push(MeshVertex {
@@ -359,6 +425,14 @@ pub fn build(
     definition: &TrackConstruction,
     limits: MeshLimits,
 ) -> Result<TrackMesh> {
+    build_with_assets(track, definition, limits, &NoAssets)
+}
+pub fn build_with_assets(
+    track: &GeneratedTrack,
+    definition: &TrackConstruction,
+    limits: MeshLimits,
+    assets: &dyn ConstructionAssets,
+) -> Result<TrackMesh> {
     definition
         .validate()
         .map_err(|e| crate::GeometryError(e.to_string()))?;
@@ -370,18 +444,72 @@ pub fn build(
         instances: 0,
         bytes: 0,
     };
+    let components = build_components(
+        track,
+        &track.samples,
+        definition,
+        Part::All,
+        None,
+        assets,
+        &mut budget,
+        &mut vec![],
+    )?;
+    finish_mesh(
+        components,
+        definition.materials.clone(),
+        budget,
+        track.samples[0].position_m,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum Part {
+    All,
+    Running,
+    Structure,
+}
+#[derive(Clone, Copy)]
+struct HardwareWindow {
+    start: f64,
+    end: f64,
+    final_interval: bool,
+}
+// The same sweep and asset resolver serve ordinary and segmented construction.
+#[allow(clippy::too_many_arguments)]
+fn build_components(
+    track: &GeneratedTrack,
+    samples: &[CenterlineSample],
+    definition: &TrackConstruction,
+    part: Part,
+    window: Option<HardwareWindow>,
+    assets: &dyn ConstructionAssets,
+    budget: &mut Budget,
+    omitted: &mut Vec<(String, f64)>,
+) -> Result<Vec<Component>> {
     let mut components = vec![];
-    let mut bounds = Bounds::point(track.samples[0].position_m);
-    for c in &definition.continuous {
-        let mesh = sweep(
-            &track.samples,
-            &c.profile,
+    for c in definition.continuous.iter().filter(|c| match part {
+        Part::All => true,
+        Part::Running => c.role == Role::Running,
+        Part::Structure => c.role != Role::Running,
+    }) {
+        let resolved;
+        let profile = if let Profile::AssetSection { path, scale, .. } = &c.profile {
+            resolved = assets.section(path, *scale)?;
+            &resolved
+        } else {
+            &c.profile
+        };
+        let caps = window.map_or([c.cap_ends; 2], |w| {
+            [c.cap_ends || w.start > 0., c.cap_ends || !w.final_interval]
+        });
+        let mesh = sweep_with_caps(
+            samples,
+            profile,
             v3(c.offset_m),
             c.rotation_rad,
-            c.cap_ends,
-            &mut budget,
+            caps,
+            budget,
         )?;
-        bounds.union(mesh.bounds);
         components.push(Component {
             id: c.id.clone(),
             role: c.role,
@@ -392,17 +520,13 @@ pub fn build(
             placements: vec![],
         });
     }
-    for c in &definition.repeated {
-        let size = match &c.shape {
-            HardwareShape::Box { size_m } => *size_m,
-            HardwareShape::Asset { id, path, .. } => {
-                return Err(crate::GeometryError(format!(
-                    "unresolved component asset {id}: {path}; GLB import is not implemented"
-                )));
-            }
-        };
+    for c in definition
+        .repeated
+        .iter()
+        .filter(|_| !matches!(part, Part::Running))
+    {
         let end = track.length_m() - c.end_margin_m;
-        let count = if end < c.start_m {
+        let total = if end < c.start_m {
             0
         } else {
             let steps = ((end - c.start_m) / c.spacing_m).floor();
@@ -412,40 +536,82 @@ pub fn build(
             )?;
             steps as usize + 1
         };
-        budget.reserve(0, 0, count)?;
+        let first = window.map_or(0, |w| {
+            (((w.start - c.start_m) / c.spacing_m).ceil().max(0.) as usize).min(total)
+        });
+        let last = window.map_or(total, |w| {
+            let k = if w.final_interval {
+                ((w.end - c.start_m) / c.spacing_m).floor() + 1.
+            } else {
+                ((w.end - c.start_m) / c.spacing_m).ceil()
+            };
+            (k.max(0.) as usize).min(total)
+        });
+        let count = last.saturating_sub(first);
         let frame = Frame::new(Quaternion::IDENTITY)?;
-        let template = [
-            CenterlineSample {
-                distance_m: 0.,
-                design_time_s: 0.,
-                position_m: Vec3::X * (-size[0] / 2.),
-                frame,
-            },
-            CenterlineSample {
-                distance_m: size[0],
-                design_time_s: 0.,
-                position_m: Vec3::X * (size[0] / 2.),
-                frame,
-            },
-        ];
-        let mesh = sweep(
-            &template,
-            &Profile::Box {
-                height_m: size[1],
-                width_m: size[2],
-            },
-            Vec3::ZERO,
-            0.,
-            true,
-            &mut budget,
-        )?;
+        let mesh = match &c.shape {
+            HardwareShape::Asset { path, scale, .. } => {
+                let mesh = assets.hardware(path, *scale)?;
+                mesh.validate()?;
+                budget.reserve(mesh.vertices.len(), mesh.indices.len(), 0)?;
+                mesh
+            }
+            HardwareShape::Box { size_m: size } => {
+                let template = [
+                    CenterlineSample {
+                        distance_m: 0.,
+                        design_time_s: 0.,
+                        position_m: Vec3::X * (-size[0] / 2.),
+                        frame,
+                    },
+                    CenterlineSample {
+                        distance_m: size[0],
+                        design_time_s: 0.,
+                        position_m: Vec3::X * (size[0] / 2.),
+                        frame,
+                    },
+                ];
+                sweep(
+                    &template,
+                    &Profile::Box {
+                        height_m: size[1],
+                        width_m: size[2],
+                    },
+                    Vec3::ZERO,
+                    0.,
+                    true,
+                    budget,
+                )?
+            }
+        };
         let rotation = Quaternion::axis_angle(Vec3::Z, c.rotation_rad[2])?
             .compose(Quaternion::axis_angle(Vec3::Y, c.rotation_rad[1])?)
             .compose(Quaternion::axis_angle(Vec3::X, c.rotation_rad[0])?);
         let mut placements = allocated(count)?;
         let mut component_bounds = None::<Bounds>;
-        for k in 0..count {
+        // A local sphere limits seam tests to nearby hardware. Test transformed
+        // vertices against each cut plane: curved/banked parts are never cut or
+        // stretched, and their finite rigid footprint cannot cross that plane.
+        let radius = mesh
+            .vertices
+            .iter()
+            .map(|v| (rotation.rotate_unit(v.position_m) + v3(c.offset_m)).length())
+            .fold(0., f64::max);
+        let cuts = window
+            .map(|w| {
+                Ok::<_, crate::GeometryError>((
+                    track.sample_at_distance(w.start)?,
+                    track.sample_at_distance(w.end)?,
+                ))
+            })
+            .transpose()?;
+        for k in first..last {
             let station = c.start_m + k as f64 * c.spacing_m;
+            if let Some(w) = window
+                && (station < w.start || station > w.end || (!w.final_interval && station == w.end))
+            {
+                continue;
+            }
             let sample = track.sample_at_distance(station)?;
             let base = if c.alignment == Alignment::TrackFrame {
                 sample.frame
@@ -458,6 +624,25 @@ pub fn build(
                 position_m: sample.position_m + base.local_to_world(v3(c.offset_m)),
                 frame: Frame::new(base.orientation().compose(rotation))?,
             };
+            if let (Some(w), Some((start, end))) = (window, cuts.as_ref()) {
+                let crosses = mesh.vertices.iter().any(|v| {
+                    let p = placement.position_m + placement.frame.local_to_world(v.position_m);
+                    (w.start > 0.
+                        && station - w.start <= radius
+                        && (p - start.position_m).dot(start.frame.tangent()) < -1e-10)
+                        || (!w.final_interval
+                            && w.end - station <= radius
+                            && (p - end.position_m).dot(end.frame.tangent()) > 1e-10)
+                });
+                if crosses {
+                    ensure(
+                        omitted.len() < budget.limits.max_instances.min(100_000),
+                        "omitted boundary hardware diagnostic budget exceeded",
+                    )?;
+                    omitted.push((c.id.clone(), station));
+                    continue;
+                }
+            }
             for vertex in &mesh.vertices {
                 let p = placement.position_m + placement.frame.local_to_world(vertex.position_m);
                 if let Some(b) = &mut component_bounds {
@@ -468,8 +653,8 @@ pub fn build(
             }
             placements.push(placement);
         }
-        let cb = component_bounds.unwrap_or(Bounds::point(track.samples[0].position_m));
-        bounds.union(cb);
+        budget.reserve(0, 0, placements.len())?;
+        let cb = component_bounds.unwrap_or(Bounds::point(samples[0].position_m));
         components.push(Component {
             id: c.id.clone(),
             role: Role::Hardware,
@@ -479,6 +664,18 @@ pub fn build(
             placements,
             bounds: cb,
         });
+    }
+    Ok(components)
+}
+fn finish_mesh(
+    components: Vec<Component>,
+    materials: Vec<Material>,
+    budget: Budget,
+    origin: Vec3,
+) -> Result<TrackMesh> {
+    let mut bounds = Bounds::point(origin);
+    for c in &components {
+        bounds.union(c.bounds);
     }
     let rendered_triangles = components
         .iter()
@@ -493,7 +690,7 @@ pub fn build(
         .sum();
     Ok(TrackMesh {
         components,
-        materials: definition.materials.clone(),
+        materials,
         bounds,
         stats: MeshStats {
             vertices: budget.vertices,
@@ -514,6 +711,15 @@ pub fn build_reference(
     reference: &crate::heartline::ReferenceTrack,
     definition: &TrackConstruction,
     limits: MeshLimits,
+) -> Result<TrackMesh> {
+    build_reference_with_assets(source, reference, definition, limits, &NoAssets)
+}
+pub fn build_reference_with_assets(
+    source: &GeneratedTrack,
+    reference: &crate::heartline::ReferenceTrack,
+    definition: &TrackConstruction,
+    limits: MeshLimits,
+    assets: &dyn ConstructionAssets,
 ) -> Result<TrackMesh> {
     ensure(
         reference.role == crate::heartline::ReferencePathRole::TrackCenterline,
@@ -552,7 +758,7 @@ pub fn build_reference(
             a.1 + (b.1 - a.1) * (s - a.0) / (b.0 - a.0)
         }
     };
-    let mut mesh = build(&track, definition, limits)?;
+    let mut mesh = build_with_assets(&track, definition, limits, assets)?;
     for c in &mut mesh.components {
         if c.role == Role::Hardware {
             for p in &mut c.placements {

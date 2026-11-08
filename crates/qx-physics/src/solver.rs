@@ -1,5 +1,8 @@
 use crate::{Body, Result};
-use qx_geometry::{math::Vec3, solver::GeneratedTrack};
+use qx_geometry::{
+    math::{Frame, Quaternion, Vec3},
+    solver::GeneratedTrack,
+};
 
 pub const FIXED_STEP_SECONDS: f64 = 1.0 / 240.0;
 
@@ -31,6 +34,18 @@ pub struct TrackGuide {
     pub station_m: f64,
 }
 
+/// One rail-referenced twist constraint on running gear. Captive longitudinal
+/// guide points locate pitch/yaw; this supplies the missing roll reaction.
+/// The local rail frame preserves authored mounting orientation. Stations are
+/// projection hints only, never coordinates used to advance bodies.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackAttitude {
+    pub body: usize,
+    pub station_m: f64,
+    pub local_frame: Quaternion,
+    pub local_point_m: Vec3,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Diagnostics {
     pub max_angular_error_rad: f64,
@@ -38,6 +53,12 @@ pub struct Diagnostics {
     pub angular_torque_on_b_nm: Vec<Vec3>,
     pub max_joint_error_m: f64,
     pub max_guide_error_m: f64,
+    /// Maximum running-gear-to-rail twist error.
+    pub max_attitude_error_rad: f64,
+    /// Average external rail roll-reaction torque in attitude order.
+    pub attitude_torque_nm: Vec<Vec3>,
+    /// Companion rail force from the spatially varying bank constraint.
+    pub attitude_force_n: Vec<Vec3>,
     /// Average world-space constraint force on body B over the outer step.
     pub joint_force_on_b_n: Vec<Vec3>,
     /// Average world-space force on each guided body over the outer step.
@@ -60,7 +81,7 @@ pub struct World {
 impl World {
     pub fn validate(&self) -> Result<()> {
         if self.bodies.is_empty()
-            || self.bodies.len() > 1024
+            || self.bodies.len() > 2048
             || self.joints.len() > 4096
             || self.angular_joints.len() > 4096
             || self.guides.len() > 4096
@@ -104,21 +125,44 @@ impl World {
     pub fn step(&mut self) -> Result<Diagnostics> {
         self.validate()?;
         let mut next = self.clone();
-        let diagnostics = next.step_inner(None)?;
+        let diagnostics = next.step_inner(None, false)?;
         next.validate()?;
         *self = next;
         Ok(diagnostics)
     }
 
     /// Transactionally step independent bodies with captive, frictionless point
-    /// guides on the generated centerline. Open endpoints reject an attempted
-    /// escape; the caller must provide a different boundary/operation model.
+    /// guides on the generated centerline. `attitudes` holds body roll to the
+    /// authored track frame; pass an empty slice for fully free roll. Open
+    /// endpoints reject an attempted escape; the caller must provide a different
+    /// boundary/operation model.
     pub fn step_on_track(
         &mut self,
         track: &GeneratedTrack,
         guides: &mut [TrackGuide],
+        attitudes: &mut [TrackAttitude],
+    ) -> Result<Diagnostics> {
+        self.step_on_track_topology(track, guides, attitudes, false)
+    }
+
+    /// Seam traversal requires explicit authored circuit intent and verified closure.
+    pub fn step_on_track_topology(
+        &mut self,
+        track: &GeneratedTrack,
+        guides: &mut [TrackGuide],
+        attitudes: &mut [TrackAttitude],
+        circuit: bool,
     ) -> Result<Diagnostics> {
         self.validate()?;
+        if circuit
+            && !qx_geometry::topology::diagnose(track)
+                .map_err(|e| e.to_string())?
+                .valid
+        {
+            return Err(
+                "circuit guidance requires verified position, tangent and frame closure".into(),
+            );
+        }
         if track.samples.len() < 2
             || !track.length_m().is_finite()
             || track.length_m() <= 0.0
@@ -132,6 +176,33 @@ impl World {
             })
         {
             return Err("invalid track guide or generated track".into());
+        }
+        if attitudes.len() > 4096
+            || attitudes.iter().any(|a| {
+                a.body >= self.bodies.len()
+                    || !a.local_point_m.is_finite()
+                    || (a
+                        .local_frame
+                        .w
+                        .hypot(a.local_frame.x)
+                        .hypot(a.local_frame.y)
+                        .hypot(a.local_frame.z)
+                        - 1.)
+                        .abs()
+                        > 1e-8
+                    || Frame::new(a.local_frame).is_err()
+                    || !a.station_m.is_finite()
+                    || a.station_m < 0.0
+                    || a.station_m > track.length_m()
+            })
+        {
+            return Err("invalid track attitude or generated track".into());
+        }
+        // Exactly one roll target per body: two independent targets would pump
+        // the Baumgarte correction against itself.
+        let mut attitude_bodies = std::collections::HashSet::new();
+        if !attitudes.iter().all(|a| attitude_bodies.insert(a.body)) {
+            return Err("duplicate track attitude body".into());
         }
         if track
             .samples
@@ -147,22 +218,32 @@ impl World {
         }
         let mut next = self.clone();
         let mut next_guides = guides.to_vec();
-        let diagnostics = next.step_inner(Some((track, &mut next_guides)))?;
+        let mut next_attitudes = attitudes.to_vec();
+        let diagnostics = next.step_inner(
+            Some((track, &mut next_guides, &mut next_attitudes)),
+            circuit,
+        )?;
         next.validate()?;
         *self = next;
         guides.clone_from_slice(&next_guides);
+        attitudes.clone_from_slice(&next_attitudes);
         Ok(diagnostics)
     }
 
     fn step_inner(
         &mut self,
-        mut track_guidance: Option<(&GeneratedTrack, &mut [TrackGuide])>,
+        mut track_guidance: Option<(&GeneratedTrack, &mut [TrackGuide], &mut [TrackAttitude])>,
+        circuit: bool,
     ) -> Result<Diagnostics> {
         let dt = FIXED_STEP_SECONDS / f64::from(self.substeps);
         let mut joint_impulse = vec![Vec3::ZERO; self.joints.len()];
         let mut angular_impulse = vec![Vec3::ZERO; self.angular_joints.len()];
-        let track_count = track_guidance.as_ref().map_or(0, |(_, g)| g.len());
+        let track_count = track_guidance.as_ref().map_or(0, |(_, g, _)| g.len());
         let mut guide_impulse = vec![Vec3::ZERO; self.guides.len() + track_count];
+        let mut attitude_impulse =
+            vec![Vec3::ZERO; track_guidance.as_ref().map_or(0, |(_, _, a)| a.len())];
+        let mut attitude_linear_impulse = vec![Vec3::ZERO; attitude_impulse.len()];
+        let mut rail_targets = Vec::with_capacity(attitude_impulse.len());
         for _ in 0..self.substeps {
             for b in &mut self.bodies {
                 b.integrate_forces(self.gravity_mps2, dt);
@@ -174,13 +255,65 @@ impl World {
             }
             // Project from the previous station to avoid jumping between nearby
             // branches of a loop. Each body remains independently integrated.
-            if let Some((track, guides)) = track_guidance.as_mut() {
+            if let Some((track, guides, attitudes)) = track_guidance.as_mut() {
                 for g in guides.iter_mut() {
                     let point = self.bodies[g.body].world_point(g.local_point_m)?;
-                    g.station_m = project_station(track, point, g.station_m)?;
+                    g.station_m = project_station_topology(track, point, g.station_m, circuit)?;
+                }
+                rail_targets.clear();
+                for a in attitudes.iter_mut() {
+                    a.station_m = project_station_topology(
+                        track,
+                        self.bodies[a.body].world_point(a.local_point_m)?,
+                        a.station_m,
+                        circuit,
+                    )?;
+                    let sample = track
+                        .sample_at_distance(a.station_m)
+                        .map_err(|e| e.to_string())?;
+                    rail_targets.push((
+                        sample.frame,
+                        sample.position_m,
+                        track_frame_derivative(track, a.station_m, circuit)?,
+                    ));
                 }
             }
             for _ in 0..self.iterations {
+                if let Some((_, _, attitudes)) = track_guidance.as_mut() {
+                    for (i, (a, (target, target_position, derivative))) in
+                        attitudes.iter().zip(&rail_targets).enumerate()
+                    {
+                        let b = &mut self.bodies[a.body];
+                        let rail = Frame::new(b.pose.orientation.compose(a.local_frame))
+                            .map_err(|e| e.to_string())?;
+                        let (axis, error) = crate::angular::roll_constraint(*target, rail)?;
+                        // C = twist(track(s(point))^-1 * rail_frame). The
+                        // spatial bank derivative contributes a LINEAR Jacobian
+                        // as well as angular torque. A torque-only moving target
+                        // would do unbalanced work and miss roll inertia's effect
+                        // on longitudinal motion.
+                        let r = b.frame().local_to_world(a.local_point_m);
+                        let delta = b.pose.position_m + r - *target_position;
+                        let projection = 1. - delta.dot(derivative.cross(target.tangent()));
+                        if !projection.is_finite() || projection <= 1e-6 {
+                            return Err("rail attitude station projection is singular".into());
+                        }
+                        let linear = target.tangent() * (-axis.dot(*derivative) / projection);
+                        let angular = axis + r.cross(linear);
+                        let velocity = linear.dot(b.linear_velocity_mps)
+                            + angular.dot(b.angular_velocity_radps);
+                        let mass = linear.dot(linear) / b.mass.mass_kg
+                            + angular.dot(b.inv_inertia(angular));
+                        let impulse = scalar_impulse(velocity, error, mass, dt)?;
+                        let p = linear * impulse;
+                        b.impulse(r, p);
+                        b.angular_velocity_radps =
+                            b.angular_velocity_radps + b.inv_inertia(axis * impulse);
+                        attitude_impulse[i] = attitude_impulse[i] + angular * impulse;
+                        attitude_linear_impulse[i] = attitude_linear_impulse[i] + p;
+                        b.validate()?;
+                    }
+                }
                 for (i, j) in self.angular_joints.iter().enumerate() {
                     angular_impulse[i] = angular_impulse[i]
                         + j.solve(&mut self.bodies, dt, &mut limit_impulses[i])?;
@@ -230,7 +363,7 @@ impl World {
                     }
                     b.validate()?;
                 }
-                if let Some((track, guides)) = track_guidance.as_mut() {
+                if let Some((track, guides, _)) = track_guidance.as_mut() {
                     for (index, g) in guides.iter().enumerate() {
                         let sample = track
                             .sample_at_distance(g.station_m)
@@ -272,32 +405,54 @@ impl World {
             );
         }
         let mut max_guide_error_m: f64 = 0.0;
+        let mut max_attitude_error_rad: f64 = 0.0;
         for g in &self.guides {
             let d = self.bodies[g.body].world_point(g.local_point_m)? - g.line_origin_m;
             max_guide_error_m =
                 max_guide_error_m.max((d - g.line_direction * d.dot(g.line_direction)).length());
         }
-        if let Some((track, guides)) = track_guidance {
+        if let Some((track, guides, attitudes)) = track_guidance.as_mut() {
             for g in guides.iter_mut() {
                 let point = self.bodies[g.body].world_point(g.local_point_m)?;
-                g.station_m = project_station(track, point, g.station_m)?;
+                g.station_m = project_station_topology(track, point, g.station_m, circuit)?;
                 let sample = track
                     .sample_at_distance(g.station_m)
                     .map_err(|e| e.to_string())?;
                 let delta = point - sample.position_m;
                 // No invented end-stop or extrapolated rail at open endpoints.
                 let along = delta.dot(sample.frame.tangent());
-                if (g.station_m <= 1e-9 && along < -1e-7)
-                    || (g.station_m >= track.length_m() - 1e-9 && along > 1e-7)
+                if !circuit
+                    && ((g.station_m <= 1e-9 && along < -1e-7)
+                        || (g.station_m >= track.length_m() - 1e-9 && along > 1e-7))
                 {
                     return Err("track guide reached an open endpoint".into());
                 }
                 max_guide_error_m = max_guide_error_m.max(delta.length());
             }
+            for a in attitudes.iter_mut() {
+                a.station_m = project_station_topology(
+                    track,
+                    self.bodies[a.body].world_point(a.local_point_m)?,
+                    a.station_m,
+                    circuit,
+                )?;
+                let sample = track
+                    .sample_at_distance(a.station_m)
+                    .map_err(|e| e.to_string())?;
+                let rail = Frame::new(self.bodies[a.body].pose.orientation.compose(a.local_frame))
+                    .map_err(|e| e.to_string())?;
+                let error = crate::angular::roll_constraint(sample.frame, rail)?.1.abs();
+                max_attitude_error_rad = max_attitude_error_rad.max(error);
+            }
         }
         if !max_joint_error_m.is_finite()
             || !max_angular_error_rad.is_finite()
-            || angular_impulse.iter().any(|v| !v.is_finite())
+            || !max_attitude_error_rad.is_finite()
+            || angular_impulse
+                .iter()
+                .chain(&attitude_impulse)
+                .chain(&attitude_linear_impulse)
+                .any(|v| !v.is_finite())
             || !max_guide_error_m.is_finite()
             || joint_impulse
                 .iter()
@@ -314,6 +469,15 @@ impl World {
                 .collect(),
             max_joint_error_m,
             max_guide_error_m,
+            max_attitude_error_rad,
+            attitude_torque_nm: attitude_impulse
+                .into_iter()
+                .map(|p| p / FIXED_STEP_SECONDS)
+                .collect(),
+            attitude_force_n: attitude_linear_impulse
+                .into_iter()
+                .map(|p| p / FIXED_STEP_SECONDS)
+                .collect(),
             joint_force_on_b_n: joint_impulse
                 .into_iter()
                 .map(|p| p / FIXED_STEP_SECONDS)
@@ -335,6 +499,41 @@ pub(crate) fn scalar_impulse(velocity: f64, error: f64, denominator: f64, dt: f6
     }
     Ok(value)
 }
+
+/// World angular change per metre of the authored rail frame. Use one-sided
+/// differences at open ends and wrapped differences only for verified circuits.
+pub(crate) fn track_frame_derivative(
+    track: &GeneratedTrack,
+    s: f64,
+    circuit: bool,
+) -> Result<Vec3> {
+    let h = 0.001_f64.min(track.length_m() * 0.25);
+    let (lo, hi, span) = if circuit {
+        (
+            (s - h).rem_euclid(track.length_m()),
+            (s + h).rem_euclid(track.length_m()),
+            2. * h,
+        )
+    } else {
+        let lo = (s - h).max(0.);
+        let hi = (s + h).min(track.length_m());
+        (lo, hi, hi - lo)
+    };
+    let a = track
+        .sample_at_distance(lo)
+        .map_err(|e| e.to_string())?
+        .frame
+        .orientation();
+    let b = track
+        .sample_at_distance(hi)
+        .map_err(|e| e.to_string())?
+        .frame
+        .orientation();
+    Ok(b.compose(a.conjugate())
+        .rotation_vector()
+        .map_err(|e| e.to_string())?
+        / span)
+}
 fn pair_mut(bodies: &mut [Body], a: usize, b: usize) -> (&mut Body, &mut Body) {
     if a < b {
         let (left, right) = bodies.split_at_mut(b);
@@ -348,6 +547,14 @@ fn pair_mut(bodies: &mut [Body], a: usize, b: usize) -> (&mut Body, &mut Body) {
 // Local tangent projection retains branch identity at self-intersections. The
 // finite iteration and displacement bounds deliberately reject lost tracking.
 pub(crate) fn project_station(track: &GeneratedTrack, point: Vec3, hint: f64) -> Result<f64> {
+    project_station_topology(track, point, hint, false)
+}
+pub(crate) fn project_station_topology(
+    track: &GeneratedTrack,
+    point: Vec3,
+    hint: f64,
+    circuit: bool,
+) -> Result<f64> {
     let mut s = hint;
     for _ in 0..12 {
         let sample = track.sample_at_distance(s).map_err(|e| e.to_string())?;
@@ -355,8 +562,12 @@ pub(crate) fn project_station(track: &GeneratedTrack, point: Vec3, hint: f64) ->
         if !correction.is_finite() || correction.abs() > 2.0 {
             return Err("track guide projection lost its local branch".into());
         }
-        let next = (s + correction).clamp(0.0, track.length_m());
-        if (next - s).abs() < 1e-10 {
+        let next = if circuit {
+            (s + correction).rem_euclid(track.length_m())
+        } else {
+            (s + correction).clamp(0.0, track.length_m())
+        };
+        if correction.abs() < 1e-10 || (!circuit && (next - s).abs() < 1e-10) {
             return Ok(next);
         }
         s = next;

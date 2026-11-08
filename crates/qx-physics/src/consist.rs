@@ -1,10 +1,9 @@
 //! Experimental consist inspection and initialization from persisted definitions.
-//! Track-frame placement is an approximation: connection residuals are explicit,
-//! and the resulting poses are only initial conditions for independent dynamics.
+//! Bounded rigid assembly produces initial conditions for independent dynamics.
 use crate::{BallJoint, Body, MassProperties, Pose, Result, TrackGuide, World};
 use qx_document::train::{Train, mechanism::Placement};
 use qx_geometry::{
-    math::{Frame, Vec3, rotation_between},
+    math::{Frame, Vec3},
     solver::GeneratedTrack,
 };
 use std::collections::HashMap;
@@ -27,6 +26,54 @@ pub struct ConsistInspection {
     pub components: Vec<ComponentPose>,
     pub joints: Vec<JointResidual>,
 }
+/// One presentation pose for both mesh instances and attached cameras. Linear
+/// origin/station interpolation and shortest-arc unit-quaternion interpolation;
+/// it is visual interpolation, not a second dynamics solve or extrapolation.
+pub fn interpolate(
+    previous: &ConsistInspection,
+    current: &ConsistInspection,
+    alpha: f64,
+) -> Result<ConsistInspection> {
+    if !alpha.is_finite()
+        || !(0. ..=1.).contains(&alpha)
+        || previous.components.len() != current.components.len()
+        || previous.joints.len() != current.joints.len()
+    {
+        return Err("incompatible presentation snapshots or interpolation fraction".into());
+    }
+    let mut result = current.clone();
+    for ((a, b), p) in previous
+        .components
+        .iter()
+        .zip(&current.components)
+        .zip(&mut result.components)
+    {
+        if a.id != b.id {
+            return Err("presentation component identity changed".into());
+        }
+        p.pose.position_m = a.pose.position_m * (1. - alpha) + b.pose.position_m * alpha;
+        p.pose.orientation = a
+            .pose
+            .orientation
+            .slerp(b.pose.orientation, alpha)
+            .map_err(|e| e.to_string())?;
+        p.station_m = a.station_m * (1. - alpha) + b.station_m * alpha;
+    }
+    for ((a, b), j) in previous
+        .joints
+        .iter()
+        .zip(&current.joints)
+        .zip(&mut result.joints)
+    {
+        if a.id != b.id {
+            return Err("presentation joint identity changed".into());
+        }
+        j.anchor_a_m = a.anchor_a_m * (1. - alpha) + b.anchor_a_m * alpha;
+        j.anchor_b_m = a.anchor_b_m * (1. - alpha) + b.anchor_b_m * alpha;
+        j.error_m = (j.anchor_a_m - j.anchor_b_m).length();
+    }
+    Ok(result)
+}
 fn point(p: &Pose, local: Vec3) -> Result<Vec3> {
     let result = p.position_m
         + Frame::new(p.orientation)
@@ -37,12 +84,55 @@ fn point(p: &Pose, local: Vec3) -> Result<Vec3> {
     }
     Ok(result)
 }
-/// Explicit track/mount placements support arbitrary component graphs. The
-/// legacy Schema 5 adapter places bogies from the first attached car's station. Each legacy car
-/// is then fit rigidly to up to two of its bogie anchors; extra/unsatisfied
-/// connections remain measurable residuals. Unsupported unconnected components
-/// are rejected instead of receiving an invented transform.
+/// Assemble arbitrary component IDs and physical connections on an open track.
+/// Track offsets/mounts seed the bounded local solve; rigid anchors and explicit
+/// guide references determine closure. Incompatible graphs return an error rather
+/// than changing dimensions or displaying a disconnected train.
 pub fn inspect(train: &Train, track: &GeneratedTrack, station_m: f64) -> Result<ConsistInspection> {
+    let seed = seed(train, track, station_m)?;
+    crate::assembly::assemble(train, track, seed)
+}
+
+/// Opt-in developer observations of the identical assembly solve. The supplied
+/// report is reset for each call and retained on errors, including seed failures.
+/// Nothing is written to the train, track, playback state or persisted schema.
+pub fn inspect_with_diagnostics(
+    train: &Train,
+    track: &GeneratedTrack,
+    station_m: f64,
+    diagnostics: &mut crate::assembly_diagnostics::AssemblyDiagnostics,
+) -> Result<ConsistInspection> {
+    use crate::assembly_diagnostics::{AssemblyPhase, AssemblyTermination};
+    *diagnostics = Default::default();
+    let result = seed(train, track, station_m).and_then(|seed| {
+        crate::assembly::assemble_with_diagnostics(train, track, seed, diagnostics)
+    });
+    match &result {
+        Ok(_) => {
+            diagnostics.phase = AssemblyPhase::Complete;
+            diagnostics.termination = AssemblyTermination::Converged;
+        }
+        Err(e) => {
+            if diagnostics.termination != AssemblyTermination::SweepLimit {
+                diagnostics.termination = AssemblyTermination::Aborted;
+            }
+            diagnostics.error = Some(e.clone());
+        }
+    }
+    result
+}
+
+/// Unclosed placement for explicitly labeled development diagnostics only.
+/// Never use this result to initialize physics or attach a ride camera.
+pub fn diagnostic_seed(
+    train: &Train,
+    track: &GeneratedTrack,
+    station_m: f64,
+) -> Result<ConsistInspection> {
+    seed(train, track, station_m)
+}
+
+fn seed(train: &Train, track: &GeneratedTrack, station_m: f64) -> Result<ConsistInspection> {
     train.validate().map_err(|e| e.to_string())?;
     if !station_m.is_finite() {
         return Err("station must be finite".into());
@@ -141,48 +231,6 @@ pub fn inspect(train: &Train, track: &GeneratedTrack, station_m: f64) -> Result<
             );
         }
     }
-    for car in &train.cars {
-        if train
-            .components
-            .iter()
-            .find(|c| c.id == car.body_id)
-            .is_some_and(|c| c.placement.is_some())
-        {
-            continue;
-        }
-        let mut anchors = Vec::new();
-        for j in &train.connections {
-            let pair = if j.component_a == car.body_id && car.bogie_ids.contains(&j.component_b) {
-                Some((j.anchor_a_m, &j.component_b, j.anchor_b_m))
-            } else if j.component_b == car.body_id && car.bogie_ids.contains(&j.component_a) {
-                Some((j.anchor_b_m, &j.component_a, j.anchor_a_m))
-            } else {
-                None
-            };
-            if let Some((local, id, other)) = pair {
-                anchors.push((local, point(&poses[id.as_str()].pose, other)?));
-            }
-        }
-        let mut body = poses[car.body_id.as_str()].clone();
-        if anchors.len() >= 2 {
-            let frame = Frame::new(body.pose.orientation).map_err(|e| e.to_string())?;
-            let source = frame.local_to_world(anchors[1].0 - anchors[0].0);
-            let target = anchors[1].1 - anchors[0].1;
-            let rotation = rotation_between(source, target)
-                .map_err(|e| format!("cannot fit car {}: {e}", car.body_id))?;
-            body.pose.orientation = rotation
-                .compose(body.pose.orientation)
-                .normalized()
-                .map_err(|e| e.to_string())?;
-        }
-        if !anchors.is_empty() {
-            let frame = Frame::new(body.pose.orientation).map_err(|e| e.to_string())?;
-            body.pose.position_m = anchors.iter().fold(Vec3::ZERO, |sum, (a, b)| {
-                sum + *b - frame.local_to_world(*a)
-            }) / anchors.len() as f64;
-        }
-        poses.insert(&car.body_id, body);
-    }
     // Resolve explicit mounts without assuming a car/bogie count, ordering, or passenger side.
     for _ in 0..train.components.len() {
         let mut changed = false;
@@ -250,7 +298,12 @@ pub fn initialize(
     gravity_mps2: Vec3,
     iterations: u32,
     substeps: u32,
-) -> Result<(World, Vec<TrackGuide>, ConsistInspection)> {
+) -> Result<(
+    World,
+    Vec<TrackGuide>,
+    Vec<crate::TrackAttitude>,
+    ConsistInspection,
+)> {
     if train
         .components
         .iter()
@@ -336,6 +389,11 @@ pub fn initialize(
             model: j.model.clone(),
         })
         .collect();
+    let stations: Vec<_> = inspection.components.iter().map(|p| p.station_m).collect();
+    let mut attitudes = rail_attitudes(train, &stations);
+    for a in &mut attitudes {
+        a.local_point_m = a.local_point_m - train.components[a.body].center_of_mass_m;
+    }
     let world = World {
         bodies,
         joints,
@@ -354,7 +412,7 @@ pub fn initialize(
             );
         }
     }
-    Ok((world, guides, inspection))
+    Ok((world, guides, attitudes, inspection))
 }
 
 /// Converts simulated mass-center poses back to component origins for the same renderer/inspector.
@@ -401,4 +459,36 @@ pub fn snapshot(
         residual.error_m = (residual.anchor_a_m - residual.anchor_b_m).length();
     }
     Ok(result)
+}
+
+/// Shared by initial assembly (component origins) and dynamics (mass centers).
+/// Rail guidance belongs to running gear, including suspended configurations;
+/// passenger bodies receive reactions only through their authored joints.
+pub(crate) fn rail_attitudes(train: &Train, stations: &[f64]) -> Vec<crate::TrackAttitude> {
+    train
+        .components
+        .iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            if !c.kind.is_running_gear() || c.guide_references_m.is_empty() {
+                return None;
+            }
+            let local_point_m = c
+                .guide_references_m
+                .iter()
+                .copied()
+                .fold(Vec3::ZERO, |a, b| a + b)
+                / c.guide_references_m.len() as f64;
+            let local_frame = match &c.placement {
+                Some(Placement::Track { frame, .. }) => frame.rotation.conjugate(),
+                _ => qx_geometry::math::Quaternion::IDENTITY,
+            };
+            Some(crate::TrackAttitude {
+                body: i,
+                station_m: stations[i],
+                local_frame,
+                local_point_m,
+            })
+        })
+        .collect()
 }

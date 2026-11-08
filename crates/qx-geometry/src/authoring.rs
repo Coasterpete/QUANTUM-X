@@ -143,19 +143,19 @@ impl Section {
                 ChannelKey::Yaw,
             ) => Ok(yaw_rate),
             _ => Err(crate::GeometryError(
-                "channel is not applicable to this section type".into(),
+                "channel is not applicable to this region type".into(),
             )),
         }
     }
     pub fn validate(&self) -> Result<()> {
-        ensure(self.id.0 > 0, "section ID must be nonzero")?;
+        ensure(self.id.0 > 0, "region ID must be nonzero")?;
         ensure(
             !self.name.trim().is_empty() && self.name.len() <= 1024,
-            "section name must contain 1..1024 bytes",
+            "region name must contain 1..1024 bytes",
         )?;
         ensure(
             self.extent.is_finite() && (1e-8..=1e6).contains(&self.extent),
-            "section extent must be in [1e-8,1e6]",
+            "region extent must be in [1e-8,1e6]",
         )?;
         if let Some(v) = self.reference_speed_mps {
             validate_speed(v)?;
@@ -163,7 +163,7 @@ impl Section {
         if let SectionKind::Spline { curve } = &self.kind {
             ensure(
                 self.domain == Domain::Normalized && self.extent == 1.0,
-                "spline sections require normalized domain [0,1]",
+                "spline regions require normalized domain [0,1]",
             )?;
             let prepared = curve.prepare()?;
             let start = prepared.evaluate(prepared.domain().0, crate::transition::Side::Right)?;
@@ -178,7 +178,7 @@ impl Section {
                 ensure(
                     join.g1(1e-8),
                     format!(
-                        "spline has a cusp/reversed/discontinuous tangent at parameter {}; track sections require G1",
+                        "spline has a cusp/reversed/discontinuous tangent at parameter {}; track regions require G1",
                         join.parameter
                     ),
                 )?;
@@ -186,7 +186,7 @@ impl Section {
         } else {
             ensure(
                 self.domain != Domain::Normalized,
-                "normalized domain is reserved for spline sections",
+                "normalized domain is reserved for spline regions",
             )?;
         }
         if let SectionKind::Arc {
@@ -203,7 +203,7 @@ impl Section {
         }
         for (name, channel) in self.channels() {
             channel.validate().map_err(|e| {
-                crate::GeometryError(format!("section {} {name} channel: {e}", self.id.0))
+                crate::GeometryError(format!("region {} {name} channel: {e}", self.id.0))
             })?;
             let expected = if name == "normal" || name == "lateral" {
                 Unit::G
@@ -212,12 +212,12 @@ impl Section {
             };
             ensure(
                 channel.unit == expected,
-                format!("section {}: wrong units for {name}", self.id.0),
+                format!("region {}: wrong units for {name}", self.id.0),
             )?;
             ensure(
                 crate::same_input(channel.length(), self.extent),
                 format!(
-                    "section {}: {name} channel must cover [0, extent]",
+                    "region {}: {name} channel must cover [0, extent]",
                     self.id.0
                 ),
             )?;
@@ -267,14 +267,14 @@ pub fn validate_track(initial: &InitialConditions, sections: &[Section]) -> Resu
     initial.validate()?;
     ensure(
         !sections.is_empty() && sections.len() <= 4096,
-        "track must contain 1..4096 sections",
+        "track must contain 1..4096 regions",
     )?;
     let mut ids = std::collections::HashSet::new();
     let mut count = 0;
     let mut controls = 0;
     for s in sections {
         s.validate()?;
-        ensure(ids.insert(s.id), "duplicate section ID")?;
+        ensure(ids.insert(s.id), "duplicate region ID")?;
         count += s
             .channels()
             .iter()

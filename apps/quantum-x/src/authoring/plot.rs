@@ -110,12 +110,31 @@ impl Plot {
             .painter()
             .with_clip_rect(self.rect.intersect(ui.clip_rect()));
         p.rect_filled(self.rect, 0., Color32::from_gray(13));
-        let xs = self.x.ticks(self.rect.width());
-        let ys = self.y.ticks(self.rect.height());
+        let xs = self.x.ticks(self.rect.width() / 4.);
+        let ys = self.y.ticks(self.rect.height() / 3.);
+        for x in self.x.ticks(self.rect.width()) {
+            p.line_segment(
+                [self.map(x, self.y.min), self.map(x, self.y.max)],
+                Stroke::new(0.5, Color32::from_gray(28)),
+            );
+        }
+        for y in self.y.ticks(self.rect.height()) {
+            p.line_segment(
+                [self.map(self.x.min, y), self.map(self.x.max, y)],
+                Stroke::new(0.5, Color32::from_gray(28)),
+            );
+        }
         for &x in &xs {
-            for &y in &ys {
-                p.circle_filled(self.map(x, y), 0.85, Color32::from_gray(66));
-            }
+            p.line_segment(
+                [self.map(x, self.y.min), self.map(x, self.y.max)],
+                Stroke::new(0.75, Color32::from_gray(48)),
+            );
+        }
+        for &y in &ys {
+            p.line_segment(
+                [self.map(self.x.min, y), self.map(self.x.max, y)],
+                Stroke::new(0.75, Color32::from_gray(48)),
+            );
         }
         if self.y.min <= 0. && self.y.max >= 0. {
             p.line_segment(

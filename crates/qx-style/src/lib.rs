@@ -1,8 +1,11 @@
 //! Track/train catalog and content discovery, independent of UI, GPU and physics.
 use serde::{Deserialize, Serialize};
+mod appearance;
 pub mod compatibility;
 pub mod construction;
+pub mod construction_segments;
 pub mod library;
+pub mod materials;
 use std::{collections::HashSet, fmt};
 
 #[derive(Debug)]
@@ -252,16 +255,23 @@ impl Catalog {
 mod tests {
     use super::*;
     #[test]
-    fn concepts_do_not_promise_assets() {
+    fn only_verified_box_spined_style_is_available() {
         let c = Catalog::built_in().unwrap();
         assert_eq!(c.styles.len(), 17);
         assert_eq!(c.styles_for_family("monorail").count(), 2);
         assert!(
             c.styles
                 .iter()
+                .filter(|s| s.id != "box-spined-100")
                 .all(|s| s.status == DevelopmentStatus::Planned
                     && s.preview.is_none()
                     && s.track_asset.is_none())
+        );
+        let source = c.styles.iter().find(|s| s.id == "box-spined-100").unwrap();
+        assert_eq!(source.status, DevelopmentStatus::Available);
+        assert_eq!(
+            source.track_asset.as_deref(),
+            Some("tracks/box-spined/100/Box-Spine-100.glb")
         );
     }
     #[test]

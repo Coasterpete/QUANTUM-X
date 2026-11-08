@@ -26,7 +26,7 @@ generated on Windows on 2026-10-30 without desktop input or image retouching.
 
 The Editor image shows a **synthetic numerical regression fixture**, not a
 finished coaster design. Its generic procedural track is development content;
-the visible Support Workspace explicitly reports that construction is unavailable.
+the historical image predates the support construction implementation described below.
 
 ## What works today
 
@@ -39,8 +39,9 @@ the visible Support Workspace explicitly reports that construction is unavailabl
   Workspaces, docked/tabbed/resizable panes, internal floating panes, UI scaling,
   keyboard commands and precision numeric editing.
 - **Coaster Properties:** name, description, family and numbered-style assignment
-  with Apply/Cancel and undo/redo. Catalog assignment stays separate from track
-  construction and vehicle mechanics. Each project currently holds one coaster.
+  with Apply/Cancel and undo/redo. Available styles install registered visual
+  construction while preserving authored geometry and vehicle mechanics.
+  Each project currently holds one coaster.
 - **Track and transition authoring:** ordered force-vector, geometric and
   rider-local sections; distance/time domains; cubic scalar NURBS regions;
   shape-preserving split and compatible merge; shared-boundary edits under
@@ -54,16 +55,27 @@ the visible Support Workspace explicitly reports that construction is unavailabl
   material settings, solid/centerline/technical/mesh-edge views, camera controls
   and offscreen wgpu/egui captures. These validation configurations are not
   finished manufacturer-specific catalog styles.
+- **Original Box-Spined construction:** Box Spined-100 uses the owner's original
+  GLB spine cross section and rigid crossties with continuous parametric rails,
+  independent PBR finishes/colors, and configurable provisional assembly
+  dimensions. See [M2 source mapping and verification](docs/m2-box-spined-construction.md).
 - **Train infrastructure:** persisted component/multi-car definitions, validated
   static GLB import, visual mounting transforms and kinematic inspection.
   Optional development tools expose experimental rigid-body playback with
   gravity, joints, hinges, limits and bounded motors at a fixed **1/240 s** step.
 - **Projects and verification:** versioned `.qx.json` storage, explicit migration
-  from schemas 1–5 to schema 6, validation, save/reopen tests, CSV/OBJ/SVG
+  from schemas 1–6 to schema 7, validation, save/reopen tests, CSV/OBJ/SVG
   diagnostics and independent numerical verifiers.
 - **Windows identity and packaging:** original owner-approved embedded executable,
   window and taskbar icon; portable staging with catalog/assets, sample projects,
   license notices and noninteractive startup/resource checks.
+
+The local [integrated core feature report](docs/integrated-core-expansion.md) documents
+layout classification/completion, shared engineering plots, launch/brake forces,
+persisted physical settings, measured telemetry, and editable support construction.
+Track Workspace → Operations exposes layout/devices; its Engineering plots button
+uses the existing Transition pane. Support Workspace edits nodes and members or
+generates editable timber. Apply/Cancel, undo/redo and save/reopen share the document.
 
 ## Experimental and incomplete
 
@@ -74,11 +86,12 @@ the visible Support Workspace explicitly reports that construction is unavailabl
 - Included GLB train bodies/bogies and mechanical configurations are explicitly
   **development fixtures**, not finished production train models.
 - The catalog registers **6 track families / 17 numbered styles** and **14 train
-  families / 11 named or numbered styles**. All catalog styles are **Planned**;
-  there are zero available production styles. Empty asset folders do not supply
-  models, previews, mechanical properties or validated compatibility.
-- Support Workspace organization exists; **support authoring is unavailable**.
-  News, ride operations, multi-coaster projects and mechanical 4D transmission
+  families / 11 named or numbered styles**. **Box Spined-100** is Available as
+  verified visual construction with owner-authorized provisional dimensions;
+  the other track styles and all train styles remain **Planned**. This does not
+  finalize production dimensions or establish mechanical compatibility.
+- Launch/brake force regions and basic editable supports are integrated. Stations,
+  lifts, block controllers, interlocks, structural analysis, News, multi-coaster projects and mechanical 4D transmission
   playback are also unavailable. Mechanical 4D playback is rejected explicitly.
 - Final interaction feel, high-DPI presentation and native desktop behavior still
   need owner testing. Automated offscreen rendering is not manual UX validation
@@ -125,8 +138,9 @@ Editor, or use numeric controls. Apply publishes a draft; Cancel restores its
 committed values. Ctrl+S saves, Ctrl+Shift+S saves as, Ctrl+O opens, Ctrl+Z/Y
 undo/redo, and Ctrl+Enter applies a section. Graph Ctrl+wheel zooms, middle drag
 pans, and F fits the hovered graph or viewport. Edit → Coaster Properties sets
-coaster identity and catalog intent. Save a copy before migrating older projects:
-older application versions cannot read new schema-6 NURBS regions.
+coaster identity and style; selecting Box Spined-100 previews its registered
+construction before Apply. Save a copy before migrating older projects:
+older application versions cannot read schema-7 operations/supports or schema-6 NURBS regions.
 
 `View → Development tools` exposes experimental train fixtures, mechanics and
 playback. Library samples and exported scenarios are numerical fixtures, not
@@ -168,6 +182,9 @@ for executed checks and manual limitations.
 - [Procedural track construction](docs/m7-procedural-track-engine.md),
   [GLB assets and rigid-body foundations](docs/m8-rigid-body-foundation.md), and
   [experimental vehicle playback](docs/m82-universal-vehicle-playback.md).
+- [M1.3 segmented construction diagnostic and asset inventory](docs/m1.3-segmented-construction.md),
+  [synthetic rendering comparisons](docs/evidence/m1.3-segmented-construction/README.md),
+  and [guided Rust/C++ lesson](docs/m1.3-rust-guide.md).
 - [Catalog and asset contracts](docs/library-catalog.md),
   [approved Windows icon](docs/windows-icon.md), and
   [core math and coordinate conventions](docs/core-foundation.md).

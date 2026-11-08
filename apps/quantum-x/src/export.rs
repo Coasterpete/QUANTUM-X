@@ -39,6 +39,7 @@ fn domain(d: Domain) -> &'static str {
 }
 fn unit(u: Unit) -> &'static str {
     match u {
+        Unit::MetresPerSecondSquared => "m/s^2",
         Unit::G => "g",
         Unit::RadiansPerSecond => "rad/s",
         Unit::RadiansPerMetre => "rad/m",

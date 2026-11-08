@@ -22,6 +22,8 @@ pub enum ChannelEdit {
 }
 #[derive(Clone, Debug)]
 pub enum Command {
+    SetOperations(crate::operations::Operations),
+    SetSupports(Vec<qx_geometry::supports::Structure>),
     SetTrains(Vec<crate::train::Train>),
     SetConstruction(qx_style::construction::TrackConstruction),
     SetHeartline(crate::HeartlineSettings),
@@ -62,14 +64,16 @@ impl Command {
             sections
                 .iter()
                 .position(|s| s.id == id)
-                .ok_or_else(|| crate::DocumentError(format!("section ID {} not found", id.0)))
+                .ok_or_else(|| crate::DocumentError(format!("region ID {} not found", id.0)))
         };
         match self {
+            Self::SetOperations(value) => project.operations = value,
+            Self::SetSupports(value) => project.supports = value,
             Self::SetTrains(value) => project.trains = value,
             Self::SetConstruction(value) => project.construction = value,
             Self::SetHeartline(settings) => project.heartline = settings,
             Self::MoveSection { id, after } => {
-                require(after != Some(id), "cannot move a section after itself")?;
+                require(after != Some(id), "cannot move a region after itself")?;
                 let i = index(id, &project.sections)?;
                 let section = project.sections.remove(i);
                 let target = after
@@ -83,14 +87,52 @@ impl Command {
                 let qx_geometry::authoring::SectionKind::Spline { curve } =
                     &mut project.sections[i].kind
                 else {
-                    return Err(crate::DocumentError(
-                        "section is not spline-authored".into(),
-                    ));
+                    return Err(crate::DocumentError("region is not spline-authored".into()));
                 };
                 edit.apply(curve)?;
             }
             Self::ValidateConnections { options } => {
-                qx_geometry::solver::generate(&project.initial, &project.sections, options)?;
+                let track =
+                    qx_geometry::solver::generate(&project.initial, &project.sections, options)?;
+                project.operations.validate_track(&track)?;
+                let physical = if !project.supports.is_empty()
+                    && project.heartline.authored_reference
+                        == qx_geometry::heartline::AuthoredReference::RiderReference
+                {
+                    Some(qx_geometry::supports::physical_attachment_track(
+                        &track,
+                        &project.reference_geometry(&track)?,
+                    )?)
+                } else {
+                    None
+                };
+                let track = physical.as_ref().unwrap_or(&track);
+                for structure in &project.supports {
+                    for member in &structure.members {
+                        let a = structure
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == member.start_node)
+                            .ok_or_else(|| {
+                                crate::DocumentError("support member start missing".into())
+                            })?
+                            .position
+                            .resolve(track)?;
+                        let b = structure
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == member.end_node)
+                            .ok_or_else(|| {
+                                crate::DocumentError("support member end missing".into())
+                            })?
+                            .position
+                            .resolve(track)?;
+                        require(
+                            (b - a).length() >= 1e-5,
+                            "support member endpoints coincide after this edit",
+                        )?;
+                    }
+                }
             }
             Self::InsertSection { after, section } => {
                 let i = after

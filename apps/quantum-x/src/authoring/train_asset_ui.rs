@@ -14,10 +14,26 @@ pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, display: &qx_renderin
         .trains
         .iter()
         .flat_map(|t| {
-            t.components.iter().map(|c| {
+            t.components.iter().enumerate().map(|(index, c)| {
                 (
                     (t.id.clone(), c.id.clone()),
-                    format!("{} / {} ({:?})", t.id, c.id, c.kind),
+                    if s.development {
+                        format!("{} / {} ({:?})", t.id, c.id, c.kind)
+                    } else {
+                        format!(
+                            "{} / {} {}",
+                            t.name,
+                            match c.kind {
+                                qx_document::train::ComponentKind::CarBody => "Car body",
+                                qx_document::train::ComponentKind::Bogie => "Bogie",
+                                qx_document::train::ComponentKind::PassengerAssembly =>
+                                    "Passenger assembly",
+                                qx_document::train::ComponentKind::RunningGear => "Running gear",
+                                qx_document::train::ComponentKind::Auxiliary => "Auxiliary part",
+                            },
+                            index + 1
+                        )
+                    },
                 )
             })
         })

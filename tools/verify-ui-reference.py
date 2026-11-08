@@ -55,8 +55,8 @@ evidence = json.loads((root / "evidence.json").read_text())
 assert evidence["automated_offscreen"] and not evidence["manual_desktop_tested"]
 assert evidence["project_unchanged"] and evidence["no_implicit_document"]
 assert evidence["schema_version"] == 6
-palette = [(164, 255, 0), (100, 132, 255), (188, 112, 255),
-           (52, 255, 97), (255, 83, 91), (255, 139, 54)]
+palette = [(154, 255, 0), (0, 0, 255), (92, 0, 255),
+           (27, 255, 0), (255, 0, 0), (255, 68, 0)]
 for capture in evidence["captures"]:
     path = root / capture["file"]
     size, rows = pixels(path)

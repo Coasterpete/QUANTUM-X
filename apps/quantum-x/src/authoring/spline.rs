@@ -3,11 +3,21 @@ use qx_geometry::{
     curve::{Curve, Parameterization},
     curve_edit::{BezierContinuity, CurveEdit},
 };
-pub(super) fn controls(section: &mut Section, ui: &mut egui::Ui, status: &mut String) {
+pub(super) fn controls(
+    section: &mut Section,
+    ui: &mut egui::Ui,
+    status: &mut String,
+    snap: super::snap::Settings,
+) {
     let SectionKind::Spline { curve } = &mut section.kind else {
         return;
     };
-    ui.label("Section-local metres. Start must remain zero with tangent +X. Apply publishes one undo step.");
+    ui.label("Region-local metres. Start must remain zero with tangent +X. Apply publishes one undo step.");
+    let positions: Vec<_> = curve
+        .points()
+        .iter()
+        .map(|p| (p.id, p.position_m))
+        .collect();
     egui::Grid::new("spline points")
         .striped(true)
         .show(ui, |ui| {
@@ -18,12 +28,28 @@ pub(super) fn controls(section: &mut Section, ui: &mut egui::Ui, status: &mut St
             ui.end_row();
             for point in curve.points_mut() {
                 ui.label(point.id.to_string());
-                for value in [
+                for (axis, value) in [
                     &mut point.position_m.x,
                     &mut point.position_m.y,
                     &mut point.position_m.z,
-                ] {
-                    ui.add(egui::DragValue::new(value).speed(0.01).max_decimals(12));
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let keys: Vec<_> = positions
+                        .iter()
+                        .filter(|(id, _)| *id != point.id)
+                        .map(|(_, p)| [p.x, p.y, p.z][axis])
+                        .collect();
+                    super::snap_ui::number(
+                        ui,
+                        value,
+                        "",
+                        0.01,
+                        snap,
+                        super::snap::Space::Local,
+                        &keys,
+                    );
                 }
                 ui.end_row();
             }

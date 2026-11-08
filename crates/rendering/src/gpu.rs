@@ -4,8 +4,11 @@ use std::sync::{Arc, mpsc};
 use wgpu::util::DeviceExt;
 use winit::{dpi::PhysicalSize, window::Window};
 pub(crate) struct Gpu {
+    pub last_draw: crate::profiling::DrawTiming,
+    pub adapter_info: String,
     mesh: crate::mesh_gpu::MeshGpu,
     assets: crate::asset_gpu::AssetGpu,
+    selection: crate::selection::SelectionGpu,
     mesh_display: crate::DisplayOptions,
     mesh_range: Option<(f64, f64)>,
     instance: wgpu::Instance,
@@ -101,12 +104,21 @@ impl Gpu {
             mapped_at_creation: false,
         });
         let depth = Self::depth(&device, &config);
+        let selection = crate::selection::SelectionGpu::new(
+            &device,
+            config.format,
+            [config.width, config.height],
+            &depth,
+        );
         let egui = egui_wgpu::Renderer::new(&device, config.format, Default::default());
         let mesh = crate::mesh_gpu::MeshGpu::new(&device, config.format);
         let assets = crate::asset_gpu::AssetGpu::new(&device, config.format);
         Ok(Self {
+            last_draw: Default::default(),
+            adapter_info: format!("{:?}", adapter.get_info()),
             mesh,
             assets,
+            selection,
             mesh_display: Default::default(),
             mesh_range: None,
             instance,
@@ -142,7 +154,8 @@ impl Gpu {
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Depth32Float,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
                 view_formats: &[],
             })
             .create_view(&Default::default())
@@ -154,6 +167,8 @@ impl Gpu {
             self.config.height = size.height;
             self.surface.configure(&self.device, &self.config);
             self.depth = Self::depth(&self.device, &self.config);
+            self.selection
+                .resize(&self.device, [size.width, size.height], &self.depth);
         }
     }
     pub fn upload_scene(
@@ -209,6 +224,8 @@ impl Gpu {
         origin: Vec3,
         mut ui: Option<GuiFrame>,
     ) -> Result<(), String> {
+        self.last_draw = Default::default();
+        self.last_draw.size = [self.size.width, self.size.height];
         if let Some(ui) = &mut ui {
             for (id, deltas) in &ui.textures.set {
                 for delta in deltas {
@@ -225,6 +242,8 @@ impl Gpu {
         if self.size.width == 0 || self.size.height == 0 {
             return Ok(());
         }
+        let acquisition = std::time::Instant::now();
+        self.last_draw.surface_status = "unavailable".into();
         let (frame, reconfigure) = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(f) => (f, false),
             wgpu::CurrentSurfaceTexture::Suboptimal(f) => (f, true),
@@ -255,6 +274,9 @@ impl Gpu {
                 );
             }
         };
+        self.last_draw.acquire_ms = acquisition.elapsed().as_secs_f64() * 1000.;
+        self.last_draw.surface_status = if reconfigure { "suboptimal" } else { "success" }.into();
+        let encoding = std::time::Instant::now();
         let viewport_visible = ui.as_ref().is_none_or(|u| {
             u.viewport.is_finite() && u.viewport.width() > 0. && u.viewport.height() > 0.
         });
@@ -301,6 +323,11 @@ impl Gpu {
         } else {
             vec![]
         };
+        let x = viewport[0].clamp(0., self.size.width.saturating_sub(1) as f32);
+        let y = viewport[1].clamp(0., self.size.height.saturating_sub(1) as f32);
+        let width = viewport[2].min(self.size.width as f32 - x).max(1.);
+        let height = viewport[3].min(self.size.height as f32 - y).max(1.);
+        self.last_draw.viewport_px = [x, y, width, height];
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("geometry inspection"),
@@ -328,10 +355,6 @@ impl Gpu {
                 }),
                 ..Default::default()
             });
-            let x = viewport[0].clamp(0., self.size.width.saturating_sub(1) as f32);
-            let y = viewport[1].clamp(0., self.size.height.saturating_sub(1) as f32);
-            let width = viewport[2].min(self.size.width as f32 - x).max(1.);
-            let height = viewport[3].min(self.size.height as f32 - y).max(1.);
             pass.set_viewport(x, y, width, height, 0., 1.);
             pass.set_scissor_rect(x as u32, y as u32, width as u32, height as u32);
             pass.set_vertex_buffer(0, self.vertices.slice(..));
@@ -341,23 +364,57 @@ impl Gpu {
                 pass.draw(0..self.grid_count, 0..1);
                 self.mesh.draw(&mut pass, &self.mesh_display);
                 self.assets.draw(&mut pass);
-                pass.set_vertex_buffer(0, self.vertices.slice(..));
-                pass.set_pipeline(if self.mesh_display.mode == crate::DisplayMode::Technical {
-                    &self.pipeline
-                } else {
-                    &self.grid_pipeline
-                });
-                pass.set_bind_group(
-                    0,
-                    if self.mesh_display.mode == crate::DisplayMode::Technical {
-                        &self.bind
-                    } else {
-                        &self.grid_bind
-                    },
-                    &[],
-                );
-                pass.draw(self.grid_count..self.count, 0..1);
             }
+        }
+        if viewport_visible {
+            self.selection.draw(
+                &mut encoder,
+                &view,
+                &self.depth,
+                &self.mesh,
+                &self.mesh_display,
+                [x, y, width, height],
+            );
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("technical overlays above selection"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_viewport(x, y, width, height, 0., 1.);
+            pass.set_scissor_rect(x as u32, y as u32, width as u32, height as u32);
+            pass.set_vertex_buffer(0, self.vertices.slice(..));
+            let technical = self.mesh_display.mode == crate::DisplayMode::Technical;
+            pass.set_pipeline(if technical {
+                &self.pipeline
+            } else {
+                &self.grid_pipeline
+            });
+            pass.set_bind_group(
+                0,
+                if technical {
+                    &self.bind
+                } else {
+                    &self.grid_bind
+                },
+                &[],
+            );
+            pass.draw(self.grid_count..self.count, 0..1);
         }
         if let Some(ui) = &ui {
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -378,11 +435,15 @@ impl Gpu {
         }
         buffers.push(encoder.finish());
         self.queue.submit(buffers);
+        self.last_draw.encode_submit_ms = encoding.elapsed().as_secs_f64() * 1000.;
         for id in self.pending_free.drain(..) {
             self.egui.free_texture(&id);
         }
         window.pre_present_notify();
+        let present = std::time::Instant::now();
         self.queue.present(frame);
+        self.last_draw.present_ms = present.elapsed().as_secs_f64() * 1000.;
+        self.last_draw.presented = true;
         if reconfigure {
             self.resize(self.size);
         }

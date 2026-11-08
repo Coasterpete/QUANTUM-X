@@ -23,6 +23,14 @@ pub enum Role {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum Profile {
+    /// Exact cross section extracted from a verified prismatic GLB. Source
+    /// coordinates are glTF metres: (Z,Y,-X) maps to local (T,N,L).
+    AssetSection {
+        id: String,
+        path: String,
+        version: u32,
+        scale: [f64; 3],
+    },
     Circle {
         radius_m: f64,
         sides: u32,
@@ -40,6 +48,10 @@ pub enum Profile {
 #[serde(deny_unknown_fields)]
 pub struct Material {
     pub id: String,
+    /// Optional reusable library material; scalar fields remain the explicit
+    /// fallback if its external files are unavailable. No family coupling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library: Option<crate::materials::Binding>,
     pub base_color: [f32; 3],
     pub metallic: f32,
     pub roughness: f32,
@@ -69,8 +81,8 @@ pub enum HardwareShape {
     Box {
         size_m: [f64; 3],
     },
-    /// Reserved asset contract. Generation returns an explicit unresolved-asset
-    /// error until an importer is provided; never silently substitutes a box.
+    /// Rigid GLB component; node transforms are retained. glTF (Z,Y,-X)
+    /// maps to local (T,N,L), with scale applied in source coordinates.
     Asset {
         id: String,
         path: String,
@@ -110,8 +122,26 @@ fn bounded(v: &[f64], limit: f64) -> bool {
     v.iter().all(|x| x.is_finite() && x.abs() <= limit)
 }
 impl Profile {
+    pub fn validate(&self) -> Result<()> {
+        if let Self::AssetSection {
+            id,
+            path,
+            version,
+            scale,
+        } = self
+        {
+            validate_asset(id, path, *version, scale)
+        } else {
+            self.points().map(|_| ())
+        }
+    }
     pub fn points(&self) -> Result<Vec<[f64; 2]>> {
         let points = match self {
+            Self::AssetSection { path, .. } => {
+                return Err(crate::CatalogError(format!(
+                    "Source profile requires the construction asset resolver: {path}"
+                )));
+            }
             Self::Circle { radius_m, sides } => {
                 require(
                     dimension(*radius_m) && (3..=128).contains(sides),
@@ -200,6 +230,9 @@ impl TrackConstruction {
         )?;
         let mut mats = HashSet::new();
         for m in &self.materials {
+            if let Some(binding) = &m.library {
+                binding.validate()?;
+            }
             require(
                 identifier(&m.id) && mats.insert(&m.id),
                 "invalid or duplicate material ID",
@@ -222,7 +255,7 @@ impl TrackConstruction {
                 bounded(&c.offset_m, 1000.) && c.rotation_rad.is_finite(),
                 "invalid sweep transform",
             )?;
-            c.profile.points()?;
+            c.profile.validate()?;
         }
         let count = self
             .continuous
@@ -264,13 +297,7 @@ impl TrackConstruction {
                     path,
                     version,
                     scale,
-                } => require(
-                    identifier(id)
-                        && relative_asset(path)
-                        && *version > 0
-                        && scale.iter().all(|v| dimension(*v)),
-                    "invalid component asset reference",
-                )?,
+                } => validate_asset(id, path, *version, scale)?,
             }
         }
         Ok(())
@@ -368,9 +395,20 @@ impl TrackConstruction {
         c
     }
 }
+fn validate_asset(id: &str, path: &str, version: u32, scale: &[f64; 3]) -> Result<()> {
+    require(
+        identifier(id)
+            && relative_asset(path)
+            && path.to_ascii_lowercase().ends_with(".glb")
+            && version == 1
+            && scale.iter().all(|v| dimension(*v)),
+        "invalid or unsupported construction asset reference",
+    )
+}
 fn material(id: &str, base_color: [f32; 3], metallic: f32, roughness: f32) -> Material {
     Material {
         id: id.into(),
+        library: None,
         base_color,
         metallic,
         roughness,
