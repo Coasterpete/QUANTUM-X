@@ -4,6 +4,10 @@ name = "qx-geometry"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Research-only immutable source queries; no application/physics wiring.
+experimental-graph-source = []
+
 [dependencies]
 qx-style = { path = "../qx-style" }
 serde.workspace = true
