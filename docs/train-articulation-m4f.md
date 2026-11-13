@@ -164,6 +164,117 @@ strict feature Clippy. The retained opt-in long runs/cost tests were not execute
 Stage A is checkpointed in the first M4F commit; no Stage B qualification follows
 from geometry tests alone.
 
+## Stage B — narrowly scoped B1 coupling
+
+The opt-in physics feature `experimental-source-guidance` enables only research
+integration tests; it installs no production backend. `source_guidance.rs`
+imports M4B's contract, initialization, mass/inertia and reaction equations and
+M4D's refined dynamics/transactional tracking **unchanged**. The new
+`support/m4f_surface.rs` supplies a physical-centerline snapshot, explicit constant
+local rail/face datum, and the running/side normal algebra from M4E-A. It uses
+P through order three and normal through order two from **the same** dense
+reference. Normals are constructed perpendicular to the actual offset tangent,
+never guessed from a mesh, manufacturing profile or nominal frame alone.
+
+Initial body seeds are mapped from the declared mechanical topology/local
+dimensions onto the source for every body. The shared nonlinear seating solve,
+velocity projection, residuals, Jacobians, directional Jdot, acceleration,
+reactions, continuation and dynamics all receive that same `Rail`. No synthetic
+path pose is left as a physics reference. The adapter's two `GeneratedTrack`
+samples are endpoint metadata for the inherited branch guard only: the whole
+snapshot must first pass equal-sided-source-jet interval validation. No sample
+interpolator is queried. Original source chart IDs remain in the dense source;
+equal-sided-jet source joins inside this connected differential interval
+are traversable, as are all internal numerical checkpoints.
+
+Projection retains the M4D bounded 0.025 m-bin search, 48 Newton iterations per
+bracket, at most 128 bins, rejection of competing local minima, `|F| < 2e-13`
+and `D > 1e-8`. It is not global projection/root certification. New physical
+normal and offset degeneracies fail; stale source identities fail. This adapter
+requires one qualified open connected source interval. It offers no periodic
+seam, rider inverse, unsupported source kind or contact fallback.
+
+### Qualification and explicit rejection
+
+Required positive cases are the retained straight, banked arc, twisted arc,
+varying rider-local and force fixtures, plus the actual foundation prefix. Each
+uses both one-car/two-bogie and two-car/shared-middle-bogie assemblies (7 or 11
+rigid bodies). Speed is 6 m/s, fixed outer timestep 1/240 s, four internal
+substeps, existing 32 impulse sweeps. There are 24 ticks / .1 simulated second
+per run, with exact deterministic replay. This is short-run qualification of
+ideal bilateral datums, not a general vehicle/contact simulation.
+
+The high-twist .4 rad/m rolling line is a geometry-positive/mechanism-negative
+stress case, excluded from the positive seating scope before testing. Its source
+and all numerical checkpoints remain admitted by Stage A. With the unchanged
+mechanism dimensions, seeds, .2 correction bound and .7 rad bearing envelope,
+the bounded seating solve returns **NoConvergence**. It creates no simulation
+state and leaves the model untouched. Roughly .96 rad of source roll across a
+2.4 m car explains why this is a severe mechanism test, but the bounded failure
+is not a proof of global infeasibility. No layout, twist, bearing limit or solver
+tolerance was changed to admit it. This configuration is **not mechanically
+qualified** and is not a visualization candidate.
+
+The positive mechanical matrix passes unchanged gates at both seated and
+.002-scaled displaced poses. Observed maxima:
+
+| Independent quantity | Maximum | Unchanged gate |
+| --- | ---: | ---: |
+| Residual finite-difference J columns | 1.770e-9 | 3e-7 |
+| Directional Jdot*v stencil refinement | 4.094e-10 | 1e-6 |
+| Independent second differences of c | 2.557e-6 | 2e-5 |
+| Independent reaction solve discrepancy | 1.052e-11 | 1e-7 |
+| Acceleration equation residual | 1.324e-13 | 1e-7 |
+| Ideal constraint power | 6.105e-12 W | 1e-7 W |
+
+Initialization preserves position rows <2e-11 and Jv <1e-9. NumPy independently
+checks all 12 reaction matrices, full row rank at 1e-5/1e-7/1e-9, mass-weighted
+acceleration, and reaction power. Decimal independently differentiates 42
+datum/normal cases from source polynomial **poses**: an inner position-only
+stencil obtains P', then normal normalization and outer stencils obtain n'/n''.
+No Rust normal/jet formula is reused. All observed geometry errors are below
+2.447e-15 (position) and 3.620e-16 (normal and derivative components).
+
+Across the twelve .1 s runs, maximum position and velocity rows are 1.272e-5 and
+.002261, below the inherited 2e-5 / .003 quality envelope. Maximum absolute
+energy drift is 1.267 J; the largest drift/initial-kinetic ratio is 7.002e-5.
+Energy is measured, **not conserved exactly** by this stabilized impulse method.
+Invalid internal-step configuration triggers a late transactional failure after
+candidate windows are prepared: poses, velocities, hints, windows, envelopes and
+tick count all remain unchanged. Existing M4B–M4D rejection/replay regressions
+also remain executable. Separate runs carry a support from 11.805 m through the
+actual 12 m foundation source join to 12.405 m, for both topologies.
+
+Paired replay timings in one serial Release observation were 69–163 ms for 24
+ticks (both replays together). These are shared-machine observations, exclude
+rendering and preparation, and do not establish a worst-case 240 Hz or 60 FPS
+budget. Query evaluation still includes coarse/fine comparison and higher jets;
+no performance optimization is inferred from correctness.
+
+Reproduction:
+
+```powershell
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance -- --nocapture --test-threads=1 > target/m4f/stage-b-targeted.log 2>&1
+python tools/verify-source-guidance-m4f.py target/m4f/stage-b-targeted.log
+cargo fmt --all -- --check
+cargo check --workspace
+cargo clippy --workspace --all-targets --features qx-physics/experimental-source-guidance -- -D warnings
+cargo test --workspace --features qx-physics/experimental-source-guidance
+```
+
+Retained native Release M4A-M4E-A regression: 40 passed, zero failed, five
+ignored. The unchanged independent verifiers pass 38 M4A matrices, 29 M4B
+matrices, six M4C systems, 18 M4D systems and 216 M4D geometry cases.
+
+Stage B gate: **PASS within the positive scope above**. Full feature-enabled
+debug workspace: 523 passed, zero failed, 15 ignored. Formatting, default
+workspace check, and strict all-target Clippy both with and without the research
+feature passed. The five new Release tests and both independent tools passed.
+Default application feature-tree inspection confirms experimental geometry and
+source guidance are not enabled. Stage B is checkpointed in the second M4F
+commit. No failed positive mechanical gate has been waived; the rolling seating
+negative remains an explicit limitation.
+
 ## UX and desktop status
 
 No owner-facing UX is changed; no temporary UI is introduced in Stage A.
