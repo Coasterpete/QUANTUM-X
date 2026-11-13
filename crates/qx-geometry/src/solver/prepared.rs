@@ -8,6 +8,8 @@
 use super::*;
 use crate::heartline::AuthoredReference;
 
+pub mod dense;
+
 /// Caller-owned document-instance/generation identity. Never persisted or inferred
 /// from equal positions/lengths. A source edit must retire the generation token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -20,6 +22,8 @@ pub struct SourceIdentity {
 pub enum DerivativeProvenance {
     /// Differentiated source RHS, evaluated on the approximate integrated frame.
     SourceEquationAtIntegratedPose,
+    /// Differentiated, arc-length-reparameterized quaternion hodograph.
+    NumericalDenseExtension,
 }
 
 #[derive(Clone, Debug)]
