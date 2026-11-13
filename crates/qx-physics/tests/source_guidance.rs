@@ -29,6 +29,8 @@ mod surface;
 #[allow(dead_code)]
 #[path = "support/m4d_tracking.rs"]
 mod tracking;
+#[path = "support/m4f_visualization.rs"]
+mod visualization;
 use contract::{Kind, Model};
 use matrix::{finite_jacobian, max_abs, multiply};
 use qx_geometry::{

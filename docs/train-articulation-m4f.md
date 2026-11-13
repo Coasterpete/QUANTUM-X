@@ -17,7 +17,8 @@ was changed. No push, merge or PR is authorized or performed.
 Stages are gated: A requires one continuous differential reference and independent
 derivative/source-convergence evidence; B requires unchanged mechanical gates;
 C requires B and an isolated development visualization. Each completed stage is
-a separate local commit. No project schema, production train selector, production
+a separate local commit (A: `751865a`, B: `6a541ca`; C is the final checkpoint).
+No project schema, production train selector, production
 playback or editor UX change belongs to this initiative.
 
 ## Stage A — numerical representation
@@ -275,11 +276,110 @@ source guidance are not enabled. Stage B is checkpointed in the second M4F
 commit. No failed positive mechanical gate has been waived; the rolling seating
 negative remains an explicit limitation.
 
+## Stage C — isolated development visualization
+
+The integration can remain entirely outside the app: an ignored opt-in test
+exports actual `Tracked.state.poses` and physical alignment measurements, then
+a standard-library Python tool validates the log and builds a self-contained
+offline HTML/SVG viewer. No server, third-party JavaScript, new runtime dependency,
+production render path, document field or B1 selector is added. This is a
+development trace format, not a project format or persisted authoring command.
+
+Files: `support/m4f_visualization.rs`, `render-source-guidance-m4f.py`,
+`source-guidance-m4f-viewer.html` and `verify-source-viewer-m4f.mjs`. The source
+adapter/mechanical equations from Stage B remain unchanged. Export uses its
+qualified R8/.04-twist shared-bogie fixture, gravity, 6 m/s initialization and
+24 fixed 1/240 s outer steps. No source-following pose animation is substituted
+for the dynamics. A second export reproduces the scene and all 25 state records
+**exactly**, excluding the intentionally variable timing observations.
+
+Each frame includes all 11 actual body positions/orientations, 30 support points
+and their projected physical datums/normals, bearing anchor pairs, row residuals,
+velocity residuals, energy drift, support-tangent angle and body angle relative
+to its nearest physical centerline frame. Rendering transforms the primitive
+boxes with those **actual** quaternions. Two cars share one middle bogie identity;
+the exporter does not duplicate the carrier. Source datum lines are sampled for
+display only. They never feed the physical reference, initialization or dynamics.
+
+The viewer offers frame selection, previous/next, discrete slow replay, camera
+yaw/elevation/reset, body IDs, normal visibility and keyboard commands. Running
+and side normal segments also differ by solid/dashed pattern. It reports the
+different units of position/angular constraint rows. Body/source and support/
+datum angles are observations, not extra constraints, contact-fit results or
+certification. Magnitudes are displayed numerically; micrometre residuals are
+not silently exaggerated in the geometry.
+
+### Actual usability and performance observations
+
+The first view fit the full source and foreshortened the assembly too strongly
+to inspect articulation. That was observed in a headless screenshot and fixed:
+the camera now fits the entire recorded assembly, uses a clearer initial angle,
+and gives cars transparent primitive geometry so the bogies/anchors remain
+readable. The inspected 1500x1200 screenshot shows both cars, all three bogies
+including the shared middle one, carriers and bearing connections. Camera fit
+uses all recorded states, so frame selection does not resize the assembly.
+
+This remains a small offline inspector. The clip spans **only .100 s**, replayed
+24 times slower with no pose interpolation. It demonstrates source coupling and
+local articulation, not a complete ride traversal. The camera is orthographic;
+there is no live authoring, picking, arbitrary project import, train asset
+renderer, contact visualization, perspective camera or editor integration. Body
+dimensions are explicitly provisional stand-ins. Source lines can leave the
+camera view; extreme camera angles can overlap labels. General display sizes,
+high-DPI behavior and owner interaction have not been manually qualified.
+
+In one native Release export observation, the slowest physics step took 3.156 ms,
+the slowest alignment/record-emission pass 2.561 ms, and the slowest combined
+step/diagnostic export 5.642 ms. The last exceeds the 4.167 ms timestep budget
+for this observation. This is why no live 240 Hz diagnostic or interactive
+performance claim is made. These are a short fixture on a shared machine, not
+worst-case bounds; rendering/preparation are excluded. HTML is about 309 KB.
+Display FPS, GPU throughput and integrated application latency are **unmeasured**.
+
+### Reproduction and verification
+
+```powershell
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance visualization::export_actual_shared_bogie_poses -- --ignored --nocapture --test-threads=1 > target/m4f/stage-c-trace.log 2>&1
+python tools/render-source-guidance-m4f.py target/m4f/stage-c-trace.log
+node tools/verify-source-viewer-m4f.mjs target/m4f/source-guidance-m4f.html
+```
+
+The Python renderer uses only the standard library and opens no window. The
+optional Node QA tool uses an installed Edge/Chromium executable (a second
+argument can provide its path), two isolated profiles under ignored `target/`,
+`--headless`, and hidden process creation. It never attaches to an active browser
+or the owner's desktop. It checks the real rendered controls, including timed
+replay advancement, keyboard commands, final-state replay reset, timeline,
+camera/reset and normal visibility. It verifies 11 body rows and 66 body faces,
+then exports the PNG. The original QA face count accidentally included a string
+inside the script as well as SVG elements; restricting that check to the actual
+SVG fixed the verifier. No renderer/physics gate was waived.
+
+Artifacts, all ignored: `target/m4f/source-guidance-m4f.html` (open manually),
+`source-guidance-m4f.json`, `source-guidance-m4f.png`, `stage-c-viewer-dom.html`,
+trace/replay and QA logs. Static screenshot inspection and real headless-browser
+interaction checks passed. Node syntax checking passed before headless execution;
+the final HTML is additionally parsed/executed by Edge. No active desktop or
+native application interaction was performed.
+
+Stage C gate: **PASS as an isolated development trace viewer**. Final full
+feature-enabled debug workspace: 523 passed, zero failed, 16 ignored (the new
+export is ignored by the ordinary suite and was explicitly executed twice in
+Release). Formatting, default workspace check, strict all-target Clippy with
+and without the research feature, trace validation, exact replay comparison,
+Python/Node syntax checks and final real headless-browser QA all passed.
+The third M4F commit checkpoints this stage and report. No native application
+Release package, manual desktop check, long-run train qualification, live frame
+rate or additional ignored profiling run is claimed.
+
 ## UX and desktop status
 
-No owner-facing UX is changed; no temporary UI is introduced in Stage A.
-Production playback, authoring and persistence are untouched. No GUI was
-controlled, no manual visual result or FPS measurement is claimed. The owner
+No owner-facing UX is changed. Stages A/B introduce no UI. Stage C implements the
+owner-authorized development visualization scope in a clearly provisional,
+separate trace viewer; its layout is not an approved production UX design.
+Production playback, authoring and persistence are untouched. Future production
+guidance presentation/workflows still require human design. No active GUI was
+controlled, no manual native-app result or FPS measurement is claimed. The owner
 regression command remains `cargo run -p quantum-x --release -- edit`: open an
 existing train project, Inspect/Initialize, Play/Pause/Reset, save/reopen. Those
 desktop checks are not manually verified by this initiative.

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>M4F experimental pose trace</title>
+<style>
+*{box-sizing:border-box}body{font:14px system-ui,sans-serif;color:#172b3a;background:#edf1f4;margin:0}main{max-width:1500px;margin:auto;padding:20px}h1{font-size:23px;margin:0 0 6px}p{margin:6px 0 14px}.banner{border-left:5px solid #976221;background:#fff4df;padding:10px 14px}.layout{display:grid;grid-template-columns:minmax(500px,1fr) 320px;gap:16px}.panel{background:white;border:1px solid #bdc8d0;border-radius:4px;padding:14px}.controls{display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:12px 0}button{font:inherit;background:white;color:#172b3a;border:1px solid #718492;border-radius:3px;padding:7px 12px;cursor:pointer}button:hover{background:#dfeaf3}button:focus-visible,input:focus-visible{outline:3px solid #246da0;outline-offset:3px}label{display:flex;align-items:center;gap:6px}input[type=range]{width:145px}#frame{width:240px}svg{display:block;width:100%;height:auto;background:#f8fafb;border:1px solid #d1dbe1}table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:5px 3px;text-align:left;border-bottom:1px solid #dce3e8}td:last-child,th:last-child{text-align:right}.metric{display:flex;justify-content:space-between;gap:8px;margin:7px 0;font-variant-numeric:tabular-nums}.small{font-size:12px;color:#415765;line-height:1.5}h2{font-size:16px;margin:0 0 10px}.legend{display:flex;gap:18px;margin:10px 0}.swatch{display:inline-block;width:15px;height:10px;margin-right:5px;border:1px solid #304a5d}#time{font-variant-numeric:tabular-nums;font-weight:600}@media(max-width:1000px){.layout{grid-template-columns:1fr}main{padding:10px}}
+</style>
+<main>
+<h1>M4F — experimental rigid-body pose trace</h1>
+<p class="banner"><strong>Development only · ideal bilateral guide experiment.</strong> Primitive bodies and datum lines are diagnostics. These are recorded dynamics states, with no live simulation, wheel-contact model, production train assets or editor integration.</p>
+<div class="controls"><button id="play">Replay slowly</button><button id="previous" title="Left arrow">Previous</button><button id="next" title="Right arrow">Next</button><label>State <input id="frame" aria-label="Recorded state" type="range" min="0" max="24" value="0" step="1"></label><span id="time" aria-live="polite"></span></div>
+<div class="layout"><section class="panel">
+<h2 id="fixture"></h2>
+<div class="controls"><label>Yaw ° <input id="yaw" type="range" min="-180" max="180" value="35"></label><label>Elevation ° <input id="elevation" type="range" min="5" max="85" value="25"></label><label><input id="normals" type="checkbox" checked>Datum normals</label><label><input id="labels" type="checkbox" checked>Body IDs</label><button id="reset">Reset view</button></div>
+<svg id="view" role="img" aria-label="Projected 3D train bodies, bearing anchors and physical source datums" viewBox="0 0 1000 600"></svg>
+<div class="legend"><span><i class="swatch" style="background:#aec7db"></i>Car</span><span><i class="swatch" style="background:#d9b474"></i>Bogie</span><span><i class="swatch" style="background:#aeb8bf"></i>Axle carrier</span></div>
+<p class="small">Two cars, three bogies with one shared middle bogie, six axle carriers. Lines connect actual bearing anchors. Short normal segments are solid for running datums and dashed for side datums. Boxes use actual body orientation and provisional dimensions. World coordinates: X forward, Y up, Z lateral; metres. The camera fits the recorded assembly; source datum lines can leave the view.</p>
+<p class="small">25 states at 1/240 s span only 0.100 s of physical time. Replay is slowed 24×, with discrete frames. No interpolation, force smoothing or track-following animation is applied. Space: replay/pause. Left/right: state. Escape: pause.</p>
+</section><aside class="panel"><h2>Physical alignment diagnostics</h2><div id="metrics"></div>
+<p class="small">c mixes translation (m) and angular bearing rows (rad); Jv uses m/s or rad/s. Body angle compares the actual rigid body to its nearest source centerline frame. Chord articulation makes a nonzero angle expected. Support angle compares carrier forward to the offset-datum tangent. These measurements add no constraints.</p>
+<table><thead><tr><th>Body ID</th><th>Frame angle °</th></tr></thead><tbody id="bodies"></tbody></table>
+<p class="small" id="cost"></p><p class="small">This viewer measures neither live physics latency nor display FPS. Source datums and frame data are frozen in this file. Camera controls change only this diagnostic view.</p>
+</aside></div></main>
+<script>
+'use strict';
+const DATA=__DATA__;
+const $=id=>document.getElementById(id), scene=DATA.scene, frames=DATA.frames;
+let timer=null;
+const add=(a,b)=>a.map((v,i)=>v+b[i]),sub=(a,b)=>a.map((v,i)=>v-b[i]),mul=(a,s)=>a.map(v=>v*s);
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+function world(body,v){const q=body.slice(4,7),t=mul(cross(q,v),2);return add(body.slice(0,3),add(v,add(mul(t,body[3]),cross(q,t))));}
+const colors={Car:'#aec7db',Bogie:'#d9b474',Carrier:'#aeb8bf'},dimensions={Car:[2.4,.65,1.1],Bogie:[.6,.16,1.25],Carrier:[.08,.08,1.3]};
+function vertices(body,id){const d=dimensions[scene.roles[id]],v=[];for(const x of [-.5,.5])for(const y of [-.5,.5])for(const z of [-.5,.5])v.push(world(body,[x*d[0],y*d[1],z*d[2]]));return v;}
+const cloud=frames.flatMap(f=>f.bodies.flatMap(vertices));
+const lo=[0,1,2].map(i=>Math.min(...cloud.map(p=>p[i]))),hi=[0,1,2].map(i=>Math.max(...cloud.map(p=>p[i])));
+const center=mul(add(lo,hi),.5);let scale=1,offset=[0,0],cameraAngles=[0,0];
+function camera(p){const [x,y,z]=sub(p,center),[a,b]=cameraAngles;const horizontal=Math.cos(a)*x+Math.sin(a)*z,depth=-Math.sin(a)*x+Math.cos(a)*z;return [horizontal,Math.cos(b)*y-Math.sin(b)*depth,Math.sin(b)*y+Math.cos(b)*depth];}
+function fit(){cameraAngles=[+$('yaw').value*Math.PI/180,+$('elevation').value*Math.PI/180];const p=cloud.map(camera);const low=[0,1].map(i=>Math.min(...p.map(v=>v[i]))),high=[0,1].map(i=>Math.max(...p.map(v=>v[i])));offset=mul(add(low,high),.5);scale=Math.min(850/(high[0]-low[0]),440/(high[1]-low[1]));}
+function project(p){const [x,y,z]=camera(p);return [500+scale*(x-offset[0]),300-scale*(y-offset[1]),z];}
+function point(p){return project(p).slice(0,2).map(v=>v.toFixed(3)).join(',');}
+function line(a,b,color,width=1,dash=''){return `<line x1="${project(a)[0]}" y1="${project(a)[1]}" x2="${project(b)[0]}" y2="${project(b)[1]}" stroke="${color}" stroke-width="${width}" ${dash?'stroke-dasharray="'+dash+'"':''}/>`;}
+function polyline(points,color,width){return `<polyline points="${points.map(point).join(' ')}" fill="none" stroke="${color}" stroke-width="${width}"/>`;}
+const faces=[[0,1,3,2],[4,6,7,5],[0,4,5,1],[2,3,7,6],[0,2,6,4],[1,5,7,3]];
+function render(){fit();const f=frames[+$('frame').value],parts=[];
+  for(let rail=0;rail<3;rail++)parts.push(polyline(scene.track.map(p=>p[rail]),rail===1?'#7f94a4':'#3e5d70',rail===1?1:2));
+  const polygons=[];
+  f.bodies.forEach((body,id)=>{const corners=vertices(body,id);
+    for(const face of faces){const v=face.map(i=>corners[i]);polygons.push({depth:v.reduce((a,p)=>a+project(p)[2],0)/4,html:`<polygon points="${v.map(point).join(' ')}" fill="${colors[scene.roles[id]]}" fill-opacity="${scene.roles[id]==='Car'?.3:.85}" stroke="#314b5d" stroke-width="1"/>`});}});
+  polygons.sort((a,b)=>a.depth-b.depth);parts.push(...polygons.map(p=>p.html));
+  f.anchors.forEach((a,i)=>{const [owner,other]=scene.edges[i];parts.push(line(f.bodies[owner].slice(0,3),a.slice(0,3),'#675032',1,'3 2'));parts.push(line(a.slice(3,6),f.bodies[other].slice(0,3),'#675032',1,'3 2'));const p=project(a);parts.push(`<circle cx="${p[0]}" cy="${p[1]}" r="3" fill="#fff" stroke="#3d3023"/>`);});
+  if($('normals').checked)f.supports.forEach((s,i)=>{const p=s.slice(4,7),normal=s.slice(7,10);parts.push(line(p,add(p,mul(normal,.22)),scene.running[i]?'#1a6a51':'#754b87',1.4,scene.running[i]?'':'3 2'));const a=project(s.slice(1,4));parts.push(`<circle cx="${a[0]}" cy="${a[1]}" r="1.7" fill="#172b3a"/>`);});
+  if($('labels').checked)f.bodies.forEach((b,i)=>{const p=project(b);parts.push(`<text x="${p[0]+5}" y="${p[1]-8}" font-size="11" font-weight="600" fill="#172b3a" stroke="#f8fafb" stroke-width="3" paint-order="stroke">${scene.roles[i]} ${i}</text>`);});
+  parts.push('<text x="20" y="28" fill="#415765" font-size="13">Recorded rigid bodies · orthographic projection · development geometry</text>');
+  $('view').innerHTML=parts.join('');$('time').textContent=`State ${f.tick}/24 · t = ${f.time.toFixed(5)} s`;
+  const gap=Math.max(...f.supports.map(s=>Math.abs(s[11]))),angle=Math.max(...f.supports.map(s=>s[12]));
+  const metrics=[['max |c| (m / rad)',f.max_position.toExponential(3)],['max |Jv| (m/s / rad/s)',f.max_velocity.toExponential(3)],['max datum gap (µm)',(gap*1e6).toFixed(3)],['max bearing gap (µm)',(f.bearing_gap*1e6).toFixed(3)],['max support angle (°)',angle.toFixed(4)],['energy drift (J)',f.energy_drift.toFixed(6)]];
+  $('metrics').innerHTML=metrics.map(([a,b])=>`<div class="metric"><span>${a}</span><strong>${b}</strong></div>`).join('');
+  $('bodies').innerHTML=f.bodies.map((b,i)=>`<tr><td>${scene.roles[i]} ${i}</td><td>${b[7].toFixed(4)}</td></tr>`).join('');
+}
+function pause(){if(timer!==null)clearInterval(timer);timer=null;$('play').textContent='Replay slowly';}
+function advance(delta){pause();$('frame').value=Math.max(0,Math.min(24,+$('frame').value+delta));render();}
+$('play').onclick=()=>{if(timer!==null){pause();return;}if(+$('frame').value===24){$('frame').value=0;render();}$('play').textContent='Pause replay';timer=setInterval(()=>{if(+$('frame').value===24){pause();return;}$('frame').value=+$('frame').value+1;render();},100);};
+$('previous').onclick=()=>advance(-1);$('next').onclick=()=>advance(1);
+$('frame').oninput=()=>{pause();render();};for(const id of ['yaw','elevation','normals','labels'])$(id).oninput=render;
+$('reset').onclick=()=>{$('yaw').value=35;$('elevation').value=25;render();};
+document.onkeydown=e=>{if(e.target.tagName==='INPUT')return;if(e.key==='ArrowRight'){advance(1);e.preventDefault();}if(e.key==='ArrowLeft'){advance(-1);e.preventDefault();}if(e.code==='Space'){$('play').click();e.preventDefault();}if(e.key==='Escape')pause();};
+$('fixture').textContent=scene.title;
+$('cost').textContent=`Native Release export observation: slowest physics step ${DATA.cost.max_solver_ms.toFixed(3)} ms; slowest diagnostics ${DATA.cost.max_diagnostics_ms.toFixed(3)} ms; slowest combined ${DATA.cost.max_combined_ms.toFixed(3)} ms. One short fixture, shared machine; rendering excluded.`;
+render();
+// Automated headless QA exercises the real controls, then leaves a middle frame.
+if(new URLSearchParams(location.search).has('selftest')){(async()=>{
+  const check=(value,message)=>{if(!value)throw Error(message);};
+  $('next').click();check(+$('frame').value===1,'next');$('previous').click();check(+$('frame').value===0,'previous');
+  $('frame').value=24;$('frame').dispatchEvent(new Event('input'));check($('time').textContent.includes('0.10000'),'time');
+  $('play').click();check(timer!==null,'replay');check($('time').textContent.includes('State 0/24'),'replay resets final state');$('play').click();check(timer===null,'pause');
+  const initial=$('view').innerHTML;$('yaw').value=15;$('yaw').dispatchEvent(new Event('input'));check($('view').innerHTML!==initial,'camera');$('reset').click();check(+$('yaw').value===35,'reset');
+  $('normals').checked=false;$('normals').dispatchEvent(new Event('input'));check(!$('view').innerHTML.includes('#1a6a51'),'normals');$('normals').checked=true;
+  $('frame').value=12;render();check($('bodies').children.length===11,'body rows');check($('view').querySelectorAll('polygon').length===66,'body faces');
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowRight'}));check(+$('frame').value===13,'keyboard next');document.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowLeft'}));check(+$('frame').value===12,'keyboard previous');
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space'}));check(timer!==null,'keyboard replay');await new Promise(resolve=>setTimeout(resolve,150));check(+$('frame').value>12,'replay advances actual states');check($('time').textContent.includes(`State ${$('frame').value}/`),'replay updates view');document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}));check(timer===null,'keyboard pause');$('frame').value=12;render();
+  document.documentElement.dataset.selfTest='passed';
+})().catch(error=>{document.documentElement.dataset.selfTest='failed:'+error.message;console.error(error);});}
+</script></html>
