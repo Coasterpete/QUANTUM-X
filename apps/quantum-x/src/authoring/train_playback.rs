@@ -524,7 +524,10 @@ pub(super) struct PresentationSample {
     pub starved: bool,
 }
 pub(super) fn update(s: &mut Session, ctx: &egui::Context) {
-    if s.workbench.active == super::workbench::Profile::Train
+    // Simulator Mode owns its own (physical-camera-only) shortcuts.
+    let editor_keys = !s.simulator.blocks_editor_input();
+    if editor_keys
+        && s.workbench.active == super::workbench::Profile::Train
         && !ctx.egui_wants_keyboard_input()
         && !s.project_prompt_open()
         && s.file_dialog.is_none()
@@ -557,7 +560,8 @@ pub(super) fn update(s: &mut Session, ctx: &egui::Context) {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
     }
-    if s.workbench.active == super::workbench::Profile::Train
+    if editor_keys
+        && s.workbench.active == super::workbench::Profile::Train
         && !ctx.egui_wants_keyboard_input()
         && !s.project_prompt_open()
         && s.file_dialog.is_none()

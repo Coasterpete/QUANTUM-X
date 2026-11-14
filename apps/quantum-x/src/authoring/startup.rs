@@ -134,6 +134,8 @@ pub(super) struct App {
     workbench: Workbench,
     preferences: PreferenceStore,
     pending_scene: Option<InspectionScene>,
+    /// `--gui-smoke-test simulator` only; never set in normal launches.
+    simulator_smoke: Option<super::simulator_smoke::Script>,
 }
 impl App {
     /// Deterministic diagnostic capture without personal recents or preferences.
@@ -167,6 +169,7 @@ impl App {
             workbench,
             preferences,
             pending_scene: None,
+            simulator_smoke: None,
         };
         app.refresh_recents();
         Ok(app)
@@ -326,11 +329,29 @@ impl App {
     }
 }
 impl EditorSurface for App {
+    fn smoke_script(&mut self) -> Result<bool, String> {
+        match (&mut self.simulator_smoke, &mut self.session) {
+            (Some(script), Some(session)) if self.page == Page::Editor => script.advance(session),
+            (Some(_), _) => Err("simulator smoke test has no open editor session".into()),
+            (None, _) => Ok(false),
+        }
+    }
+    fn smoke_script_report(&self) -> serde_json::Value {
+        self.simulator_smoke.as_ref().map_or(
+            serde_json::Value::Null,
+            super::simulator_smoke::Script::report,
+        )
+    }
     fn window_title(&self) -> String {
         let title = if self.page == Page::Editor {
             return format!(
-                "{} — Editor — {}",
+                "{} — {} — {}",
                 qx_rendering::identity::product().name,
+                if self.session.as_ref().is_some_and(|s| s.simulator.active()) {
+                    "Simulator"
+                } else {
+                    "Editor"
+                },
                 self.session
                     .as_ref()
                     .map(|s| s.editor.project().metadata.name.as_str())
@@ -376,6 +397,7 @@ impl EditorSurface for App {
     fn select_section(&mut self, id: qx_geometry::authoring::SectionId) {
         if self.page == Page::Editor
             && let Some(s) = &mut self.session
+            && !s.simulator.blocks_editor_input()
         {
             s.select(id);
         }
@@ -383,6 +405,7 @@ impl EditorSurface for App {
     fn inspect_station(&mut self, point: Option<(qx_geometry::authoring::SectionId, f64)>) {
         if self.page == Page::Editor
             && let Some(s) = &mut self.session
+            && !s.simulator.blocks_editor_input()
         {
             s.viewport_inspection = point;
         }
@@ -493,8 +516,7 @@ pub(crate) fn exit_log(exit: &qx_rendering::EditorExit) -> String {
         (exit.reason == qx_rendering::ExitReason::CloseApproved).into();
     serde_json::to_string(&record).expect("exit record serializes")
 }
-pub(crate) const GUI_SMOKE_USAGE: &str =
-    "usage: quantum-x --gui-smoke-test [welcome | edit [project.qx.json]]";
+pub(crate) const GUI_SMOKE_USAGE: &str = "usage: quantum-x --gui-smoke-test [welcome | edit [project.qx.json] | simulator [project.qx.json]]";
 /// Startup route exercised by `--gui-smoke-test`; mirrors normal launch routes.
 pub(crate) fn smoke_launch(args: &[std::ffi::OsString]) -> Result<Launch, String> {
     match args {
@@ -515,9 +537,26 @@ pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn 
         atomic::{AtomicBool, Ordering},
     };
     use std::time::{Duration, Instant};
-    let entry = smoke_launch(args)?;
+    // `simulator [project]` opens the editor, then scripts a mode round trip.
+    let simulator = args.first().is_some_and(|a| a == "simulator");
+    let entry = match args {
+        [_] if simulator => Launch::Editor(None),
+        [_, path] if simulator => Launch::Editor(Some(PathBuf::from(path))),
+        _ if simulator => return Err(GUI_SMOKE_USAGE.into()),
+        _ => smoke_launch(args)?,
+    };
     let mut app = App::offscreen()?;
-    app.enter_launch(entry.clone())?;
+    if simulator && matches!(entry, Launch::Editor(None)) {
+        let project = super::simulator_smoke::fixture();
+        let scene = session::scene(&project, &app.catalog, Default::default())?;
+        let candidate = Session::new(project, None, app.catalog.clone())?;
+        app.install(candidate, scene);
+    } else {
+        app.enter_launch(entry.clone())?;
+    }
+    if simulator {
+        app.simulator_smoke = Some(super::simulator_smoke::Script::new());
+    }
     if matches!(entry, Launch::Editor(_)) && app.session.is_none() {
         return Err(format!("GUI smoke test could not open the editor: {}", app.status).into());
     }
@@ -549,7 +588,9 @@ pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn 
     let mut report = qx_rendering::smoke_test(initial, app, config);
     done.store(true, Ordering::Release);
     report["product"] = qx_rendering::identity::product().name.as_str().into();
-    report["page"] = if matches!(entry, Launch::Editor(_)) {
+    report["page"] = if simulator {
+        "simulator"
+    } else if matches!(entry, Launch::Editor(_)) {
         "editor"
     } else {
         "welcome"

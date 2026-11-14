@@ -93,6 +93,12 @@ pub(super) fn show(
                     ui.menu_button(if ui.available_width() < 300. { "Layout" } else { "Window / Layout" }, |ui| {
                         ui.selectable_value(&mut session.workbench.active, Profile::Track, "Track Workspace   Ctrl+1");
                         ui.selectable_value(&mut session.workbench.active, Profile::Train, "Train Workspace   Ctrl+2");
+                        // DEVELOPMENT-ONLY entry point: placement and styling await owner design.
+                        let readiness = super::simulator::readiness(session);
+                        if ui.add_enabled(readiness.is_ok(), egui::Button::new("Simulator Mode (development)…"))
+                            .on_hover_text("Simulate the committed document with the associated train. Provisional development entry point.")
+                            .on_disabled_hover_text(readiness.err().unwrap_or_default())
+                            .clicked() { session.simulator.entry_requested = true; ui.close(); }
                         ui.separator();
                         if ui.button("Reset current workspace layout").clicked() { session.workbench.reset_layout(); ui.close(); }
                         if ui.button("Reset Window/Layout").clicked() { let snap = session.workbench.snap; session.workbench = Default::default(); session.workbench.snap = snap; session.preferences.allow_reset(); window = Some(WindowCommand::Reset); ui.close(); }

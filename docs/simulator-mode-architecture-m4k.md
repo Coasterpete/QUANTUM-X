@@ -1,7 +1,10 @@
 # Native Editor Mode and Simulator Mode — M4K proposal
 
 Status: proposed architecture and UX outline, **not an approved redesign**.
-M4J implements no mode transition. Public product: QUANTUM Dynamics; repository:
+M4J implements no mode transition. The first M4K vertical slice is implemented
+and reported in [simulator-mode-m4k.md](simulator-mode-m4k.md); this proposal
+remains the reference for deferred work and open owner decisions.
+Public product: QUANTUM Dynamics; repository:
 QUANTUM-X. Both workflows use the same production physics and rendered scene.
 
 ## Existing implementation, established by source inspection

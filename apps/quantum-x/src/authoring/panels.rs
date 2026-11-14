@@ -55,6 +55,9 @@ pub(super) fn workspace(
     scene: &InspectionScene,
     display: &mut DisplayOptions,
 ) -> SurfaceOutput {
+    if session.simulator.active() {
+        return super::simulator_ui::workspace(session, ctx, scene, display);
+    }
     session.expansion.sync(session.editor.project());
     session.poll_completion(ctx);
     let before_expansion = (
@@ -104,6 +107,10 @@ pub(super) fn workspace(
     // File/history actions run after numeric widgets consume this input batch.
     session.run_ui_action();
     super::train_playback::update(session, ctx);
+    if std::mem::take(&mut session.simulator.entry_requested) {
+        super::simulator::request_entry(session, scene);
+    }
+    super::simulator::poll(session);
     if session.file_dialog.is_some() {
         egui::Modal::new(egui::Id::unique("native file dialog pending")).show(ctx, |ui| {
             ui.heading("File dialog");
@@ -279,6 +286,8 @@ pub(super) fn workspace(
                     session.close_approved = true;
                 }
             });
+        } else if session.simulator.preparing() || session.simulator.error.is_some() {
+            super::simulator_ui::editor_feedback(session, ctx);
         } else {
             super::workflow::resolution_dialog(session, ctx);
         }

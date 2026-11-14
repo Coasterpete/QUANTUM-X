@@ -28,7 +28,7 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x editor-workflow-scenario <output-directory>
   quantum-x ui-reference-scenario <project.qx.json> <output-directory>
   quantum-x --startup-check [edit [project.qx.json] | project.qx.json]
-  quantum-x --gui-smoke-test [welcome | edit [project.qx.json]]
+  quantum-x --gui-smoke-test [welcome | edit [project.qx.json] | simulator [project.qx.json]]
   quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>
   quantum-x authoring-scenario <output-directory>
   quantum-x transition-scenario <new-output-directory>
