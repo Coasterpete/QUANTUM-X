@@ -186,6 +186,7 @@ fn rider_and_chase_cameras_share_powered_and_unpowered_physics_poses() {
         let time = Instant::now();
         s.workbench.active = Profile::Train;
         s.playback.snapshot = Some(Snapshot {
+            velocity_initialization: None,
             poses: sim.snapshot().unwrap(),
             previous: sim.previous_snapshot().clone(),
             committed_at: time,

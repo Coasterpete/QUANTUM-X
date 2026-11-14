@@ -1,0 +1,2 @@
+# Preserve archival inputs and manifest digests, including original mixed EOLs.
+* -text whitespace=cr-at-eol

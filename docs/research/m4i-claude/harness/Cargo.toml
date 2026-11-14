@@ -1,0 +1,16 @@
+[package]
+name = "qx-reference-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Scratch harness outside the repository. Links the worktree crates by path;
+# changes no tracked file. B1 research modules are included read-only by #[path].
+[dependencies]
+qx-geometry = { path = "C:/Users/coast/.codex/worktrees/train-articulation-m4h/QUANTUM-X/crates/qx-geometry", features = ["experimental-graph-source"] }
+qx-physics = { path = "C:/Users/coast/.codex/worktrees/train-articulation-m4h/QUANTUM-X/crates/qx-physics" }
+qx-document = { path = "C:/Users/coast/.codex/worktrees/train-articulation-m4h/QUANTUM-X/crates/qx-document" }
+
+[profile.release]
+opt-level = 3
+debug-assertions = false

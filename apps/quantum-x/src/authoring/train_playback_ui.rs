@@ -3,6 +3,29 @@ use super::{session::Session, train_playback::Action};
 
 pub(super) fn controls(s: &mut Session, ui: &mut egui::Ui, scene: &qx_rendering::InspectionScene) {
     ui.heading("Rigid-body playback · development controls");
+    if s.playback.experimental_velocity {
+        ui.small("M4J experimental velocity initialization · lead running-gear speed contract");
+    }
+    if let Some(r) = s
+        .playback
+        .snapshot
+        .as_ref()
+        .and_then(|p| p.velocity_initialization.as_ref())
+    {
+        let component = s
+            .editor
+            .project()
+            .heartline
+            .train_configuration_id
+            .as_ref()
+            .and_then(|id| s.editor.project().trains.iter().find(|t| &t.id == id))
+            .and_then(|t| t.components.get(r.reference.body))
+            .map_or("unknown", |c| c.id.as_str());
+        ui.small(format!(
+            "Lead {component} guide {}: {:.9} m/s; residual {:.2e}; {} sweeps",
+            r.reference_guide, r.achieved_speed_mps, r.max_residual, r.sweeps
+        ));
+    }
     let active = s.playback.active();
     super::operations_ui::physical(s, ui);
     if s.expansion.operations != s.editor.project().operations {

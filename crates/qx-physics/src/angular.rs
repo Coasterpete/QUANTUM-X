@@ -32,7 +32,7 @@ impl AngularJoint {
         }
         Ok(())
     }
-    fn frames(&self, a: &Body, b: &Body) -> Result<(Frame, Frame)> {
+    pub(crate) fn frames(&self, a: &Body, b: &Body) -> Result<(Frame, Frame)> {
         let (fa, fb) = match &self.model {
             JointModel::Fixed { frame_a, frame_b }
             | JointModel::Hinge {
@@ -87,12 +87,7 @@ impl AngularJoint {
         apply(bodies, self.body_a, self.body_b, impulse);
         Ok(impulse)
     }
-    pub(crate) fn solve(
-        &self,
-        bodies: &mut [Body],
-        dt: f64,
-        limit_impulse: &mut f64,
-    ) -> Result<Vec3> {
+    pub(crate) fn bilateral_rows(&self, bodies: &[Body]) -> Result<([(Vec3, f64); 3], usize)> {
         let (fa, fb) = self.frames(&bodies[self.body_a], &bodies[self.body_b])?;
         let relative = fa
             .orientation()
@@ -105,9 +100,7 @@ impl AngularJoint {
             // Using rotation_vector().x with the tangent Jacobian couples free
             // pitch/yaw into roll and can stall assembly on a changing bank.
             let (n, error) = roll_constraint(fa, fb)?;
-            let p = angular_impulse(bodies, self.body_a, self.body_b, n, error, dt)?;
-            apply(bodies, self.body_a, self.body_b, p);
-            return Ok(p);
+            return Ok(([(n, error), (Vec3::ZERO, 0.), (Vec3::ZERO, 0.)], 1));
         }
         let fixed = matches!(self.model, JointModel::Fixed { .. });
         let error = if fixed {
@@ -117,12 +110,21 @@ impl AngularJoint {
                 .and_then(|q| q.rotation_vector())
                 .map_err(|e| e.to_string())?
         };
+        Ok((
+            [fa.tangent(), fa.normal(), fa.lateral()].map(|n| (n, error.dot(n))),
+            if fixed { 3 } else { 2 },
+        ))
+    }
+    pub(crate) fn solve(
+        &self,
+        bodies: &mut [Body],
+        dt: f64,
+        limit_impulse: &mut f64,
+    ) -> Result<Vec3> {
+        let (rows, count) = self.bilateral_rows(bodies)?;
         let mut total = Vec3::ZERO;
-        for n in [fa.tangent(), fa.normal(), fa.lateral()]
-            .into_iter()
-            .take(if fixed { 3 } else { 2 })
-        {
-            let p = angular_impulse(bodies, self.body_a, self.body_b, n, error.dot(n), dt)?;
+        for (n, error) in rows.into_iter().take(count) {
+            let p = angular_impulse(bodies, self.body_a, self.body_b, n, error, dt)?;
             apply(bodies, self.body_a, self.body_b, p);
             total = total + p;
         }
@@ -130,6 +132,7 @@ impl AngularJoint {
             limits: Some(l), ..
         } = self.model
         {
+            let (fa, fb) = self.frames(&bodies[self.body_a], &bodies[self.body_b])?;
             let theta = angle(fa.orientation().conjugate().compose(fb.orientation()));
             let bound = if theta < l.min_rad {
                 Some((l.min_rad, true))

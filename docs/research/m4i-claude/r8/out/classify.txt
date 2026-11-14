@@ -1,0 +1,19 @@
+ handoff ticks   1-300: max |c_start - c_end(prev)| 0.000e+00 m
+ handoff ticks 301-301: max |c_start - c_end(prev)| 0.000e+00 m
+ handoff ticks 302-563: max |c_start - c_end(prev)| 3.209e-17 m
+== out/r8.jsonl substeps 2252
+ max |c| 1.649e-05   max |R| 3.000e-03   max |sweep r| 7.805e-04
+ ticks   1- 10: max unexplained |e_c| 8.045e-10 m, |e_R| 1.158e-06 m/s; max gate |R| 2.260e-03
+ ticks  11-300: max unexplained |e_c| 7.285e-10 m, |e_R| 1.049e-06 m/s; max gate |R| 2.210e-03
+ ticks 301-302: max unexplained |e_c| 4.679e-12 m, |e_R| 6.735e-09 m/s; max gate |R| 7.158e-05
+ ticks 303-330: max unexplained |e_c| 2.057e-11 m, |e_R| 2.962e-08 m/s; max gate |R| 1.963e-04
+ ticks 331-563: max unexplained |e_c| 1.178e-09 m, |e_R| 1.696e-06 m/s; max gate |R| 3.000e-03
+ handoff ticks   1-300: max |c_start - c_end(prev)| 0.000e+00 m
+ handoff ticks 301-301: max |c_start - c_end(prev)| 1.000e-05 m
+ handoff ticks 302-563: max |c_start - c_end(prev)| 0.000e+00 m
+== out/perturb.jsonl substeps 1320
+ max |c| 1.272e-05   max |R| 2.260e-03   max |sweep r| 6.301e-04
+ ticks   1- 10: max unexplained |e_c| 8.045e-10 m, |e_R| 1.158e-06 m/s; max gate |R| 2.260e-03
+ ticks  11-300: max unexplained |e_c| 7.285e-10 m, |e_R| 1.049e-06 m/s; max gate |R| 2.210e-03
+ ticks 301-302: max unexplained |e_c| 4.680e-12 m, |e_R| 6.740e-09 m/s; max gate |R| 1.918e-03
+ ticks 303-330: max unexplained |e_c| 2.035e-11 m, |e_R| 2.931e-08 m/s; max gate |R| 3.243e-04

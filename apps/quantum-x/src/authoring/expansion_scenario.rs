@@ -242,6 +242,7 @@ pub(crate) fn run(output: PathBuf) -> Result<(), Box<dyn Error>> {
         if tick == 240 || tick == 1200 {
             let now = Instant::now();
             s.playback.snapshot = Some(Snapshot {
+                velocity_initialization: None,
                 poses: sim.snapshot()?,
                 previous: sim.previous_snapshot().clone(),
                 committed_at: now,

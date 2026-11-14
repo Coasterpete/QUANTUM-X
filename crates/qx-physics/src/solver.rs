@@ -284,22 +284,19 @@ impl World {
                         attitudes.iter().zip(&rail_targets).enumerate()
                     {
                         let b = &mut self.bodies[a.body];
-                        let rail = Frame::new(b.pose.orientation.compose(a.local_frame))
-                            .map_err(|e| e.to_string())?;
-                        let (axis, error) = crate::angular::roll_constraint(*target, rail)?;
-                        // C = twist(track(s(point))^-1 * rail_frame). The
-                        // spatial bank derivative contributes a LINEAR Jacobian
-                        // as well as angular torque. A torque-only moving target
-                        // would do unbalanced work and miss roll inertia's effect
-                        // on longitudinal motion.
-                        let r = b.frame().local_to_world(a.local_point_m);
-                        let delta = b.pose.position_m + r - *target_position;
-                        let projection = 1. - delta.dot(derivative.cross(target.tangent()));
-                        if !projection.is_finite() || projection <= 1e-6 {
-                            return Err("rail attitude station projection is singular".into());
-                        }
-                        let linear = target.tangent() * (-axis.dot(*derivative) / projection);
-                        let angular = axis + r.cross(linear);
+                        let crate::constraint_geometry::RailTwist {
+                            arm: r,
+                            axis,
+                            error,
+                            linear,
+                            angular,
+                        } = crate::constraint_geometry::rail_twist(
+                            b,
+                            a,
+                            *target,
+                            *target_position,
+                            *derivative,
+                        )?;
                         let velocity = linear.dot(b.linear_velocity_mps)
                             + angular.dot(b.angular_velocity_radps);
                         let mass = linear.dot(linear) / b.mass.mass_kg
@@ -323,7 +320,7 @@ impl World {
                     let ra = a.frame().local_to_world(j.anchor_a_m);
                     let rb = b.frame().local_to_world(j.anchor_b_m);
                     let error = (b.pose.position_m + rb) - (a.pose.position_m + ra);
-                    for n in [Vec3::X, Vec3::Y, Vec3::Z] {
+                    for n in crate::constraint_geometry::BALL_AXES {
                         let velocity = b.point_velocity(rb) - a.point_velocity(ra);
                         let denom = a.effective_mass(ra, n) + b.effective_mass(rb, n);
                         let impulse = scalar_impulse(velocity.dot(n), error.dot(n), denom, dt)?;
@@ -339,18 +336,7 @@ impl World {
                     let b = &mut self.bodies[g.body];
                     let r = b.frame().local_to_world(g.local_point_m);
                     let delta = b.pose.position_m + r - g.line_origin_m;
-                    let axis = if g.line_direction.y.abs() < 0.9 {
-                        Vec3::Y
-                    } else {
-                        Vec3::X
-                    };
-                    let n1 = g
-                        .line_direction
-                        .cross(axis)
-                        .normalized()
-                        .map_err(|e| e.to_string())?;
-                    let n2 = g.line_direction.cross(n1);
-                    for n in [n1, n2] {
+                    for n in crate::constraint_geometry::line_normals(g.line_direction)? {
                         let impulse = scalar_impulse(
                             b.point_velocity(r).dot(n),
                             delta.dot(n),
@@ -371,7 +357,7 @@ impl World {
                         let b = &mut self.bodies[g.body];
                         let r = b.frame().local_to_world(g.local_point_m);
                         let delta = b.pose.position_m + r - sample.position_m;
-                        for n in [sample.frame.normal(), sample.frame.lateral()] {
+                        for n in crate::constraint_geometry::track_normals(sample.frame) {
                             let impulse = scalar_impulse(
                                 b.point_velocity(r).dot(n),
                                 delta.dot(n),

@@ -514,6 +514,7 @@ pub(crate) fn startup_check(
         serde_json::json!({"product": qx_rendering::identity::product().name,
         "no_arguments": match entry { Launch::Welcome => "welcome", Launch::Command => "cli-help", _ => "editor" },
             "document_open": app.session.is_some(), "project_name": app.session.as_ref().map(|s| &s.editor.project().metadata.name),
+            "experimental_velocity_initialization": app.session.as_ref().is_some_and(|s| s.playback.experimental_velocity),
             "page": if entry == Launch::Command { "cli-help" } else { match app.page {Page::Editor => "editor", Page::Welcome => "welcome", Page::New => "new", Page::Library => "library", Page::Projects => "projects", Page::Info => "info", Page::News => "news", Page::Configuration => "setup"} },
             "status": app.status, "sample_projects": app.projects.samples.len(), "templates": app.projects.templates.len()}),
     )

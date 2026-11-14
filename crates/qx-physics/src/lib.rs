@@ -7,6 +7,7 @@ pub mod assembly_diagnostics;
 mod body;
 pub mod bogie_fitting;
 mod chord;
+mod constraint_geometry;
 pub use angular::AngularJoint;
 pub mod inspection;
 mod playback;
@@ -24,3 +25,4 @@ pub type Result<T> = std::result::Result<T, String>;
 
 pub mod consist;
 pub mod devices;
+pub mod velocity_initialization;

@@ -92,6 +92,7 @@ fn remember(timeline: &mut VecDeque<TimedPose>, s: &TrackSimulation, at: Instant
 }
 #[derive(Clone, Debug)]
 pub(super) struct Snapshot {
+    pub velocity_initialization: Option<qx_physics::velocity_initialization::Report>,
     pub poses: ConsistInspection,
     pub previous: ConsistInspection,
     pub committed_at: Instant,
@@ -129,7 +130,7 @@ struct Worker {
 }
 type Latest = Arc<Mutex<Option<(u64, Result<Snapshot, String>)>>>;
 impl Worker {
-    fn new() -> Self {
+    fn new(experimental_velocity: bool) -> Self {
         let (send, receive) = mpsc::channel();
         let latest = Arc::new(Mutex::new(None));
         let output = latest.clone();
@@ -162,22 +163,33 @@ impl Worker {
                     }) => {
                         epoch = e;
                         running = false;
+                        let result = if experimental_velocity {
+                            TrackSimulation::with_experimental_velocity_initialization(
+                                *train,
+                                track,
+                                station,
+                                *operations,
+                            )
+                        } else {
+                            TrackSimulation::with_operations(*train, track, station, *operations)
+                        };
+                        match result {
+                            Ok(s) => simulation = Some(s),
+                            Err(e) => {
+                                // Keep any prior valid simulation paused. A failed
+                                // candidate must never replace its reset snapshot.
+                                if let Ok(mut slot) = output.lock() {
+                                    *slot = Some((epoch, Err(e)));
+                                }
+                                continue;
+                            }
+                        }
                         diagnostics = None;
                         error = None;
                         lag_events = 0;
                         timing = WorkerTiming::default();
                         collapse_pair = true;
                         committed_at = Instant::now();
-                        match TrackSimulation::with_operations(*train, track, station, *operations)
-                        {
-                            Ok(s) => simulation = Some(s),
-                            Err(e) => {
-                                simulation = None;
-                                if let Ok(mut slot) = output.lock() {
-                                    *slot = Some((epoch, Err(e)));
-                                }
-                            }
-                        }
                     }
                     Ok(Request::Action(e, action)) if e == epoch => {
                         if let Some(s) = &mut simulation {
@@ -268,6 +280,7 @@ impl Worker {
                         remember(&mut timeline, s, committed_at);
                     }
                     let value = s.snapshot().map(|poses| Snapshot {
+                        velocity_initialization: s.velocity_initialization().cloned(),
                         previous: if collapse_pair {
                             poses.clone()
                         } else {
@@ -300,7 +313,20 @@ impl Worker {
         Self { send, latest }
     }
 }
+/// Launch-only developer contract, never serialized or selected in normal UI.
+pub(super) const VELOCITY_ENV: &str = "QX_EXPERIMENTAL_TRAIN_VELOCITY";
+pub(super) fn velocity_opt_in(value: Option<&str>) -> Result<bool, String> {
+    match value {
+        None => Ok(false),
+        Some("compatible-lead") => Ok(true),
+        Some(_) => Err(format!(
+            "{VELOCITY_ENV}: expected compatible-lead; remove the setting for legacy initialization"
+        )),
+    }
+}
 pub(super) struct State {
+    pub experimental_velocity: bool,
+    launch_error: Option<String>,
     worker: Option<Worker>,
     source: Option<Source>,
     epoch: u64,
@@ -313,7 +339,15 @@ pub(super) struct State {
 }
 impl Default for State {
     fn default() -> Self {
+        let value = std::env::var_os(VELOCITY_ENV);
+        let policy = velocity_opt_in(
+            value
+                .as_ref()
+                .map(|v| v.to_str().unwrap_or("invalid unicode")),
+        );
         Self {
+            experimental_velocity: policy.as_ref().copied().unwrap_or(false),
+            launch_error: policy.err(),
             worker: None,
             source: None,
             epoch: 0,
@@ -405,13 +439,25 @@ impl State {
         track: &GeneratedTrack,
         station: f64,
     ) {
-        self.discard();
+        if let Some(e) = &self.launch_error {
+            self.error = Some(e.clone());
+            return;
+        }
         self.error = None;
         let Some(source) = Source::new(project, options) else {
             self.error = Some("associate a saved train first".into());
             return;
         };
-        let worker = self.worker.get_or_insert_with(Worker::new);
+        if self.source.as_ref().is_some_and(|old| old != &source) {
+            self.discard();
+        }
+        self.epoch = self.epoch.wrapping_add(1);
+        if let Some(p) = &mut self.snapshot {
+            p.running = false;
+        }
+        let worker = self
+            .worker
+            .get_or_insert_with(|| Worker::new(self.experimental_velocity));
         let request = Request::Load {
             epoch: self.epoch,
             train: Box::new(source.train.clone()),

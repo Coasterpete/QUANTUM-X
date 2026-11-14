@@ -1,4 +1,10 @@
 //! Spatial RK4 integration. See docs/core-foundation.md for equations/error limits.
+#[cfg(feature = "experimental-graph-source")]
+pub mod prepared;
+mod rate;
+#[cfg(feature = "experimental-graph-source")]
+mod station_jet;
+
 use crate::{
     GeometryError, Result,
     authoring::{
@@ -202,49 +208,38 @@ struct Context<'a> {
     gravity: f64,
 }
 impl Context<'_> {
+    fn knots(self) -> Result<Vec<f64>> {
+        let mut knots = vec![0.0, self.section.extent];
+        for (_, channel) in self.section.channels() {
+            knots.extend(
+                channel
+                    .integration_knots()?
+                    .into_iter()
+                    .filter(|x| *x > 0.0 && *x < self.section.extent),
+            );
+        }
+        knots.sort_by(f64::total_cmp);
+        knots.dedup_by(|a, b| crate::same_input(*a, *b));
+        if let Some(last) = knots.last_mut() {
+            *last = self.section.extent;
+        }
+        Ok(knots)
+    }
     fn omega(self, x: f64, q: Quaternion, side: Side) -> Result<Vec3> {
         let frame = Frame::new(q)?;
         let t = frame.tangent();
         let n = frame.normal();
         let l = frame.lateral();
-        let scale = self.section.domain.metres_per_input(self.speed);
-        let value = |c: &crate::transition::Channel| c.evaluate_side(x, side).map(|e| e.value);
-        let twist = value(&self.section.roll_rate)? / scale;
-        let dt = match &self.section.kind {
-            SectionKind::Spline { .. } => {
-                return Err(GeometryError("spline uses its analytic evaluator".into()));
-            }
-            SectionKind::Straight {} => Vec3::ZERO,
-            SectionKind::Arc {
-                radius_m,
-                plane_angle_rad,
-            } => (n * plane_angle_rad.cos() + l * plane_angle_rad.sin()) / *radius_m,
-            SectionKind::Force {
-                normal_g,
-                lateral_g,
-            } => {
-                let grav = Vec3::new(0.0, -self.gravity, 0.0);
-                n * ((self.gravity * value(normal_g)? + grav.dot(n)) / (self.speed * self.speed))
-                    + l * ((self.gravity * value(lateral_g)? + grav.dot(l))
-                        / (self.speed * self.speed))
-            }
-            SectionKind::RiderLocal {
-                pitch_rate,
-                yaw_rate,
-            } => n * (value(pitch_rate)? / scale) + l * (value(yaw_rate)? / scale),
-            SectionKind::Geometric {
-                pitch_rate,
-                yaw_rate,
-            } => {
-                ensure(
-                    (1.0 - t.y * t.y).max(0.0).sqrt() > 1e-6,
-                    "world geometric pitch/yaw undefined near vertical; use rider-local controls",
-                )?;
-                let (up, _) = frame.horizontal_basis()?;
-                up * (value(pitch_rate)? / scale) + t.cross(Vec3::Y) * (value(yaw_rate)? / scale)
-            }
+        let up = if matches!(self.section.kind, SectionKind::Geometric { .. }) {
+            ensure(
+                (1.0 - t.y * t.y).max(0.0).sqrt() > 1e-6,
+                "world geometric pitch/yaw undefined near vertical; use rider-local controls",
+            )?;
+            Some(frame.horizontal_basis()?.0)
+        } else {
+            None
         };
-        let omega = t.cross(dt) + t * twist;
+        let omega = self.omega_axes(t, n, l, up, |c| c.evaluate_side(x, side).map(|e| e.value))?;
         ensure(omega.is_finite(), "nonfinite curvature/twist")?;
         Ok(omega)
     }
@@ -371,23 +366,11 @@ pub fn generate(
             )?;
             result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(0.0),code:"section_rate_jump",message:"pose is continuous; curvature, twist, or reference speed jumps at the region boundary".into()});
         }
-        let mut knots = vec![0.0, section.extent];
+        let knots = context.knots()?;
         for (name, channel) in section.channels() {
-            knots.extend(
-                channel
-                    .integration_knots()?
-                    .into_iter()
-                    .filter(|x| *x > 0.0 && *x < section.extent),
-            );
             for issue in channel.continuity()? {
                 result.diagnostics.push(Diagnostic{section_id:section.id,input:Some(issue.input),code:"channel_discontinuity",message:format!("{name}: value jump {}, derivative jump {}, second derivative jump {}; one-sided integration preserves pose",issue.value_jump,issue.derivative_jump,issue.second_derivative_jump)});
             }
-        }
-        knots.sort_by(f64::total_cmp);
-        knots.dedup_by(|a, b| crate::same_input(*a, *b));
-        // Retain the explicit endpoint when channel knots differ by roundoff.
-        if let Some(last) = knots.last_mut() {
-            *last = section.extent;
         }
         let start_sample = result.samples.len() - 1;
         let start_distance = distance;

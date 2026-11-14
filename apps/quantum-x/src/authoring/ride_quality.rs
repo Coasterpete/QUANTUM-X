@@ -265,6 +265,7 @@ pub fn record(input: PathBuf, output: PathBuf) -> Result<(), Box<dyn Error>> {
             step_max_ms = step_max_ms.max(ms);
         }
         s.playback.snapshot = Some(super::train_playback::Snapshot {
+            velocity_initialization: None,
             poses: sim.snapshot()?,
             previous: sim.previous_snapshot().clone(),
             committed_at: epoch

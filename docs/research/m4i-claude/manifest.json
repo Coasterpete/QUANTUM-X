@@ -1,0 +1,110 @@
+[
+  {
+    "file": "harness/analyze.py",
+    "bytes": 8485,
+    "sha256": "24a935833e6bc17e911b569bc3aeeb6a6f7305f4845c2904a8568a6bfea75464",
+    "retained": "docs/research/m4i-claude/harness/analyze.py"
+  },
+  {
+    "file": "harness/Cargo.lock",
+    "bytes": 3321,
+    "sha256": "63ca9c1e911acb0a6baa41ae1a1f9c2b964686f0070f7cb97111db4938588fd1",
+    "retained": "docs/research/m4i-claude/harness/Cargo.lock"
+  },
+  {
+    "file": "harness/Cargo.toml",
+    "bytes": 697,
+    "sha256": "58d5a296da36f2e3718b00080546c45cacfe04fb3cea59c4b142866db31cc4e2",
+    "retained": "docs/research/m4i-claude/harness/Cargo.toml"
+  },
+  {
+    "file": "harness/README.md",
+    "bytes": 1171,
+    "sha256": "5cfb512513f5fb4b64fc7263527d5e69aaada7492d0f99dd7a7feef5a65e2128",
+    "retained": "docs/research/m4i-claude/harness/README.md"
+  },
+  {
+    "file": "harness/out/run1.jsonl",
+    "bytes": 18671275,
+    "sha256": "77d2c90e2a80eb5ae03133c624b01be0d1983d7e6f7e9ea1f7fa223a9f6bf005",
+    "retained": "target/m4i/claude-evidence/harness/out/run1.jsonl"
+  },
+  {
+    "file": "harness/out/summary1.json",
+    "bytes": 27341,
+    "sha256": "ae4e204ed860e8c4529565a78b9ed62de24f302289ee6e84ae4cedbbd11682cb",
+    "retained": "docs/research/m4i-claude/harness/out/summary1.json"
+  },
+  {
+    "file": "harness/out/sweep.jsonl",
+    "bytes": 1445,
+    "sha256": "8f7c55237e856ba3ca67711e09a0fd71aceb5cfc4273590372bcb646b928e00a",
+    "retained": "target/m4i/claude-evidence/harness/out/sweep.jsonl"
+  },
+  {
+    "file": "harness/src/main.rs",
+    "bytes": 20939,
+    "sha256": "f5dd2edf2ca5eb332f2d25e5ccdd08c3875aa5dcad28ae6d583fc47cbe0b2e2b",
+    "retained": "docs/research/m4i-claude/harness/src/main.rs"
+  },
+  {
+    "file": "r8/analyze_r8.py",
+    "bytes": 6961,
+    "sha256": "de54067dabb3057b18b46f8a5b23ba4c4c8b7c19c9de15c09ded118e955e333f",
+    "retained": "docs/research/m4i-claude/r8/analyze_r8.py"
+  },
+  {
+    "file": "r8/Cargo.lock",
+    "bytes": 3313,
+    "sha256": "6eec6b01da8130a1bafd0b23294792fd82d57935c8032a0909ebb872683c390d",
+    "retained": "docs/research/m4i-claude/r8/Cargo.lock"
+  },
+  {
+    "file": "r8/Cargo.toml",
+    "bytes": 689,
+    "sha256": "e1c59aebcaf3200b4a431c3152f4856d5826a0646e13a02cf4b9d5a997b49e42",
+    "retained": "docs/research/m4i-claude/r8/Cargo.toml"
+  },
+  {
+    "file": "r8/classify.py",
+    "bytes": 2665,
+    "sha256": "0eed4759671d4ca58043eb4293b092d32e69449ac1b8c1b450313fa668e22485",
+    "retained": "docs/research/m4i-claude/r8/classify.py"
+  },
+  {
+    "file": "r8/README.md",
+    "bytes": 1056,
+    "sha256": "a880396596a78828086480ed43912d1d44795357e7722a95cd99f2579adb8dfc",
+    "retained": "docs/research/m4i-claude/r8/README.md"
+  },
+  {
+    "file": "r8/out/analysis.txt",
+    "bytes": 2999,
+    "sha256": "5d2665af2ca0304577d7047193fbd0a7c0648b86d3cda5fcdd47552a34e2fb47",
+    "retained": "docs/research/m4i-claude/r8/out/analysis.txt"
+  },
+  {
+    "file": "r8/out/classify.txt",
+    "bytes": 1453,
+    "sha256": "50f81aed69535066c1bdcdf3997d7217e8bf674ba997d2f2ceabe8497aef8310",
+    "retained": "docs/research/m4i-claude/r8/out/classify.txt"
+  },
+  {
+    "file": "r8/out/perturb.jsonl",
+    "bytes": 9440235,
+    "sha256": "2e7a32a286eb603e0e5c87572bf547e9b86d8870020ca61093f06386e69f2037",
+    "retained": "target/m4i/claude-evidence/r8/out/perturb.jsonl"
+  },
+  {
+    "file": "r8/out/r8.jsonl",
+    "bytes": 16855285,
+    "sha256": "102fd4fe79e974795f19accf9b177cfaaf455a0da977055933f3332309adf73c",
+    "retained": "target/m4i/claude-evidence/r8/out/r8.jsonl"
+  },
+  {
+    "file": "r8/src/main.rs",
+    "bytes": 16025,
+    "sha256": "bf5a97e77cb3ca765d37c0395e3dfea719b7431db00a84a41289fc9bce8b5fe3",
+    "retained": "docs/research/m4i-claude/r8/src/main.rs"
+  }
+]

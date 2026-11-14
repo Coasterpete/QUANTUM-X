@@ -4,6 +4,10 @@ name = "qx-physics"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+# Integration-test research only. No production guidance implementation/selector.
+experimental-source-guidance = ["qx-geometry/experimental-graph-source"]
+
 [dependencies]
 qx-geometry = { path = "../qx-geometry" }
 qx-document = { path = "../qx-document" }

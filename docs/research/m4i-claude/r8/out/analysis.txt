@@ -1,0 +1,30 @@
+candidate tick 563: gate quantity max|R| = 3.0034861710e-03 at substep 3, row 25 support25/body8/Running/left
+max|c1| at candidate = 1.6489395727e-05
+
+Per-substep decomposition of R for row 25 (support25/body8/Running/left):
+ sub |      R       | -beta c0/h  |  sweep r    | h(dgamma)   | Taylor rem  | R_converged | 1/2 h gamma0 | recurrence R
+ 0 | -2.9930e-03 | -3.0325e-03 | +4.6473e-05 | -6.9223e-06 | -3.9645e-08 | -3.0409e-03 | -3.0071e-03 | -2.9930e-03
+ 1 | -2.9965e-03 | -3.0360e-03 | +4.6485e-05 | -6.9168e-06 | -3.9715e-08 | -3.0444e-03 | -3.0106e-03 | -2.9965e-03
+ 2 | -3.0000e-03 | -3.0395e-03 | +4.6496e-05 | -6.9113e-06 | -3.9785e-08 | -3.0479e-03 | -3.0141e-03 | -3.0001e-03
+ 3 | -3.0035e-03 | -3.0430e-03 | +4.6508e-05 | -6.9058e-06 | -3.9855e-08 | -3.0515e-03 | -3.0176e-03 | -2.9966e-03
+
+All rows, candidate substeps (max abs over rows):
+ sub 0: |R| 2.993e-03  |stab| 3.152e-03  |sweep| 7.770e-04  |h dgamma| 7.250e-06  |rem| 1.690e-06  |R-Rconv| 7.763e-04  |R-Rrecur| 6.020e-06  |impulse gap|/|impulse| 1.24e-01
+ sub 1: |R| 2.996e-03  |stab| 3.156e-03  |sweep| 7.782e-04  |h dgamma| 7.245e-06  |rem| 1.693e-06  |R-Rconv| 7.775e-04  |R-Rrecur| 6.026e-06  |impulse gap|/|impulse| 1.24e-01
+ sub 2: |R| 3.000e-03  |stab| 3.159e-03  |sweep| 7.794e-04  |h dgamma| 7.240e-06  |rem| 1.696e-06  |R-Rconv| 7.786e-04  |R-Rrecur| 6.032e-06  |impulse gap|/|impulse| 1.24e-01
+ sub 3: |R| 3.003e-03  |stab| 3.163e-03  |sweep| 7.805e-04  |h dgamma| 7.235e-06  |rem| 1.699e-06  |R-Rconv| 7.798e-04  |R-Rrecur| 7.361e-06  |impulse gap|/|impulse| 1.24e-01
+
+Recurrence (gamma-only) prediction vs measured R over all 2251 substeps: median rel err 2.243e-03, p99 6.898e-02, max 1.000e+00
+Recurrence prediction vs measured c: median rel err 3.901e-01, p99 1.000e+00 (after tick 10)
+Finite-sweep residual / gate quantity: median 4.724e-01, max 3.456e+03
+R / (h gamma/2) on rows with significant gamma at the max substep: min 0.990 max 0.998
+rows giving the per-substep max |R| (by prefix): {'bearing': 1, 'support': 2251}
+gate row support25/body8/Running/left: gamma0 = -5.793797e+00 (=> curvature-type acceleration), c0 = 1.5849e-05
+
+Projection at candidate: min D 1.0006, min window margin 0.0190 m, min distance to source end 4.7528 m, max |gap| 1.649e-05 m, max source refinement diff 1.739e-11 m / 5.164e-12 rad, charts [np.int64(0)]
+Bearings: max swing 0.1865 rad (limit 0.70), max anchor gap 5.227e-06 m, max roll twist 1.927e-06 rad
+Energy drift at candidate: -29.169941 J
+tick 562 trajectory error vs Richardson reference: n=4 4.2282e-03 m, n=16 1.0567e-03 m; successive-difference ratio 4.002 (4 => first order); n=4 velocity err 1.569e-03 m/s
+tick 563 trajectory error vs Richardson reference: n=4 4.2293e-03 m, n=16 1.0570e-03 m; successive-difference ratio 4.002 (4 => first order); n=4 velocity err 1.576e-03 m/s
+
+Local replay of tick 563 only, from the n=4 accepted state: n=16 v=1.2527e-02, n=64 v=5.0265e-02 (inherited c0 makes beta*c0/h grow as h shrinks)
