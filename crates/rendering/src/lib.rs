@@ -28,6 +28,8 @@ pub use offscreen::render_offscreen;
 pub use offscreen::render_offscreen_with_input;
 pub use scene::{DisplayMode, DisplayOptions, InspectionScene, OverlayLine, SectionLabel};
 pub use window::{StartupSizing, WindowCommand, WindowPreferences};
-pub use workspace::{EditorSurface, SurfaceOutput, ViewCommand, edit, profile_editor, smoke_test};
+pub use workspace::{
+    EditorSurface, NAVIGATION_BANKS, SurfaceOutput, ViewCommand, edit, profile_editor, smoke_test,
+};
 mod lifecycle;
 pub use lifecycle::{EditorExit, ExitReason, SmokeConfig, SmokeStage};

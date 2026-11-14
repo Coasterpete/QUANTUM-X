@@ -54,6 +54,7 @@ mod material_tests;
 mod material_ui;
 mod operations_ui;
 mod panels;
+mod playback_clock;
 mod plot;
 mod previews;
 #[cfg(test)]
@@ -70,6 +71,12 @@ mod ride_camera;
 pub(crate) mod ride_quality;
 pub(crate) mod ride_scenario;
 mod session;
+mod simulator;
+mod simulator_smoke;
+#[cfg(test)]
+mod simulator_tests;
+mod simulator_timing;
+mod simulator_ui;
 mod snap;
 #[cfg(test)]
 mod snap_tests;
@@ -172,16 +179,26 @@ pub fn render(
     Ok(())
 }
 impl EditorSurface for Session {
+    // Simulator viewport picks never change editor selection or inspection.
     fn select_section(&mut self, id: qx_geometry::authoring::SectionId) {
+        if self.simulator.blocks_editor_input() {
+            return;
+        }
         self.expansion.structure = None;
         self.select(id);
     }
     fn select_support(&mut self, structure: u64, member: u64) {
+        if self.simulator.blocks_editor_input() {
+            return;
+        }
         self.expansion.structure = Some(structure);
         self.expansion.member = Some(member);
         self.expansion.node = None;
     }
     fn inspect_station(&mut self, point: Option<(qx_geometry::authoring::SectionId, f64)>) {
+        if self.simulator.blocks_editor_input() {
+            return;
+        }
         self.viewport_inspection = point;
     }
     fn window_preferences(&self) -> qx_rendering::WindowPreferences {
@@ -205,9 +222,14 @@ impl EditorSurface for Session {
         self.poll()
     }
     fn open_path(&mut self, path: &Path) {
+        // Project replacement runs the existing Editor guards; the simulation
+        // is retired first so it can never outlive or follow the old project.
+        simulator::exit(self);
         self.open(Some(path.to_path_buf()), false);
     }
     fn request_close(&mut self) -> bool {
+        // Close guards are Editor prompts: return there before evaluating them.
+        simulator::exit(self);
         if self.pending_edits() {
             self.close_requested = true;
             self.status =

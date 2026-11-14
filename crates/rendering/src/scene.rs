@@ -431,6 +431,66 @@ impl Default for DisplayOptions {
         }
     }
 }
+impl DisplayOptions {
+    /// True when `self` and `other` differ at most in per-frame presentation
+    /// fields: train instances, attached camera and train/car framing bounds.
+    /// None of these feed line vertices or the cached track mesh, so a moving
+    /// train needs only an instance upload, not a scene rebuild. The
+    /// destructuring is exhaustive so a new field must be classified here.
+    pub(crate) fn differs_only_in_presentation(&self, other: &Self) -> bool {
+        let Self {
+            selected_support,
+            camera_view: _,
+            asset_instances: _,
+            train_bounds: _,
+            selected_car_bounds: _,
+            overlay_lines,
+            mode,
+            running,
+            structure,
+            supports,
+            hardware,
+            boundaries,
+            highlights,
+            grid,
+            grid_spacing,
+            frames,
+            curvature,
+            selected,
+            hovered,
+            inspection_distance_m,
+            inspection_marker,
+            centerline,
+            reference,
+            offsets,
+            points,
+            loads,
+        } = self;
+        *selected_support == other.selected_support
+            && *overlay_lines == other.overlay_lines
+            && *mode == other.mode
+            && *running == other.running
+            && *structure == other.structure
+            && *supports == other.supports
+            && *hardware == other.hardware
+            && *boundaries == other.boundaries
+            && *highlights == other.highlights
+            && *grid == other.grid
+            && *grid_spacing == other.grid_spacing
+            && *frames == other.frames
+            && *curvature == other.curvature
+            && *selected == other.selected
+            && *hovered == other.hovered
+            && *inspection_marker == other.inspection_marker
+            // The station only feeds the marker; hidden, it may move freely.
+            && (!*inspection_marker || *inspection_distance_m == other.inspection_distance_m)
+            && *centerline == other.centerline
+            && *reference == other.reference
+            && *offsets == other.offsets
+            && *points == other.points
+            && *loads == other.loads
+    }
+}
 pub(crate) fn vertices(
     scene: &InspectionScene,
     origin: Vec3,
@@ -635,6 +695,43 @@ pub(crate) fn vertices(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn moving_train_presentation_does_not_require_a_scene_rebuild() {
+        use super::{DisplayMode, DisplayOptions, Vec3};
+        let base = DisplayOptions {
+            inspection_marker: false,
+            ..Default::default()
+        };
+        let mut moved = base.clone();
+        moved.camera_view = Some(crate::CameraView {
+            eye_m: Vec3::new(1., 2., 3.),
+            forward: Vec3::X,
+            up: Vec3::Y,
+        });
+        moved.train_bounds = Some((Vec3::ZERO, Vec3::new(1., 1., 1.)));
+        moved.selected_car_bounds = moved.train_bounds;
+        moved.inspection_distance_m = Some(12.5);
+        assert!(base.differs_only_in_presentation(&moved));
+        assert!(base.differs_only_in_presentation(&base));
+        // A visible marker, selection or display mode does change line/mesh inputs.
+        let mut marker = moved.clone();
+        marker.inspection_marker = true;
+        assert!(!base.differs_only_in_presentation(&marker));
+        let mut selected = base.clone();
+        selected.selected = Some(0);
+        assert!(!base.differs_only_in_presentation(&selected));
+        let mut mode = base.clone();
+        mode.mode = DisplayMode::Wireframe;
+        assert!(!base.differs_only_in_presentation(&mode));
+        let shown = DisplayOptions {
+            inspection_marker: true,
+            inspection_distance_m: Some(1.),
+            ..Default::default()
+        };
+        let mut moved_marker = shown.clone();
+        moved_marker.inspection_distance_m = Some(2.);
+        assert!(!shown.differs_only_in_presentation(&moved_marker));
+    }
     #[test]
     fn welcome_scene_has_no_track_and_supports_bounds_and_picking() {
         let scene = super::InspectionScene::empty();

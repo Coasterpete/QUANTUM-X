@@ -261,6 +261,8 @@ pub(super) struct Session {
     pub viewport_inspection: Option<(SectionId, f64)>,
     pub train_station_m: Option<f64>,
     pub playback: super::train_playback::State,
+    /// Transient M4K application mode; never persisted.
+    pub simulator: super::simulator::State,
     pub ride: super::ride_camera::State,
     pub assets: super::train_assets::State,
     pub keyboard_owned_last_frame: bool,
@@ -414,6 +416,7 @@ impl Session {
             viewport_inspection: None,
             train_station_m: None,
             playback: Default::default(),
+            simulator: Default::default(),
             ride: Default::default(),
             assets: Default::default(),
             keyboard_owned_last_frame: false,

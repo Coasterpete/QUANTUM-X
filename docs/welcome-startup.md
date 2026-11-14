@@ -157,6 +157,13 @@ drivers may not present to hidden windows; that reports as a timeout with
 `#[ignore]`d in the default suite:
 `cargo test -p quantum-x --test headless -- --ignored gui_smoke`.
 
+`--gui-smoke-test simulator [project.qx.json]` additionally scripts a real
+Editor → Simulator → Play → Pause → Reset → Editor round trip through the same
+hidden native loop (a labeled development fixture when no project is given)
+and adds a `script` object to the report. It fails fast with
+`entry refused: …` when the project cannot be simulated, for example when no
+saved train is associated. See [simulator-mode-m4k.md](simulator-mode-m4k.md).
+
 ### Editor exit record
 
 Every interactive `edit`, project-file or Welcome launch writes one JSON line to

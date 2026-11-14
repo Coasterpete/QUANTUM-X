@@ -26,7 +26,7 @@ impl Mode {
         Self::Chase,
         Self::Track,
     ];
-    fn label(self) -> &'static str {
+    pub(super) fn label(self) -> &'static str {
         match self {
             Self::Free => "Free Camera",
             Self::Rider => "Rider POV",

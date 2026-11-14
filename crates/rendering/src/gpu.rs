@@ -200,6 +200,16 @@ impl Gpu {
         self.assets
             .upload(&self.device, &self.queue, &display.asset_instances, origin)
     }
+    /// Updates only per-frame asset instances (moving train bodies); the track
+    /// mesh, line vertices and `mesh_display` keep their last rebuild.
+    pub fn upload_assets(
+        &mut self,
+        instances: &[crate::asset::AssetInstance],
+        origin: Vec3,
+    ) -> Result<(), String> {
+        self.assets
+            .upload(&self.device, &self.queue, instances, origin)
+    }
     pub fn upload(&mut self, vertices: &[Vertex], grid_count: u32) -> Result<(), String> {
         if grid_count as usize > vertices.len() || !grid_count.is_multiple_of(2) {
             return Err("invalid grid line prefix".into());

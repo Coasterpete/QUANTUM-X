@@ -153,6 +153,8 @@ pub(crate) struct Smoke {
     pub adapter: Option<String>,
     pub surface_size: Option<[u32; 2]>,
     pub resources_released: Option<bool>,
+    /// Optional scripted-check evidence supplied by the surface.
+    pub script: serde_json::Value,
 }
 impl Smoke {
     pub fn new(config: SmokeConfig, start: Instant) -> Self {
@@ -169,6 +171,7 @@ impl Smoke {
             adapter: None,
             surface_size: None,
             resources_released: None,
+            script: serde_json::Value::Null,
         }
     }
     fn ms(&self, now: Instant) -> f64 {
@@ -219,7 +222,7 @@ impl Smoke {
             && self.complete()
             && self.resources_released == Some(true);
         let round = |v: Option<f64>| v.map(|v| (v * 100.).round() / 100.);
-        serde_json::json!({
+        let mut report = serde_json::json!({
             "ok": passed,
             "result": if passed { "passed" } else if matches!(&exit.reason, ExitReason::DiagnosticFailed(d) if d.contains("timed out")) { "timeout" } else { "failed" },
             "hidden_window": true,
@@ -238,7 +241,11 @@ impl Smoke {
             },
             "resources_released": self.resources_released,
             "exit": exit.to_json(),
-        })
+        });
+        if !self.script.is_null() {
+            report["script"] = self.script.clone();
+        }
+        report
     }
 }
 

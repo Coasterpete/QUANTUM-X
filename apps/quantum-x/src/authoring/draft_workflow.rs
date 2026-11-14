@@ -43,6 +43,7 @@ impl Session {
             || self.open_dialog_requested
             || self.close_requested
             || self.startup_request.is_some()
+            || self.simulator.preparing()
     }
     pub fn request_drafts(&mut self, request: DraftRequest) {
         self.draft_request = Some(request);

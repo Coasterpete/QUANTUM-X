@@ -33,6 +33,9 @@ pub enum ViewCommand {
     Front,
     ToggleOrthographic,
 }
+/// Camera/display banks: 0 Track workspace, 1 Train workspace, 2 Simulator.
+/// Each keeps its own navigation so switching never disturbs another bank.
+pub const NAVIGATION_BANKS: usize = 3;
 pub struct SurfaceOutput {
     pub viewport: egui::Rect,
     pub view_command: Option<ViewCommand>,
@@ -43,6 +46,16 @@ pub struct SurfaceOutput {
 }
 pub trait EditorSurface {
     fn diagnostic_tick(&mut self, _elapsed_s: f64) {}
+    /// Hidden-window smoke tests only: advances an optional scripted check
+    /// after every draw. `Ok(true)` keeps the loop running, `Ok(false)` lets it
+    /// finish once enough frames were presented, `Err` fails the run.
+    fn smoke_script(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    /// Evidence from [`EditorSurface::smoke_script`], embedded in the report.
+    fn smoke_script_report(&self) -> serde_json::Value {
+        serde_json::Value::Null
+    }
     fn frame_diagnostics(&self) -> serde_json::Value {
         serde_json::Value::Null
     }
@@ -138,7 +151,7 @@ fn run(
         cursor: None,
         drag: None,
         drag_start: None,
-        needs_fit: [true; 2],
+        needs_fit: [true; NAVIGATION_BANKS],
         exit: None,
         exit_requested: false,
         capture,
@@ -188,14 +201,15 @@ struct Workspace {
     input: Option<egui_winit::State>,
     camera: Camera,
     display: DisplayOptions,
-    navigation: [(Camera, DisplayOptions); 2],
+    /// Independent camera/display banks selected by `SurfaceOutput::profile`.
+    navigation: [(Camera, DisplayOptions); NAVIGATION_BANKS],
     profile: usize,
     origin: Vec3,
     viewport: egui::Rect,
     cursor: Option<(f64, f64)>,
     drag: Option<MouseButton>,
     drag_start: Option<(f64, f64)>,
-    needs_fit: [bool; 2],
+    needs_fit: [bool; NAVIGATION_BANKS],
     /// First recorded cause for leaving the event loop.
     exit: Option<ExitReason>,
     exit_requested: bool,
@@ -283,7 +297,7 @@ impl Workspace {
             action = result.view_command;
             self.exit_requested = result.close;
             window_command = result.window_command;
-            profile = result.profile.min(1);
+            profile = result.profile.min(NAVIGATION_BANKS - 1);
             reset_navigation = result.reset_navigation;
         });
         let ui_ms = started.elapsed().as_secs_f64() * 1000.;
@@ -310,7 +324,7 @@ impl Workspace {
             self.drag = None;
         }
         if reset_navigation {
-            self.needs_fit = [true; 2];
+            self.needs_fit = [true; NAVIGATION_BANKS];
         }
         if self.needs_fit[self.profile] && self.viewport.is_positive() {
             self.fit(false);
@@ -372,8 +386,13 @@ impl Workspace {
         }
         self.camera.attached = camera_view.and_then(|v| v.validate().ok());
         let upload = Instant::now();
-        if changed || before != self.display {
+        if changed || !before.differs_only_in_presentation(&self.display) {
             self.rebuild()?;
+        } else if before.asset_instances != self.display.asset_instances
+            && let Some(gpu) = &mut self.gpu
+        {
+            // Moving train only: keep track lines and mesh, re-upload instances.
+            gpu.upload_assets(&self.display.asset_instances, self.origin)?;
         }
         let upload_ms = upload.elapsed().as_secs_f64() * 1000.;
         let jobs = self.ctx.tessellate(output.shapes, output.pixels_per_point);
@@ -638,14 +657,24 @@ impl ApplicationHandler for Workspace {
                 }
                 let draw = &self.gpu.as_ref().unwrap().last_draw;
                 let (status, presented) = (draw.surface_status.clone(), draw.presented);
-                if self
-                    .smoke
-                    .as_mut()
-                    .unwrap()
-                    .record(Instant::now(), &status, presented)
-                {
-                    self.finish(event_loop, ExitReason::DiagnosticComplete);
-                    return;
+                let enough =
+                    self.smoke
+                        .as_mut()
+                        .unwrap()
+                        .record(Instant::now(), &status, presented);
+                let script = self.surface.smoke_script();
+                self.smoke.as_mut().unwrap().script = self.surface.smoke_script_report();
+                match script {
+                    Err(e) => {
+                        let reason = ExitReason::DiagnosticFailed(format!("smoke script: {e}"));
+                        self.finish(event_loop, reason);
+                        return;
+                    }
+                    Ok(false) if enough => {
+                        self.finish(event_loop, ExitReason::DiagnosticComplete);
+                        return;
+                    }
+                    Ok(_) => {}
                 }
             }
             event_loop.set_control_flow(ControlFlow::WaitUntil(
