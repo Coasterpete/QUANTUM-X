@@ -14,6 +14,8 @@ mod fixtures;
 #[allow(dead_code)]
 #[path = "support/m4a_guidance.rs"]
 mod guidance;
+#[path = "support/m4h_long.rs"]
+mod long;
 #[allow(dead_code)]
 #[path = "support/m4a_matrix.rs"]
 mod matrix;

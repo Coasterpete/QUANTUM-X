@@ -15,7 +15,7 @@ pub(super) fn fixture(name: &str) -> (InitialConditions, Vec<Section>, f64) {
     }
 }
 
-fn energies(s: &original_dynamics::State) -> [f64; 3] {
+pub(super) fn energies(s: &original_dynamics::State) -> [f64; 3] {
     let mut e = [0.; 3];
     for (p, v) in s.poses.iter().zip(s.velocity.as_chunks::<6>().0) {
         e[0] += 50. * v[..3].iter().map(|x| x * x).sum::<f64>();
@@ -29,7 +29,7 @@ fn energies(s: &original_dynamics::State) -> [f64; 3] {
 // Jv+ = -h gamma - beta c/h + residual after finite PGS sweeps.
 // Terms: gravity kick, gravity path, constraint midpoint, curvature target,
 // stabilization target, finite-sweep residual, negative impulse quadratic.
-fn ledger(s: &Sample, h: f64) -> ([f64; 7], Vec<f64>) {
+pub(super) fn ledger(s: &Sample, h: f64) -> ([f64; 7], Vec<f64>) {
     let mut p = vec![0.; s.before.velocity.len()];
     for (row, l) in s.j.iter().zip(&s.impulse) {
         for (p, j) in p.iter_mut().zip(row) {

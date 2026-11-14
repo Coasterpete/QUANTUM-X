@@ -229,3 +229,45 @@ query patterns and cannot inherit the mechanical cache's hit ratio.
 Mechanical and diagnostic outputs remain bitwise identical. Geometry reuse
 reduces observed complete-step median cost while observed misses/outliers remain;
 this is not production integration or a promise of sustained 240 Hz behavior.
+
+## Stage C — bounded continuation, not unrestricted qualification
+
+Both A/B gates passed before this experiment. Retained the exact source domains,
+6 m/s initial speed, four internal steps, 32 sweeps and all acceptance gates.
+Attempted at most 720 outer ticks (3 s), comparing every candidate to the original
+by bits and retaining the discrete ledger. A gate failure restores poses,
+velocities, support hints/windows, envelopes, tick count and the prior recorded
+internal-step evidence. A fresh cache begins before each attempt; cached query
+results have no authority over accepted state. Populated-cache invalid-step and
+doubled-speed negatives also reject transactionally, including repeated failures
+and a successful subsequent valid step.
+
+| Fixture | Accepted ticks / duration | Final drift J | Max support gap m | Max bearing anchor gap m | Max bearing swing rad | Max roll residual rad | Max reaction N |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| helix | 562 / 2.341667 s | -29.214501166 | 1.64178258e-05 | 5.19815465e-06 | 0.186451641 | 1.94375957e-06 | 1942.941327 |
+| foundation | 720 / 3.000000 s | 1.389018775 | 1.44686609e-06 | 2.92301691e-06 | 0.0224095018 | 1.167013e-07 | 1090.270605 |
+
+R8 candidate tick 563 rejects because maximum velocity residual .003003486171
+exceeds the unchanged .003 gate (position residual .000016489396 remains below
+.00002). It is **not qualified for three seconds**. The accepted prefix ends at
+tick 562; there is no endpoint extension, changed speed or relaxed gate. Both
+original and cached engines reject identically. Foundation passes all 720 ticks.
+
+helix accepted support station range [1.535532573353915, 11.836265316360908] m; charts [0]. Maximum accumulated ledger discrepancy 1.37172e-10 J and independent state-energy reconstruction discrepancy 1.45519e-11 J.
+
+foundation accepted support station range [6.430001067765272, 29.92433897455032] m; charts [0, 1]. Maximum accumulated ledger discrepancy 2.85837e-10 J and independent state-energy reconstruction discrepancy 1.09139e-11 J.
+
+All 1282 accepted states pass independent Python body-to-support/bearing
+transforms, quaternion, normal/gap, projection F/D/domain, source chart ownership,
+velocity-driven station continuation, bearing swing/roll, momentum and energy
+checks. Five late reaction systems (R8 ticks 480/562; foundation 480/600/720)
+pass independent full-rank NumPy reaction/acceleration and support-force checks.
+Finite-difference J and directional Jdot refinements at those same states retain
+3e-7 / 1e-6 gates. Two complete exports compare exactly, excluding test harness
+boilerplate and unrelated negative messages. No timing data enters this replay.
+Evidence: `stage-c-final.log`, `stage-c-replay.log`, `stage-c-independent.log`
+and `stage-c-final.summary.json`. Original rolling seating, changing-bank corner,
+restart-derivative and other expected negatives remain untouched.
+
+**Stage C result:** PASS for the accepted bounded evidence, with the explicit
+R8 continuation rejection above. No full-three-second R8 or general-layout claim.
