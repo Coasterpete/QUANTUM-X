@@ -4,6 +4,10 @@ Native Windows/MSVC, 2026-11-13. Experimental integration tests and standalone
 developer evidence only. No production simulator, schema, editor or train assets
 are changed. No push, merge or PR is authorized.
 
+Toolchain/hardware: rustc/Cargo 1.99.1, LLVM 23.1.1,
+`x86_64-pc-windows-msvc`, Intel Core i7-14700KF. Performance observations are
+on a shared desktop, with no CPU affinity, isolated scheduling or deadline bound.
+
 ## Stage 0 — preserved baseline
 
 Read repository `AGENTS.md`, the M4F report, and relevant M4D/M4E-A/B/C research.
@@ -43,6 +47,18 @@ equation is changed. Outer timestep remains 1/240 s, four internal substeps and
 state/report/hint/envelope replay. There is no incomplete duration target or
 first failing tick in either qualification case. The R8 train reverses under
 gravity before reaching the endpoint; motion is not prescribed or repeated.
+
+Dense preparation uses unchanged defaults: requested maximum step .1 m, fine
+grid .05 m, 200,000-sample budget and .15 rad maximum source rotation per step.
+R8 is fixture index 2 in `qx-geometry/tests/support/m4e_c_extension.rs`: section
+1, radius 8 m, plane angle 0, constant roll .04 rad/m and initial bank .6 rad.
+Foundation uses `qx_document::sample::foundation_project().sections[..2]`:
+12 m level lead-in and the original 60 m force-vector rise/bank with its two
+30 m authored profiles. These are unchanged diagnostic fixtures, not newly
+designed coaster layouts. The 12 m source suffices for the R8 duration; the
+longer fixture supplies separate multi-chart/performance evidence. Tokens are
+scoped to each independent fixture run; the trace fixture/source/chart/section
+tuple identifies its reference.
 
 `support/m4g_extended.rs` retains states in memory, then separately extracts
 diagnostics. Each of 481 records per case contains all 11 actual body poses,
@@ -84,6 +100,15 @@ The R8 loss grows from 4.558 J at .5 s through 13.652 J at 1 s to 29.749 J at
 production train validation. Reactions are bilateral and can pull as well as
 push; there is no unilateral separation, suspension, friction or impact model.
 
+The front R8 support reaches its largest station at recorded tick 258 (1.075 s),
+then retreats. This is the independently observed turnaround, not a prescribed
+playback event. Support reaction multiplier ranges are [-908.6023,1710.4843] N
+for R8 and [-12.89759,1057.6939] N for foundation; normal-gradient scaling is
+accounted for separately in the force-norm maxima above. Independent energy
+reconstruction from all poses and 66 velocity components agrees within
+1.456e-11 J. Initial kinetic energies are 19011.2296 J and 19800 J; maximum
+absolute drift/initial-kinetic ratios are .001564824 and .00001577210.
+
 Stage A native Release tests pass (duration/replay, transactional rejection,
 explicit full trace). The Python verifier independently reconstructs support and
 bearing world points, checks all 962 states and continuation/chart ownership,
@@ -100,6 +125,11 @@ Evidence: `stage-a-probe.log`, `stage-a-final.log`, `stage-a-independent.log`
 and `stage-a-final.summary.json`, ignored under `target/m4g/`.
 
 ## Stage B — PASS as a measurement, not a real-time qualification
+
+Historical M4F observation: maximum solver 3.156 ms, diagnostic/record work
+2.561 ms, combined 5.642 ms, against a nominal 4.167 ms outer interval. Those
+short-fixture observations are preserved as context, not rerun or treated as a
+direct comparison with the longer multi-chart and expanded-diagnostic cases.
 
 Native serial Release observations: one complete 480-tick warm-up followed by
 five complete 480-tick runs on the unchanged 72 m foundation source. Preparation,
@@ -130,6 +160,10 @@ an editor FPS measurement. Timing hooks and interleaved controls can affect
 cache/scheduling behavior. Full phase distributions, including exclusive
 mechanical constraints/reactions, impulse integration, post-step validation/
 tracking and miscellaneous overhead, are in `stage-b-cost-final.summary.json`.
+The uninstrumented complete-step observed range is 4.5337–13.5179 ms.
+The constraints phase covers J/constraint and directional Jdot assembly;
+sequential reaction impulses are solved and applied in the impulse phase.
+Independent instantaneous dense reaction solves belong to the diagnostic phase.
 Rail queries dominate this observation. No numerical shortcut, widened gate or
 cache that could hide source changes was introduced for a latency claim.
 
@@ -207,3 +241,151 @@ touch-device, arbitrary-size or live application qualification. The whole-clip
 framing can make a single body small; zoom/isolation controls permit closer
 inspection. Source lines can leave the viewport. This layout is explicitly
 temporary developer UI, not an approved main-editor design.
+
+## Stage D — independent verification details
+
+**PASS for the stated experimental scope.** Executed native verification:
+
+| Check | Result |
+| --- | --- |
+| Default full debug workspace | 502 passed, zero failed, 13 ignored |
+| Feature-enabled full debug workspace | 525 passed, zero failed, 18 ignored |
+| Native Release geometry, experimental source feature | 112 passed, zero failed, two ignored |
+| Native Release physics, experimental guidance feature | 142 passed, zero failed, 15 ignored |
+| M4G duration/replay, transactional negative and explicit export | Passed |
+| Repeated complete-step characterization | Warm-up plus 2,400 measured paired steps passed numerical comparisons |
+| Final strengthened ladder in debug | One passed, zero failed; both fixtures finish 480 ticks |
+| Independent M4F derivatives/reactions; M4A/B/C/D matrices/reactions | Passed again against final Release physics evidence |
+| Independent M4G full-tick/replay/energy/reaction checks | 962 states and 12 long-run systems passed |
+| Formatting and workspace check | Passed, including final rerun |
+| Strict all-target Clippy, default and experimental features | Passed, including final rerun |
+| Python/Node syntax, exporter negatives, viewer export/headless interactions | Passed |
+| Git staged/unstaged whitespace and preservation audit | Passed |
+
+The full feature workspace preceded the final assertion-only strengthening of
+the ladder; that exact test was then rerun in debug, and the complete native
+Release physics run also includes the stronger assertion. No integration
+equations or physical data changed after the full workspace runs. Final syntax,
+export and headless checks include the independent energy/face verifiers.
+Final packaging observed 215.119 ms JSON serialization and 63.152 ms HTML/JSON
+file writes; HTML is 13,221,072 bytes. These offline packaging observations are
+separate from Rust trace serialization/output and from physical integration.
+
+Final evidence under ignored `target/m4g/`: `workspace-default.log`,
+`workspace-feature.log`, `geometry-release.log`, `physics-release.log`,
+`ladder-debug-final.log`, `fmt-final.log`, `check-final.log`,
+`clippy-default-final.log`, `clippy-feature-final.log`, `final-m4*-independent.log`,
+`stage-d-independent-final.log`, `stage-d-export-negatives.log`,
+`stage-d-export-final.log`, `stage-d-headless-final.log`,
+`preservation-final.log` and `platform.log`, plus the Stage A/B evidence above.
+Original M4F HTML/JSON/PNG evidence remains in its unchanged clean worktree.
+
+The original dense geometry/derivative tools pass on the preserved source:
+585 pose queries in 117 cells, 48 adjacent limit pairs, two station spacings,
+and 70/90-digit rolling controls. The unchanged physical-datum verifier checks
+42 cases: maximum position reconstruction discrepancy 2.446e-15 m, first
+derivative discrepancy 2.624e-16 and normal discrepancy 3.620e-16. These measure
+agreement with the retained numerical representation, not certified error against
+the exact graph ODE. Source approximation/refinement limits remain those of M4F.
+All geometry source and geometry tests are byte-unchanged from M4F. A normalized
+body comparison also confirms the differential and bounded-projection bodies
+are unchanged beneath the optional timing wrappers.
+
+Long-run independent checks add SI energy reconstruction for every state and
+force-vector reconstruction from independently solved multipliers at the 12
+reaction checkpoints. The headless verifier independently transforms all 66
+body faces using explicit quaternion rotation matrices and compares their SVG
+coordinates to recorded tick 240 at the declared dimensions/camera. This checks
+actual poses separately from the viewer's cross-product rotation implementation.
+Full trace verification also rejects deliberately corrupted residual, quaternion,
+endpoint and nonfinite records before viewer export. The ordinary duration test
+requires **both** fixtures to finish 480 ticks; any future early stop fails it.
+
+The original .4 rad/m rolling-line `NoConvergence` seating negative is retained
+unchanged. Its geometry is valid; it is not a new positive mechanical/playback
+case. The original sampled changing-bank corner rejection, derivative restart
+counterexample and M4A–M4E controls remain executable. No failing positive gate
+was waived or tolerance widened. Native application Release packaging, manual
+desktop/high-DPI interaction, live FPS and production B1 integration are not
+verified or claimed. Apart from the explicitly executed M4G export/profiler,
+other inherited ignored long-run/profiling/GPU exporter cases remain opt-in.
+
+## Reproduction
+
+Run from the M4G worktree. Create ignored `target/m4g` first. An ordinary target
+cache also works; no application default feature enables this experiment.
+PowerShell redirection is intentional so exact per-tick evidence is retained.
+
+```powershell
+New-Item -ItemType Directory -Force target/m4g
+cargo fmt --all -- --check
+cargo check --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --features qx-physics/experimental-source-guidance -- -D warnings
+cargo test --workspace
+cargo test --workspace --features qx-physics/experimental-source-guidance
+cargo test --release -p qx-geometry --features experimental-graph-source
+cargo test --release -p qx-physics --features experimental-source-guidance -- --nocapture --test-threads=1
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance extended:: -- --include-ignored --nocapture --test-threads=1 > target/m4g/trace.log 2>&1
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance extended::export_extended_states -- --ignored --nocapture --test-threads=1 > target/m4g/replay.log 2>&1
+python tools/verify-extended-guidance-m4g.py target/m4g/trace.log target/m4g/replay.log
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance performance::repeated_complete_step_costs -- --ignored --nocapture --test-threads=1 > target/m4g/cost.log 2>&1
+python tools/summarize-guidance-cost-m4g.py target/m4g/cost.log
+python tools/render-source-guidance-m4g.py target/m4g/trace.log target/m4g/cost.summary.json
+node --check tools/verify-source-viewer-m4g.mjs
+node tools/verify-source-viewer-m4g.mjs target/m4g/source-guidance-m4g.html
+git diff --check
+git diff --cached --check
+```
+
+Run profiling alone after other builds/tests finish. `trace.log`/`replay.log`
+are complete logs, not project documents. The exporter validates before display
+field filtering. Both fixtures and all 481 poses per fixture remain in the
+single HTML. Python requires the existing NumPy independent-check environment;
+viewer packaging otherwise uses the standard library. Node QA uses an installed
+Edge/Chromium binary; its optional second argument supplies another executable.
+The HTML itself has no third-party library or runtime dependency.
+
+Optional owner-only manual checklist (not manually verified here): open the
+generated HTML in a browser; scrub both clips from 0 to 2 s; inspect the R8
+turnaround and middle bogie 3; choose side/top/three-quarter, zoom and pan;
+select/isolate each role, toggle overlays, seek through the time histories;
+confirm play/pause/reset and keyboard navigation at multiple replay speeds.
+The native application regression command is `cargo run -p quantum-x --release
+-- edit`; opening an existing project, initialize/play/pause/reset and save/reopen
+remains an owner-executable production regression, not a new B1 workflow.
+
+## Remaining blockers and M4H recommendation
+
+The two-second fixture qualification establishes bounded residuals and repeatable
+source coupling, not a production contact model or realistic whole train. The
+same provisional 100 kg/isotropic 20 kg m² body parameters and ideal bilateral
+datums remain. They omit wheel spin, unilateral wheel/rail contact, suspension,
+friction, collision/impact and realistic vehicle mass/inertia. Projection is a
+bounded local chart search, not global nearest-root certification. Native curves,
+rider-reference inversion, periodic seams and general authored-track acceptance
+remain outside this experimental continuous-source subset. Caller-owned identity
+tokens must be retired on source edits; this offline immutable trace has no live
+edit lifecycle. No safety, all-layout, real-time or ride-quality claim follows.
+
+Recommend M4H first investigate energy/work consistency on these exact retained
+fixtures, including turnaround, step refinement with the same 1/240 s outer
+timestep, impulse/reaction work and stabilization accounting. Treat that as a
+separate numerical gate. Then profile bounded exact-key geometry reuse and
+reaction/diagnostic reuse against the unchanged control, including stale-source
+negatives and bitwise or explicitly quantified numerical comparisons. Do not
+promote B1 into production merely because the trace is longer or replay is more
+usable. Production workflows and any future simulator presentation still require
+human design; M4G finalizes no production UX choice.
+
+## UX and Git status
+
+Implemented owner-requested behavior is confined to the listed standalone
+developer inspection controls. All new viewer layout/styling remains provisional.
+No production UI/UX, simulator selector, schema, train authoring, app dependency
+or production geometry/physics source file is changed. No manual desktop control
+was used. Stage checkpoints are local: Stage 0 `8069a5e`, A `9dcffa4`, B `ce03070`,
+C `a60e03e`; final validation is recorded in a subsequent local D commit.
+No push, merge or PR is performed. Existing worktrees and unrelated work remain
+preserved. Generated traces, HTML/JSON, screenshots, logs and browser profiles
+are ignored artifacts; they are intentionally not committed as large binaries.

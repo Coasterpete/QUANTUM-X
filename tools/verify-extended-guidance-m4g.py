@@ -34,6 +34,17 @@ def world(body, local):
     return np.array(body[:3]) + v + q[0] * t + np.cross(q[1:], t)
 
 
+def finite(data):
+    if isinstance(data, float):
+        assert math.isfinite(data), 'nonfinite diagnostic value'
+    elif isinstance(data, dict):
+        for value in data.values():
+            finite(value)
+    elif isinstance(data, list):
+        for value in data:
+            finite(value)
+
+
 def verify(path, replay=None):
     clips, systems = read(path)
     assert len(clips) == 2 and len(systems) == 12
@@ -42,6 +53,7 @@ def verify(path, replay=None):
     summary = {}
     for clip in clips:
         scene, frames = clip['scene'], clip['frames']
+        finite(scene)
         assert len(frames) == 481 and scene['dt'] == 1/240
         assert scene['roles'].count('Car') == 2 and scene['roles'].count('Bogie') == 3
         assert len(scene['roles']) == 11 and len(scene['running']) == 30
@@ -50,11 +62,23 @@ def verify(path, replay=None):
         assert [3, 9] in scene['edges'] and [3, 10] in scene['edges']
         starts = [c[0] for c in scene['charts']]
         previous = None
+        initial_energy = None
+        initial_kinetic = None
+        energy_error = 0.
         for tick, f in enumerate(frames):
+            finite(f)
             assert f['tick'] == tick and abs(f['time']-tick/240) < 5e-16
             assert len(f['bodies']) == 11 and len(f['supports']) == 30
             assert len(f['constraints']) == 65 and len(f['velocity_rows']) == 65
             assert len(f['velocity']) == 66 and len(f['reactions']) == 65
+            # Independently reconstruct the declared isotropic rigid-body energy
+            # (100 kg, 20 kg m², SI, +Y up), without the Rust energy helper.
+            kinetic = sum(.5*(100 if i % 6 < 3 else 20)*v*v for i, v in enumerate(f['velocity']))
+            energy = kinetic + 981*sum(b[1] for b in f['bodies'])
+            if initial_energy is None:
+                initial_energy, initial_kinetic = energy, kinetic
+            energy_error = max(energy_error, abs(energy-initial_energy-f['energy_drift']))
+            assert energy_error < 1e-8
             assert f['max_position'] < 2e-5 and f['max_velocity'] < .003
             assert max(map(abs, f['constraints'])) <= f['max_position'] + 1e-12
             assert max(map(abs, f['velocity_rows'])) <= f['max_velocity'] + 1e-12
@@ -98,6 +122,9 @@ def verify(path, replay=None):
             'max_swing_rad': max(v for f in frames for v in f['swing']),
             'max_energy_drift_J': max(abs(f['energy_drift']) for f in frames),
             'final_energy_drift_J': frames[-1]['energy_drift'],
+            'initial_kinetic_J': initial_kinetic,
+            'max_energy_drift_initial_kinetic_ratio': max(abs(f['energy_drift']) for f in frames)/initial_kinetic,
+            'independent_energy_max_error_J': energy_error,
             'max_reaction_N': max(math.sqrt(sum(v*v for v in force)) for f in frames for force in f['reaction_forces']),
             'max_abs_power_W': max(abs(f['reaction_power']) for f in frames),
             'station_range_m': [min(s[10] for f in frames for s in f['supports']), max(s[10] for f in frames for s in f['supports'])],
@@ -119,6 +146,11 @@ def verify(path, replay=None):
         independent = np.linalg.solve((j*inverse)@j.T, -gamma-j@free)
         observed = [np.max(abs(independent-loads)), np.max(abs(j@a+gamma)), np.max(abs(a-free-inverse*(j.T@independent)))]
         assert max(observed) < 1e-7, (system['name'], observed)
+        name, tick = system['name'].split('-')
+        frame = next(c for c in clips if c['scene']['fixture'] == name)['frames'][int(tick)]
+        for i, support in enumerate(frame['supports']):
+            owner = int(support[0])
+            assert np.max(abs(j[i, owner*6:owner*6+3]*loads[i]-frame['reaction_forces'][i])) < 1e-8
         errors = np.maximum(errors, observed)
     summary['independent_matrix_max_errors'] = errors.tolist()
     Path(path).with_suffix('.summary.json').write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8')

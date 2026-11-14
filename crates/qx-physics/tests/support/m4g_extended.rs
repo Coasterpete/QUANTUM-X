@@ -134,12 +134,10 @@ fn duration_ladder_and_exact_replay() {
                 }
             }
         }
-        if name == "foundation-prefix-72m" {
-            assert_eq!(
-                t.ticks, 480,
-                "long supported fixture must pass every target"
-            );
-        }
+        assert_eq!(
+            t.ticks, 480,
+            "{name} must pass every qualified duration target"
+        );
     }
 }
 
