@@ -3,6 +3,8 @@
 #[allow(dead_code)]
 #[path = "support/m4b_contract.rs"]
 mod contract;
+#[path = "support/m4g_extended.rs"]
+mod extended;
 #[allow(dead_code)]
 #[path = "../../qx-geometry/tests/support/m4e_c_extension.rs"]
 mod fixtures;
