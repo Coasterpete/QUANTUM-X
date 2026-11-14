@@ -1,5 +1,4 @@
 //! M4H offline experiments; original M4G test binary is unchanged.
-//! Opt-in M4F experiment. Every mechanical equation is imported unchanged.
 #![cfg(feature = "experimental-source-guidance")]
 #[allow(dead_code)]
 #[path = "support/m4b_contract.rs"]
@@ -33,8 +32,10 @@ mod rail_fixtures;
 #[allow(dead_code)]
 #[path = "support/m4d_dynamics.rs"]
 mod refined_dynamics;
+#[path = "support/m4h_reuse.rs"]
+mod reuse;
 #[allow(dead_code)]
-#[path = "support/m4f_surface.rs"]
+#[path = "support/m4h_surface.rs"]
 mod surface;
 #[allow(dead_code)]
 #[path = "support/m4d_tracking.rs"]

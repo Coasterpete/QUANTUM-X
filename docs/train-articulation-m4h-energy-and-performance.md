@@ -129,3 +129,103 @@ only; all integration operations and gates are unchanged.
 stabilized discrete method, rather than missing external work or a state-energy
 accounting error. No integration method replacement or production policy change
 is attempted. Stage B may investigate exact geometry reuse independently.
+
+## Stage B — exact immutable-snapshot reuse
+
+`m4h_surface.rs` wraps the byte-unchanged `m4f_surface.rs`. With reuse and
+profiling off, calls delegate to that original implementation. With either
+experiment enabled, the original differential algebra and root search are
+retained. No tolerance, bin, Newton iteration, root competition, source jet,
+J/Jdot, support or bearing equation changes. Original M4G tests remain separate
+and unmodified. The source snapshot is owned privately and exposed read-only
+(no DerefMut). A source replacement constructs a new Rail with empty caches;
+caches never move across snapshots, even if a caller incorrectly repeats a token.
+
+Exact keys include document/generation, original chart, station f64 bits and
+endpoint side; physical datum keys add rail/face names, role and all offset f64
+bits. Projection keys also include point, hint and half-window f64 bits and
+circuit mode. Chart ownership follows the original sided partition rule. No
+rounding, proximity, old-hint substitution or cross-offset reuse is permitted.
+Every cache hit has passed query validation; projection hits also revalidate
+the source interval. Identity validity is a construction/immutability invariant.
+No source edit lifecycle or caller token retirement requirement is waived.
+Each complete timed step starts by clearing caches (included in its timer),
+with an additional hard 8192-entry cap per map. At capacity, misses simply
+recompute. Diagnostic phases start fresh caches and are timed separately.
+Failures are not cached; caches are derived state independent of rollback.
+
+Keys/negatives cover source generations, distinct snapshots with an erroneously
+repeated token, actual source joins/sides, changed physical offsets, normal roles,
+face identity, points, windows/hints, stale windows, nonfinite inputs and invalid
+offsets. All successful geometry results and measured mechanical outputs are
+compared by f64 bits, including derivatives, poses, velocities, reports, station
+hints, envelopes and restored windows. Reaction/acceleration diagnostics also
+match by bits. No numerical-equivalence tolerance replaces these comparisons.
+
+### Complete-step timing
+
+Native serial Release: each fixture has one complete 480-tick warm-up followed
+by five measured 480-tick runs. Each tick pairs cached and original executions;
+order alternates to reduce ordering bias. Preparation, compilation, assertions,
+printing and independent diagnostics are outside step timers. Cache clearing and
+normal mechanical validation/tracking are inside the cached timer. Timers are
+off in both measured adapters; counts remain cheap Cell observations. Shared
+Windows desktop observations, no affinity or isolated scheduling; no real-time
+claim or hard maximum bound. Percentiles use linear interpolation over sorted
+samples. Deadline is the unchanged 4.166667 ms outer interval.
+
+| Fixture / evaluator | Steps | Median ms | P95 ms | P99 ms | Maximum ms | Observed misses |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| helix / original | 2400 | 4.7154 | 7.7713 | 9.4620 | 16.1332 | 1948 |
+| helix / cached | 2400 | 2.3936 | 4.1810 | 6.3600 | 10.6395 | 122 |
+| foundation / original | 2400 | 6.1210 | 8.6758 | 11.6436 | 24.6478 | 2399 |
+| foundation / cached | 2400 | 2.7917 | 4.3419 | 6.8897 | 16.1602 | 128 |
+
+These are same-session paired comparisons against the original evaluator, not
+comparisons to historical M4G timings or a viewer FPS result. Individual run
+statistics and raw samples are retained in `stage-b-cost.summary.json` and
+`stage-b-cost.log`. All 5760 paired steps including warm-up passed bitwise
+mechanical comparisons; the measured distribution contains 4800 steps per
+engine across the two fixtures.
+
+### Separate attribution and observed bottlenecks
+
+An additional 480-tick run per fixture/mode enables nested timers, separately
+pairs with the original, and separately times instantaneous reaction/J/Jdot
+extraction. Categories are dense-source evaluation including lookup, physical
+datum/normal algebra including lookup but excluding source, root search excluding
+nested geometry/interval validation, and interval validation. Other constraint
+assembly, PGS, pose advancement and bookkeeping are the remainder of complete
+step time, not charged to geometry. Instrumentation overhead is present; these
+runs do not replace the uninstrumented complete-step distributions above.
+
+| Fixture / mode | Source calls / hits | Datum calls / hits | Projection calls / hits | Root iterations | Source ms | Datum ms | Root ms | Validation ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| helix / uncached | 2247593 / 0 | 2247593 / 0 | 302400 / 0 | 810023 | 1347.804 | 558.593 | 163.901 | 11.140 |
+| helix / cached | 370198 / 0 | 1392983 / 1022785 | 302400 / 115200 | 497573 | 392.472 | 411.397 | 247.102 | 13.036 |
+| foundation / uncached | 2614083 / 0 | 2614083 / 0 | 302400 / 0 | 785283 | 2290.538 | 840.064 | 232.676 | 36.952 |
+| foundation / cached | 370180 / 71 | 1626306 / 1256126 | 302400 / 115200 | 488706 | 426.893 | 464.012 | 272.229 | 44.127 |
+
+The observed useful reuse is exact physical differentials and identical bounded
+projections, particularly repeated base constraint evaluation for directional
+Jdot and substep boundary validation. The standalone dense-source cache has
+zero hits in the R8 mechanical run and only 71/370180 queries in foundation
+(about .019%): almost all remaining station/offset roots are distinct after
+physical differential hits are removed. Its bookkeeping is included in
+cached cost; no benefit is claimed for that layer. A future implementation
+should measure a simpler cache without it rather than assuming all layers help.
+No reactions or Jdot results themselves are cached; only their exact geometry
+queries reuse data. Cold diagnostic phases have different root/finite-difference
+query patterns and cannot inherit the mechanical cache's hit ratio.
+
+| Fixture / mode | Separate reaction diagnostic median ms | P95 ms | P99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: |
+| helix / uncached | 8.6641 | 11.6957 | 17.2039 | 26.6579 |
+| helix / cached | 4.6055 | 6.7791 | 8.2324 | 11.9022 |
+| foundation / uncached | 10.4616 | 14.4848 | 19.5412 | 23.8299 |
+| foundation / cached | 5.0120 | 6.0010 | 8.7630 | 12.5954 |
+
+**Stage B gate: PASS for this exact-key prototype and these two fixtures.**
+Mechanical and diagnostic outputs remain bitwise identical. Geometry reuse
+reduces observed complete-step median cost while observed misses/outliers remain;
+this is not production integration or a promise of sustained 240 Hz behavior.
