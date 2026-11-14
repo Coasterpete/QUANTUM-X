@@ -156,6 +156,10 @@ for the upcoming native mode lifecycle (not implemented yet).
 
 ## Verification
 
+Pull requests and pushes to `main` run the CPU-only GitHub Actions checks
+(format, clippy, tests and release build) with the pinned Rust toolchain; see
+[CI](docs/ci.md). GPU, packaging and verifier checks below remain local.
+
 Run from the workspace root on native Windows:
 
 ```powershell

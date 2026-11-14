@@ -1,0 +1,6 @@
+# Pinned compiler for local development and CI (R0.1). Update deliberately in
+# its own change, after the full verification suite passes on the new version.
+[toolchain]
+channel = "1.100.0"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

@@ -1,0 +1,14 @@
+# Text files are stored with LF in the repository (already true for every
+# tracked text file). Checkout conversion follows each clone's Git
+# configuration: the owner's Windows laptop and the CI workflow both use
+# core.autocrlf=true, so working copies contain CRLF. See docs/ci.md.
+* text=auto
+
+# Binary assets are never converted.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.glb binary
+*.ico binary
+*.ttf binary
+*.blend binary
