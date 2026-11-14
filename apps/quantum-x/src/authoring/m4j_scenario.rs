@@ -2,7 +2,7 @@
 //! no window input, alternate physics engine or standalone viewer.
 use super::{
     ride_camera::Mode,
-    session::{Session, blank_project, scene},
+    session::{Session, blank_project},
     train_playback::{Action, Snapshot},
     workbench::Profile,
 };
@@ -88,9 +88,23 @@ pub fn run(input: Option<PathBuf>, output: PathBuf) -> Result<(), Box<dyn Error>
         let project = s.editor.project().clone();
         let selected = s.selected;
         let dirty = s.dirty();
-        let captured = scene(&project, &s.catalog, s.options)?;
+        let deadline = Instant::now() + Duration::from_secs(15);
+        let captured = loop {
+            if let Some(scene) = s.poll() {
+                break scene;
+            }
+            if let Some(error) = &s.draft_error {
+                return Err(error.clone().into());
+            }
+            if Instant::now() >= deadline {
+                return Err("M4J generation worker timed out".into());
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        };
+        if s.visible_revision != s.revision || s.visible_preview {
+            return Err("M4J capture requires current committed generated geometry".into());
+        }
         let track = captured.train_track()?;
-        s.visible_revision = s.revision;
         s.workbench.active = Profile::Train;
         s.development = true;
         s.playback.experimental_velocity = experimental;
@@ -204,6 +218,7 @@ pub fn run(input: Option<PathBuf>, output: PathBuf) -> Result<(), Box<dyn Error>
         "offscreen_native_application":true,"desktop_manually_verified":false,
         "synthetic_development_fixture":synthetic,"input":input,"input_unchanged":true,
         "play_pause_reset":true,"history_dirty_selection_preserved":true,"save_reopen":true,
+        "generation_current_before_initialization":true,
         "records":records}))?,
     )?;
     println!(
