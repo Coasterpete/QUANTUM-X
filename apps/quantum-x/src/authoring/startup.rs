@@ -135,7 +135,7 @@ pub(super) struct App {
     preferences: PreferenceStore,
     pending_scene: Option<InspectionScene>,
     /// `--gui-smoke-test simulator` only; never set in normal launches.
-    simulator_smoke: Option<super::simulator_smoke::Script>,
+    simulator_smoke: Option<super::simulator_smoke::Driver>,
 }
 impl App {
     /// Deterministic diagnostic capture without personal recents or preferences.
@@ -339,7 +339,7 @@ impl EditorSurface for App {
     fn smoke_script_report(&self) -> serde_json::Value {
         self.simulator_smoke.as_ref().map_or(
             serde_json::Value::Null,
-            super::simulator_smoke::Script::report,
+            super::simulator_smoke::Driver::report,
         )
     }
     fn window_title(&self) -> String {
@@ -516,7 +516,7 @@ pub(crate) fn exit_log(exit: &qx_rendering::EditorExit) -> String {
         (exit.reason == qx_rendering::ExitReason::CloseApproved).into();
     serde_json::to_string(&record).expect("exit record serializes")
 }
-pub(crate) const GUI_SMOKE_USAGE: &str = "usage: quantum-x --gui-smoke-test [welcome | edit [project.qx.json] | simulator [project.qx.json]]";
+pub(crate) const GUI_SMOKE_USAGE: &str = "usage: quantum-x --gui-smoke-test [welcome | edit [project.qx.json] | simulator [project.qx.json] | simulator-timing <project.qx.json> <seconds 1..600>]";
 /// Startup route exercised by `--gui-smoke-test`; mirrors normal launch routes.
 pub(crate) fn smoke_launch(args: &[std::ffi::OsString]) -> Result<Launch, String> {
     match args {
@@ -538,8 +538,22 @@ pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn 
     };
     use std::time::{Duration, Instant};
     // `simulator [project]` opens the editor, then scripts a mode round trip.
-    let simulator = args.first().is_some_and(|a| a == "simulator");
+    // `simulator-timing <project> <seconds>` measures worker pacing (M4K.1).
+    let timing = match args {
+        [mode, path, seconds] if mode == "simulator-timing" => {
+            let seconds: f64 = seconds
+                .to_str()
+                .and_then(|s| s.parse().ok())
+                .filter(|s: &f64| (1. ..=600.).contains(s))
+                .ok_or(GUI_SMOKE_USAGE)?;
+            Some((PathBuf::from(path), seconds))
+        }
+        [mode, ..] if mode == "simulator-timing" => return Err(GUI_SMOKE_USAGE.into()),
+        _ => None,
+    };
+    let simulator = timing.is_some() || args.first().is_some_and(|a| a == "simulator");
     let entry = match args {
+        _ if timing.is_some() => Launch::Editor(timing.as_ref().map(|t| t.0.clone())),
         [_] if simulator => Launch::Editor(None),
         [_, path] if simulator => Launch::Editor(Some(PathBuf::from(path))),
         _ if simulator => return Err(GUI_SMOKE_USAGE.into()),
@@ -554,9 +568,16 @@ pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn 
     } else {
         app.enter_launch(entry.clone())?;
     }
-    if simulator {
-        app.simulator_smoke = Some(super::simulator_smoke::Script::new());
-    }
+    use super::simulator_smoke::Driver;
+    app.simulator_smoke = match &timing {
+        Some((_, seconds)) => Some(Driver::Timing(Box::new(
+            super::simulator_timing::TimingScript::new(*seconds),
+        ))),
+        None if simulator => Some(Driver::RoundTrip(Box::new(
+            super::simulator_smoke::Script::new(),
+        ))),
+        None => None,
+    };
     if matches!(entry, Launch::Editor(_)) && app.session.is_none() {
         return Err(format!("GUI smoke test could not open the editor: {}", app.status).into());
     }
@@ -564,7 +585,11 @@ pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn 
         .pending_scene
         .take()
         .unwrap_or_else(InspectionScene::empty);
-    let config = qx_rendering::SmokeConfig::default();
+    let mut config = qx_rendering::SmokeConfig::default();
+    if let Some((_, seconds)) = &timing {
+        // Play time, paused hold, re-entry cycles and the offline replay.
+        config.timeout += Duration::from_secs_f64(seconds * 2. + 30.);
+    }
     let (stage, soft) = (config.stage.clone(), config.timeout);
     // The event loop exits cleanly at the soft deadline. The hard deadline only
     // fires if the main thread stops returning to the event loop at all.

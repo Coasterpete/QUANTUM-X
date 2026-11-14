@@ -69,7 +69,9 @@ Editor ──(entry request, readiness OK)──▶ Preparing ──(worker: val
   playback when the inspection marker is hidden. **Frame-time benefit was not
   measured.**
 * Physics timing is unchanged: wall-clock-scheduled 1/240 s fixed steps on the
-  worker, with interpolation for presentation only.
+  worker, with interpolation for presentation only. M4K.1 replaced only the
+  worker's wait on Windows with a high-resolution waitable timer; see
+  [investigations/m4k1-windows-timing-correction.md](investigations/m4k1-windows-timing-correction.md).
 
 ## 4. Implemented UI (development-only)
 
@@ -130,7 +132,13 @@ The four ignored M4I items are long native release research experiments
 (six-second references, 563-tick sweeps and trajectory refinement). They were
 not run because the physics crate is unchanged in this branch.
 
-### 5.2 Intermittent test failure (open item)
+### 5.2 Intermittent test failure (resolved in M4K.1)
+
+**Resolved:** the differing field was `layouts`, and the two values were
+structurally equal; only the egui_tiles hash-map serialization order differed.
+The comparison is now structural. See
+[investigations/m4k1-windows-timing-correction.md](investigations/m4k1-windows-timing-correction.md) §10.
+The original note follows.
 
 `authoring::simulator_tests::editor_simulator_editor_round_trip_preserves_the_open_document`
 failed **once** in a full `cargo test --workspace` run, at the editor-state

@@ -1,5 +1,8 @@
 //! Transient playback worker. Fixed simulation steps never block egui or alter the document.
-use super::session::Session;
+use super::{
+    playback_clock::{Histogram, Mechanism, Waiter},
+    session::Session,
+};
 use qx_document::{Project, train::Train};
 use qx_geometry::{
     authoring::{InitialConditions, Section},
@@ -39,36 +42,58 @@ impl Source {
         })
     }
 }
-#[derive(Clone, Debug)]
+/// Worker scheduling evidence since the last Load/Reset. Diagnostics only:
+/// never persisted and never fed back into the simulation.
+#[derive(Clone, Debug, Default)]
 pub(super) struct WorkerTiming {
     pub steps: u64,
     pub step_total_ms: f64,
     pub step_max_ms: f64,
     pub over_budget_steps: u64,
     pub lateness_max_ms: f64,
-}
-impl Default for WorkerTiming {
-    fn default() -> Self {
-        Self {
-            steps: 0,
-            step_total_ms: 0.,
-            step_max_ms: 0.,
-            over_budget_steps: 0,
-            lateness_max_ms: 0.,
-        }
-    }
+    /// Wait primitive in use; `None` only for offline/default packets.
+    pub mechanism: Option<Mechanism>,
+    /// Deadline wakes while running (each may execute 0..=8 steps).
+    pub wakes: u64,
+    /// Interval between consecutive running wakes within one Play segment.
+    pub wake_interval: Histogram,
+    /// Wake lateness beyond the step deadline that was due.
+    pub wake_lateness: Histogram,
+    pub step_duration: Histogram,
+    pub steps_per_wake: [u64; 9],
+    /// Wall-clock debt discarded at catch-up limits. Simulation time falls
+    /// behind real time by this amount; no physics step is enlarged or skipped.
+    pub dropped_wall_ms: f64,
+    /// Current (or last) Play segment: wall time since Play and simulated time
+    /// stepped in that segment.
+    pub segment_wall_s: f64,
+    pub segment_simulated_s: f64,
+    /// Worker thread CPU time since the thread started (Windows only).
+    pub thread_cpu_ms: Option<f64>,
 }
 impl WorkerTiming {
+    fn new(mechanism: Mechanism) -> Self {
+        Self {
+            mechanism: Some(mechanism),
+            ..Default::default()
+        }
+    }
     fn record(&mut self, start: Instant, deadline: Instant) {
         let end = Instant::now();
         let ms = end.duration_since(start).as_secs_f64() * 1000.;
         self.steps += 1;
         self.step_total_ms += ms;
         self.step_max_ms = self.step_max_ms.max(ms);
+        self.step_duration.record(ms);
         self.over_budget_steps += u64::from(ms > FIXED_STEP_SECONDS * 1000.);
         self.lateness_max_ms = self
             .lateness_max_ms
             .max(end.saturating_duration_since(deadline).as_secs_f64() * 1000.);
+    }
+    /// Simulated-time deficit in the current Play segment. A perfectly paced
+    /// worker stays within about one step (the first step is due one dt after Play).
+    pub fn segment_drift_ms(&self) -> f64 {
+        (self.segment_wall_s - self.segment_simulated_s) * 1000.
     }
 }
 #[derive(Clone, Debug)]
@@ -130,12 +155,14 @@ struct Worker {
 }
 type Latest = Arc<Mutex<Option<(u64, Result<Snapshot, String>)>>>;
 impl Worker {
-    fn new(experimental_velocity: bool) -> Self {
+    fn new(experimental_velocity: bool, legacy_wait: bool) -> Self {
         let (send, receive) = mpsc::channel();
         let latest = Arc::new(Mutex::new(None));
         let output = latest.clone();
         std::thread::spawn(move || {
             let dt = Duration::from_secs_f64(FIXED_STEP_SECONDS);
+            // Owned by this thread; its OS timer is released when the loop ends.
+            let mut waiter = Waiter::new(legacy_wait);
             let mut simulation: Option<TrackSimulation> = None;
             let mut epoch = 0;
             let mut running = false;
@@ -144,16 +171,20 @@ impl Worker {
             let mut error = None;
             let mut lag_events = 0;
             let mut committed_at = Instant::now();
-            let mut timing = WorkerTiming::default();
+            let mut timing = WorkerTiming::new(waiter.mechanism());
             let mut collapse_pair = true;
             let mut timeline = VecDeque::new();
+            // Play segment origin (wall clock, tick) and the previous running wake.
+            let mut segment: Option<(Instant, u64)> = None;
+            let mut last_wake: Option<Instant> = None;
             loop {
-                let timeout = if running {
-                    next.saturating_duration_since(Instant::now())
+                // Absolute monotonic deadline while running; block while paused/idle.
+                let message = if running {
+                    waiter.wait(&receive, next)
                 } else {
-                    Duration::from_secs(60)
+                    receive.recv_timeout(Duration::from_secs(60))
                 };
-                match receive.recv_timeout(timeout) {
+                match message {
                     Ok(Request::Load {
                         epoch: e,
                         train,
@@ -187,7 +218,8 @@ impl Worker {
                         diagnostics = None;
                         error = None;
                         lag_events = 0;
-                        timing = WorkerTiming::default();
+                        timing = WorkerTiming::new(waiter.mechanism());
+                        segment = None;
                         collapse_pair = true;
                         committed_at = Instant::now();
                     }
@@ -200,6 +232,8 @@ impl Worker {
                                         collapse_pair = true;
                                         next = committed_at + dt;
                                         running = true;
+                                        segment = Some((committed_at, s.ticks()));
+                                        last_wake = None;
                                     }
                                 }
                                 Action::Pause => running = false,
@@ -225,7 +259,8 @@ impl Worker {
                                     diagnostics = None;
                                     error = None;
                                     lag_events = 0;
-                                    timing = WorkerTiming::default();
+                                    timing = WorkerTiming::new(waiter.mechanism());
+                                    segment = None;
                                     collapse_pair = true;
                                     committed_at = Instant::now();
                                 }
@@ -241,6 +276,18 @@ impl Worker {
                     Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {
                         if running && let Some(s) = &mut simulation {
+                            let woke = Instant::now();
+                            timing.wakes += 1;
+                            if let Some(previous) = last_wake {
+                                timing
+                                    .wake_interval
+                                    .record(woke.duration_since(previous).as_secs_f64() * 1000.);
+                            }
+                            last_wake = Some(woke);
+                            timing
+                                .wake_lateness
+                                .record(woke.saturating_duration_since(next).as_secs_f64() * 1000.);
+                            let mut stepped = 0;
                             // Bound catch-up work and discard excess wall-clock debt, never enlarge dt.
                             for _ in 0..8 {
                                 if Instant::now() < next {
@@ -256,6 +303,7 @@ impl Worker {
                                         remember(&mut timeline, s, committed_at);
                                         timing.record(start, next);
                                         collapse_pair = false;
+                                        stepped += 1;
                                     }
                                     Err(e) => {
                                         error = Some(e);
@@ -265,9 +313,12 @@ impl Worker {
                                 }
                                 next += dt;
                             }
+                            timing.steps_per_wake[stepped] += 1;
                             if running && Instant::now() >= next {
                                 lag_events += 1;
                                 committed_at = Instant::now();
+                                timing.dropped_wall_ms +=
+                                    committed_at.duration_since(next).as_secs_f64() * 1000.;
                                 collapse_pair = true;
                                 next = committed_at + dt;
                             }
@@ -275,6 +326,13 @@ impl Worker {
                     }
                 }
                 if let Some(s) = &simulation {
+                    timing.mechanism = Some(waiter.mechanism());
+                    timing.thread_cpu_ms = super::playback_clock::thread_cpu_ms();
+                    if running && let Some((start, tick)) = segment {
+                        timing.segment_wall_s = start.elapsed().as_secs_f64();
+                        timing.segment_simulated_s =
+                            s.ticks().saturating_sub(tick) as f64 * FIXED_STEP_SECONDS;
+                    }
                     if collapse_pair {
                         timeline.clear();
                         remember(&mut timeline, s, committed_at);
@@ -326,6 +384,8 @@ pub(super) fn velocity_opt_in(value: Option<&str>) -> Result<bool, String> {
 }
 pub(super) struct State {
     pub experimental_velocity: bool,
+    /// Developer A/B only (`QX_PLAYBACK_WAIT=legacy`): pre-M4K.1 channel wait.
+    pub legacy_wait: bool,
     launch_error: Option<String>,
     worker: Option<Worker>,
     source: Option<Source>,
@@ -339,15 +399,17 @@ pub(super) struct State {
 }
 impl Default for State {
     fn default() -> Self {
-        let value = std::env::var_os(VELOCITY_ENV);
-        let policy = velocity_opt_in(
-            value
-                .as_ref()
-                .map(|v| v.to_str().unwrap_or("invalid unicode")),
+        let env = |name| {
+            std::env::var_os(name).map(|v| v.to_str().unwrap_or("invalid unicode").to_owned())
+        };
+        let policy = velocity_opt_in(env(VELOCITY_ENV).as_deref());
+        let wait = super::playback_clock::legacy_requested(
+            env(super::playback_clock::WAIT_ENV).as_deref(),
         );
         Self {
             experimental_velocity: policy.as_ref().copied().unwrap_or(false),
-            launch_error: policy.err(),
+            legacy_wait: wait.as_ref().copied().unwrap_or(false),
+            launch_error: policy.err().or(wait.err()),
             worker: None,
             source: None,
             epoch: 0,
@@ -457,7 +519,7 @@ impl State {
         }
         let worker = self
             .worker
-            .get_or_insert_with(|| Worker::new(self.experimental_velocity));
+            .get_or_insert_with(|| Worker::new(self.experimental_velocity, self.legacy_wait));
         let request = Request::Load {
             epoch: self.epoch,
             train: Box::new(source.train.clone()),

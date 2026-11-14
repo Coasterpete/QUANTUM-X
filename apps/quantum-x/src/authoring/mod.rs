@@ -54,6 +54,7 @@ mod material_tests;
 mod material_ui;
 mod operations_ui;
 mod panels;
+mod playback_clock;
 mod plot;
 mod previews;
 #[cfg(test)]
@@ -74,6 +75,7 @@ mod simulator;
 mod simulator_smoke;
 #[cfg(test)]
 mod simulator_tests;
+mod simulator_timing;
 mod simulator_ui;
 mod snap;
 #[cfg(test)]

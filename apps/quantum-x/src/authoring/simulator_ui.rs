@@ -223,10 +223,25 @@ fn controls(
         }
         if p.lag_events > 0 {
             ui.small(format!(
-                "{} wall-clock catch-up limits reached; simulation time is retained, not skipped.",
-                p.lag_events
+                "{} catch-up limits reached: {:.1} ms of wall-clock time dropped, so simulated \
+                 time runs behind real time. No physics step was enlarged or skipped.",
+                p.lag_events, p.timing.dropped_wall_ms
             ));
         }
+        let t = &p.timing;
+        ui.small(format!(
+            "Worker: {} · wake p50 {} · drift {:.1} ms this run",
+            t.mechanism.map_or("—", |m| m.label()),
+            t.wake_interval
+                .quantile_ms(0.5)
+                .map_or("—".into(), |ms| format!("{ms:.2} ms")),
+            t.segment_drift_ms()
+        ))
+        .on_hover_text(
+            "Development diagnostics. Wake p50 is the median interval between worker \
+             wakes (0.25 ms bins; 4.17 ms is one step). Drift is wall time since Play minus \
+             simulated time, about one step when on pace.",
+        );
         if s.ride.starved && p.running {
             ui.small("Presentation waiting for the next committed step.");
         }

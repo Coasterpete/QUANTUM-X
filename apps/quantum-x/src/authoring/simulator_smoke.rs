@@ -45,7 +45,7 @@ enum Step {
 
 /// Editor state that must survive the round trip.
 #[derive(PartialEq)]
-struct Baseline {
+pub(super) struct Baseline {
     project: Project,
     dirty: bool,
     undo: bool,
@@ -53,10 +53,11 @@ struct Baseline {
     path: String,
     selected: u64,
     profile: usize,
-    layouts: String,
+    /// Structural (see `simulator_tests::EditorState::layouts`).
+    layouts: serde_json::Value,
 }
 impl Baseline {
-    fn capture(s: &Session) -> Self {
+    pub(super) fn capture(s: &Session) -> Self {
         Self {
             project: s.editor.project().clone(),
             dirty: s.dirty(),
@@ -65,7 +66,7 @@ impl Baseline {
             path: s.path.clone(),
             selected: s.selected.0,
             profile: s.workbench.active.index(),
-            layouts: serde_json::to_string(&s.workbench.layouts).unwrap_or_default(),
+            layouts: serde_json::to_value(&s.workbench.layouts).unwrap_or_default(),
         }
     }
 }
@@ -203,5 +204,25 @@ impl Script {
             "editor_restored": self.editor_restored,
             "entry_blocked_by": self.blocked,
         })
+    }
+}
+
+/// The scripted native Simulator run selected by `--gui-smoke-test`.
+pub(super) enum Driver {
+    RoundTrip(Box<Script>),
+    Timing(Box<super::simulator_timing::TimingScript>),
+}
+impl Driver {
+    pub fn advance(&mut self, s: &mut Session) -> Result<bool, String> {
+        match self {
+            Self::RoundTrip(script) => script.advance(s),
+            Self::Timing(script) => script.advance(s),
+        }
+    }
+    pub fn report(&self) -> serde_json::Value {
+        match self {
+            Self::RoundTrip(script) => script.report(),
+            Self::Timing(script) => script.report(),
+        }
     }
 }
