@@ -116,7 +116,11 @@ categories; phase sums are checked against complete-step observations.
 | --- | ---: | ---: | ---: | ---: |
 | Uninstrumented complete step | 6.0843 | 7.1780 | 9.3649 | 13.5179 |
 | Instrumented complete step | 6.1262 | 6.9691 | 9.4094 | 17.4725 |
-| Physical evaluation/projection | 5.5417 | 6.2698 | 8.5339 | see raw summary |
+| Physical evaluation/projection | 5.5417 | 6.2698 | 8.5339 | 16.7457 |
+| Exclusive constraints/reactions | .3132 | .4217 | .6449 | 3.5534 |
+| Impulse integration | .1572 | .1786 | .2519 | 1.4987 |
+| Exclusive validation/tracking | .0864 | .1051 | .1940 | 2.0268 |
+| Other complete-step overhead | .0218 | .0549 | .0634 | .2007 |
 
 Both measured series missed the 4.166667 ms interval on **2,400/2,400** steps.
 The nominal simulation timestep is unchanged; offline physics does not require
@@ -152,3 +156,54 @@ totals, not per-tick samples. Timing observations are excluded from exact replay
 comparison; scene and all 962 diagnostic/state records remain identical to
 Stage A. Separating this work prevents it blocking physical integration and
 makes later bounded geometry/reaction caching independently reviewable.
+
+## Stage C — PASS as a provisional developer inspector
+
+The original M4F viewer/report remain unchanged. New tools package both genuine
+481-state clips into `target/m4g/source-guidance-m4g.html`, about 13.22 MB.
+The exporter first runs full-tick physical/continuation/reaction validation;
+only then does it omit dense matrices/unused raw rows from the display package.
+The original full trace retains those observations. There is no interpolated,
+repeated or prescribed motion; each primitive box is transformed by its recorded
+position/quaternion, and shared middle bogie 3 has a single identity.
+
+Implemented developer controls: tick slider and numeric physical timestamp;
+play/pause/reset with .1/.25/.5/1/2/4 times replay speed; side/top/three-quarter
+presets; yaw/elevation, pan and zoom through controls plus drag/Shift-drag/wheel;
+role filtering, body selection and isolation; independent IDs, bearing anchors,
+support datums, normals and source-reference visibility. Replay follows elapsed
+physical timestamps and can skip displayed records; it never interpolates poses.
+All recorded ticks remain inspectable. Timer cancellation prevents stale replay
+callbacks surviving pause/reset. The initial requestAnimationFrame-driven QA
+did not advance in the headless virtual-time run; a timestamp-driven cancellable
+timer now exercises the actual replay in both normal and headless contexts.
+
+Camera bounds are computed from the entire recorded clip, not the present frame.
+Label leader lines and collision avoidance improve overlap; the body table also
+provides an accessible selection path. Source reference uses dashed lines;
+cars/bogies/carriers have distinct restrained colors and labeled roles. Selected
+bodies have a heavy dashed outline as well as a selected table row. No wheel
+graphics or train/manufacturer branding is introduced. Original provisional
+dimensions are retained and micrometre gaps are not geometrically magnified.
+Normal glyph length is explicitly .22 m. Actual error values, observed maxima
+and relevant gates are shown beside timestamp histories of normalized position/
+velocity error and signed energy drift. Graph scales are explicitly labeled.
+
+Headless Edge uses isolated profiles, hidden process creation and no connection
+to the owner's active browser/desktop. Real DOM control checks pass for both
+clips, endpoint reset, numeric timestamps, scrubbing, timed replay advancement
+at 1x and 4x, pause, keyboard stepping, camera controls/presets, filtering,
+shared-bogie isolation, body-list selection, every visibility switch and history
+generation. Stable framing and all 66 pose-derived body faces are checked.
+Three 1600x1400 screenshots were exported and visually inspected: the R8
+three-quarter state at 1 s, foundation top view at 1 s, and isolated middle bogie
+at 1 s. Evidence filenames are `source-guidance-m4g.png`,
+`source-guidance-m4g-foundation-top.png`, `source-guidance-m4g-shared-bogie.png`,
+`stage-c-viewer-dom.html`, `stage-c-headless.log` and `stage-c-export.log`.
+The viewer is standalone with no network assets or server requirement.
+
+These are headless and screenshot checks, not manual native desktop, high-DPI,
+touch-device, arbitrary-size or live application qualification. The whole-clip
+framing can make a single body small; zoom/isolation controls permit closer
+inspection. Source lines can leave the viewport. This layout is explicitly
+temporary developer UI, not an approved main-editor design.
