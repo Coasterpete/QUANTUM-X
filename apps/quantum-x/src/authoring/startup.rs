@@ -477,7 +477,90 @@ pub(crate) fn run(entry: Launch) -> Result<(), Box<dyn Error>> {
         .pending_scene
         .take()
         .unwrap_or_else(InspectionScene::empty);
-    qx_rendering::edit(initial, app).map_err(Into::into)
+    let exit = qx_rendering::edit(initial, app);
+    eprintln!("{}", exit_log(&exit));
+    exit.into_result().map_err(Into::into)
+}
+/// One structured stderr line per native editor exit; stdout stays reserved
+/// for CLI output. In this application `SurfaceOutput::close` is raised only by
+/// the "Discard edits and close" prompt, while an OS close request is accepted
+/// without a prompt only when nothing is unsaved.
+pub(crate) fn exit_log(exit: &qx_rendering::EditorExit) -> String {
+    let mut record = exit.to_json();
+    record["event"] = "editor_exit".into();
+    record["product"] = qx_rendering::identity::product().name.as_str().into();
+    record["unsaved_edits_discarded"] =
+        (exit.reason == qx_rendering::ExitReason::CloseApproved).into();
+    serde_json::to_string(&record).expect("exit record serializes")
+}
+pub(crate) const GUI_SMOKE_USAGE: &str =
+    "usage: quantum-x --gui-smoke-test [welcome | edit [project.qx.json]]";
+/// Startup route exercised by `--gui-smoke-test`; mirrors normal launch routes.
+pub(crate) fn smoke_launch(args: &[std::ffi::OsString]) -> Result<Launch, String> {
+    match args {
+        [] => Ok(Launch::Welcome),
+        [page] if page == "welcome" => Ok(Launch::Welcome),
+        [page] if page == "edit" => Ok(Launch::Editor(None)),
+        [page, path] if page == "edit" => Ok(Launch::Editor(Some(PathBuf::from(path)))),
+        _ => Err(GUI_SMOKE_USAGE.into()),
+    }
+}
+/// Hidden-window GUI smoke test. Uses isolated state (no recents/preferences
+/// read back or written), prints one JSON report to stdout and fails when the
+/// report is not a pass. A watchdog bounds the run even if the main thread
+/// blocks inside the windowing system or graphics driver.
+pub(crate) fn gui_smoke_test(args: &[std::ffi::OsString]) -> Result<(), Box<dyn Error>> {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    use std::time::{Duration, Instant};
+    let entry = smoke_launch(args)?;
+    let mut app = App::offscreen()?;
+    app.enter_launch(entry.clone())?;
+    if matches!(entry, Launch::Editor(_)) && app.session.is_none() {
+        return Err(format!("GUI smoke test could not open the editor: {}", app.status).into());
+    }
+    let initial = app
+        .pending_scene
+        .take()
+        .unwrap_or_else(InspectionScene::empty);
+    let config = qx_rendering::SmokeConfig::default();
+    let (stage, soft) = (config.stage.clone(), config.timeout);
+    // The event loop exits cleanly at the soft deadline. The hard deadline only
+    // fires if the main thread stops returning to the event loop at all.
+    let hard = soft + Duration::from_secs(10);
+    let done = Arc::new(AtomicBool::new(false));
+    let watchdog_done = done.clone();
+    std::thread::spawn(move || {
+        let start = Instant::now();
+        while !watchdog_done.load(Ordering::Acquire) {
+            if start.elapsed() >= hard {
+                println!(
+                    "{}",
+                    serde_json::json!({"ok": false, "result": "hard_timeout", "stage": stage.get(),
+                        "detail": format!("main thread blocked for {:.0} s; process terminated by watchdog", hard.as_secs_f64())})
+                );
+                std::process::exit(3);
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    });
+    let mut report = qx_rendering::smoke_test(initial, app, config);
+    done.store(true, Ordering::Release);
+    report["product"] = qx_rendering::identity::product().name.as_str().into();
+    report["page"] = if matches!(entry, Launch::Editor(_)) {
+        "editor"
+    } else {
+        "welcome"
+    }
+    .into();
+    println!("{}", serde_json::to_string_pretty(&report)?);
+    if report["ok"] == true {
+        Ok(())
+    } else {
+        Err("GUI smoke test failed; see the JSON report above".into())
+    }
 }
 impl App {
     fn enter_launch(&mut self, entry: Launch) -> Result<(), Box<dyn Error>> {

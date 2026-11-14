@@ -727,3 +727,74 @@ fn template_copy_resolves_and_packages_its_relative_train_assets() {
         std::fs::read(body).unwrap()
     );
 }
+#[test]
+fn gui_smoke_test_routes_as_a_command_and_parses_only_known_pages() {
+    use super::startup::smoke_launch;
+    let args = |a: &[&str]| a.iter().map(OsString::from).collect::<Vec<_>>();
+    // The diagnostic flag never reaches the interactive Welcome/Editor routes.
+    for exe in ["QUANTUM Dynamics.exe", "quantum-x.exe"] {
+        for a in [
+            &["--gui-smoke-test"][..],
+            &["--gui-smoke-test", "edit"],
+            &["--gui-smoke-test", "edit", "Coaster.qx.json"],
+        ] {
+            assert_eq!(launch(Path::new(exe), &args(a)), Launch::Command);
+        }
+    }
+    assert_eq!(smoke_launch(&args(&[])), Ok(Launch::Welcome));
+    assert_eq!(smoke_launch(&args(&["welcome"])), Ok(Launch::Welcome));
+    assert_eq!(smoke_launch(&args(&["edit"])), Ok(Launch::Editor(None)));
+    assert_eq!(
+        smoke_launch(&args(&["edit", "Coaster.qx.json"])),
+        Ok(Launch::Editor(Some("Coaster.qx.json".into())))
+    );
+    for bad in [
+        &["bogus"][..],
+        &["welcome", "extra"],
+        &["edit", "a", "b"],
+        &["Coaster.qx.json"],
+    ] {
+        assert!(
+            smoke_launch(&args(bad))
+                .unwrap_err()
+                .contains("--gui-smoke-test")
+        );
+    }
+}
+#[test]
+fn editor_exit_log_distinguishes_normal_discarding_and_fatal_closes() {
+    use super::startup::exit_log;
+    use qx_rendering::{EditorExit, ExitReason};
+    let record = |reason| {
+        let line = exit_log(&EditorExit {
+            reason,
+            window_created: true,
+            frames_presented: 12,
+            uptime_s: 3.,
+        });
+        assert!(!line.contains('\n'), "one log line per exit");
+        serde_json::from_str::<serde_json::Value>(&line).unwrap()
+    };
+    let normal = record(ExitReason::WindowClosed);
+    assert_eq!(normal["event"], "editor_exit");
+    assert_eq!(normal["product"], "QUANTUM Dynamics");
+    assert_eq!(normal["reason"], "window_closed");
+    assert_eq!(normal["unsaved_edits_discarded"], false);
+    assert_eq!(normal["fatal"], false);
+    let discarded = record(ExitReason::CloseApproved);
+    assert_eq!(discarded["reason"], "close_approved");
+    assert_eq!(discarded["unsaved_edits_discarded"], true);
+    assert_eq!(discarded["fatal"], false);
+    let init = record(ExitReason::InitializationFailed(
+        "graphics device unavailable: lost".into(),
+    ));
+    assert_eq!(init["reason"], "initialization_failed");
+    assert_eq!(init["fatal"], true);
+    assert_eq!(init["detail"], "graphics device unavailable: lost");
+    assert_eq!(init["unsaved_edits_discarded"], false);
+    let render = record(ExitReason::RenderingFailed(
+        "surface validation failed".into(),
+    ));
+    assert_eq!(render["reason"], "rendering_failed");
+    assert_eq!(render["fatal"], true);
+}

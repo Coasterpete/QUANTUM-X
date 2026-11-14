@@ -28,6 +28,7 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x editor-workflow-scenario <output-directory>
   quantum-x ui-reference-scenario <project.qx.json> <output-directory>
   quantum-x --startup-check [edit [project.qx.json] | project.qx.json]
+  quantum-x --gui-smoke-test [welcome | edit [project.qx.json]]
   quantum-x move-point <input.qx.json> <output.qx.json> <section-id> <point-id> <x> <y> <z>
   quantum-x authoring-scenario <output-directory>
   quantum-x transition-scenario <new-output-directory>
@@ -107,6 +108,9 @@ fn run() -> Result<(), Box<dyn Error>> {
     }
     if launch != authoring::startup::Launch::Command {
         return authoring::startup::run(launch);
+    }
+    if args.first().is_some_and(|a| a == "--gui-smoke-test") {
+        return authoring::startup::gui_smoke_test(&args[1..]);
     }
     if args.first().is_some_and(|a| a == "--startup-check") {
         println!(

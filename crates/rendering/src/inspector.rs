@@ -265,7 +265,7 @@ impl ApplicationHandler for Inspector {
                     )
                     .map_err(|e| e.to_string())?,
             );
-            let gpu = pollster::block_on(Gpu::new(window.clone()))?;
+            let gpu = pollster::block_on(Gpu::new(window.clone(), true))?;
             self.window = Some(window);
             self.gpu = Some(gpu);
             let (min, max) = self.scene.bounds(None);

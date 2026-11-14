@@ -120,6 +120,66 @@ explicit-file routes, project-library count, embedded icon and existing catalog.
 This diagnostic is evidence of routing/initial state, not a claimed physical
 Explorer double-click or native file-dialog interaction.
 
+### Native GUI startup smoke test
+
+`--startup-check` never creates a window or graphics device, so it cannot detect
+a failure in winit, the wgpu surface, the adapter/device or the first frame.
+`--gui-smoke-test [welcome | edit [project.qx.json]]` covers that path. It routes
+the same way as the matching launch, then runs the production `qx_rendering`
+event loop, window, wgpu surface and egui frame path with a **hidden, never
+activated** window:
+
+```powershell
+cargo run --release -p quantum-x -- --gui-smoke-test
+cargo run --release -p quantum-x -- --gui-smoke-test edit
+cargo run --release -p quantum-x -- --gui-smoke-test edit examples/foundation.qx.json
+```
+
+It prints one JSON report to stdout and exits 0 only when `ok` is true:
+5 swapchain images presented (`frames_presented`), and then the GPU queue
+drained and the surface, egui input and window released (`resources_released`;
+the window's `Arc` must be the sole remaining reference). The report includes
+the adapter, the last surface status, stage timings, and the `exit` record
+described below. Isolated state is used: recents and workbench preferences are
+neither read back nor written.
+
+Time limits: the event loop exits cleanly after **20 s** (`result: "timeout"`,
+exit 1, resources still released). If the main thread stops returning to the
+event loop entirely (for example, blocked inside a driver), a watchdog prints
+`{"result":"hard_timeout","stage":...}` and terminates the process with exit
+code 3 after **30 s**. The `stage` (`event_loop`, `window`, `gpu`,
+`scene_upload`, `frames`, `cleanup`) names where it stopped. Invalid arguments
+or an unopenable project fail before any window is created.
+
+The hidden window uses the normal startup size from window preferences. Some
+drivers may not present to hidden windows; that reports as a timeout with
+`frames_presented: 0` rather than a pass. The GPU-dependent integration test is
+`#[ignore]`d in the default suite:
+`cargo test -p quantum-x --test headless -- --ignored gui_smoke`.
+
+### Editor exit record
+
+Every interactive `edit`, project-file or Welcome launch writes one JSON line to
+**stderr** when the native event loop ends (stdout is unchanged):
+
+```json
+{"detail":null,"event":"editor_exit","fatal":false,"frames_presented":812,"product":"QUANTUM Dynamics","reason":"window_closed","unsaved_edits_discarded":false,"uptime_s":14.2,"window_created":true}
+```
+
+| `reason` | Meaning | Exit code |
+| --- | --- | --- |
+| `window_closed` | OS close (X, Alt+F4) accepted with nothing unsaved | 0 |
+| `close_approved` | "Discard edits and close" confirmed; `unsaved_edits_discarded: true` | 0 |
+| `initialization_failed` | Window, surface, adapter/device or first scene upload failed; `detail` explains | 1 |
+| `rendering_failed` | A frame or window event failed after startup; `detail` explains | 1 |
+| `event_loop_failed` | winit could not create or run the event loop | 1 |
+| `event_loop_ended` | Loop returned with no recorded cause (platform shutdown) | 0 |
+
+Fatal reasons are also still printed as the existing `QUANTUM Dynamics: <error>`
+line. A process that disappears without an `editor_exit` line crashed or was
+killed outside the event loop. Check `$LASTEXITCODE` (cargo also reports
+`process didn't exit successfully`).
+
 Additional automated tests cover welcome controls, cancellation,
 invalid files, draft guards, save failures, moved-file recovery, history restart,
 template copy and source-relative GLB packaging. Pointer events in tests are sent
