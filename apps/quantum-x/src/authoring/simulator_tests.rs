@@ -180,7 +180,10 @@ struct EditorState {
     selected: SectionId,
     draft: Section,
     profile: Profile,
-    layouts: String,
+    /// Structural: egui_tiles stores tiles in a hash map, so the serialized
+    /// key order of an unchanged layout is not stable. Every tile, ID, share,
+    /// active tab and child order is still compared exactly.
+    layouts: serde_json::Value,
     ride_mode: String,
     train_station_m: Option<f64>,
     viewport_inspection: Option<(SectionId, f64)>,
@@ -196,7 +199,7 @@ fn editor_state(s: &Session) -> EditorState {
         selected: s.selected,
         draft: s.draft.clone(),
         profile: s.workbench.active,
-        layouts: serde_json::to_string(&s.workbench.layouts).unwrap(),
+        layouts: serde_json::to_value(&s.workbench.layouts).unwrap(),
         ride_mode: format!("{:?}", s.ride.mode),
         train_station_m: s.train_station_m,
         viewport_inspection: s.viewport_inspection,
@@ -225,6 +228,26 @@ fn assert_same(now: &EditorState, then: &EditorState) {
         pending_edits
     );
     assert!(differs.is_empty(), "editor state changed: {differs:?}");
+}
+
+/// The intermittent M4K `["layouts"]` failure was a hash-map key-order
+/// difference between structurally equal layouts. The structural comparison
+/// ignores only object key order; values and child order still count.
+#[test]
+fn layout_comparison_ignores_only_hash_map_key_order() {
+    let v = |s: &str| serde_json::from_str::<serde_json::Value>(s).unwrap();
+    let base = r#"{"tiles":{"1":{"Pane":"Track"},"2":{"Tabs":{"children":[1,3],"active":1}}}}"#;
+    let reordered =
+        r#"{"tiles":{"2":{"Tabs":{"active":1,"children":[1,3]}},"1":{"Pane":"Track"}}}"#;
+    assert_ne!(base, reordered);
+    assert_eq!(v(base), v(reordered));
+    for changed in [
+        r#"{"tiles":{"1":{"Pane":"View"},"2":{"Tabs":{"children":[1,3],"active":1}}}}"#,
+        r#"{"tiles":{"1":{"Pane":"Track"},"2":{"Tabs":{"children":[3,1],"active":1}}}}"#,
+        r#"{"tiles":{"1":{"Pane":"Track"},"2":{"Tabs":{"children":[1,3],"active":3}}}}"#,
+    ] {
+        assert_ne!(v(base), v(changed), "{changed}");
+    }
 }
 
 #[test]
