@@ -20,7 +20,7 @@ fn record(t: &tracking::Tracked, report: Step) -> Record {
     }
 }
 
-fn fixture(name: &str) -> (InitialConditions, Vec<Section>, f64) {
+pub(super) fn fixture(name: &str) -> (InitialConditions, Vec<Section>, f64) {
     if name == "helix" {
         let (_, initial, sections) = fixtures::fixtures().remove(2);
         (initial, sections, 8.025)
@@ -145,7 +145,15 @@ fn duration_ladder_and_exact_replay() {
 
 /// Extract only AFTER integration; all poses/velocities are recorded states.
 /// Diagnostic source projections never set physical poses or station hints.
-fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Record]) {
+fn diagnostics(
+    name: &str,
+    r: &Rail,
+    t: &mut tracking::Tracked,
+    records: &[Record],
+) -> (Vec<String>, std::time::Duration, Vec<[f64; 2]>) {
+    let mut output = Vec::new();
+    let mut serialization = std::time::Duration::ZERO;
+    let mut samples = Vec::new();
     use qx_geometry::math::Frame;
     let (_, _, lead) = fixture(name);
     let labels = mechanisms::Mechanism::new(
@@ -217,15 +225,19 @@ fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Recor
             ]
         })
         .collect();
-    println!(
+    let format_clock = std::time::Instant::now();
+    output.push(format!(
         "M4G_SCENE {{\"title\":\"{name}: unchanged graph source / shared bogie\",\"fixture\":\"{name}\",\"source\":[{},{}],\"domain\":[0,{}],\"dt\":{},\"roles\":{roles:?},\"running\":{running:?},\"edges\":{edges:?},\"track\":{track:?},\"locals\":{locals:?},\"bearing_locals\":{bearing_locals:?},\"charts\":{charts:?}}}",
         ID.document,
         ID.generation,
         r.length(),
         qx_physics::FIXED_STEP_SECONDS
-    );
+    ));
+    serialization += format_clock.elapsed();
     let mut body_hints: Vec<_> = labels.poses.iter().map(|p| p.position_m.x).collect();
     for (tick, record) in records.iter().enumerate() {
+        let tick_clock = std::time::Instant::now();
+        let serialization_start = serialization;
         for (s, hint) in t.model.supports.iter_mut().zip(&record.hints) {
             s.station = *hint;
         }
@@ -240,10 +252,12 @@ fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Recor
         // Independent matrix verifier consumes genuine long-run states, including
         // near turnaround and each target, with finite stabilized residuals.
         if [0, 24, 120, 240, 360, 480].contains(&tick) {
-            println!(
+            let format_clock = std::time::Instant::now();
+            output.push(format!(
                 "M4G_SYSTEM {{\"name\":\"{name}-{tick}\",\"j\":{:?},\"v\":{:?},\"gamma\":{gamma:?},\"loads\":{reactions:?},\"acceleration\":{acceleration:?}}}",
                 e.j, state.velocity
-            );
+            ));
+            serialization += format_clock.elapsed();
             let finite = finite_jacobian(state.velocity.len(), 1e-6, |d| {
                 t.model
                     .evaluate(r, &t.model.shifted(&state.poses, d), Kind::B1)
@@ -397,7 +411,8 @@ fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Recor
             .collect();
         let velocity_rows = multiply(&e.j, &state.velocity);
         let power = contract::work(&e.j, &state.velocity, &reactions);
-        println!(
+        let format_clock = std::time::Instant::now();
+        output.push(format!(
             "M4G_FRAME {{\"tick\":{tick},\"time\":{},\"bodies\":{bodies:?},\"velocity\":{:?},\"supports\":{supports:?},\"anchors\":{anchors:?},\"max_position\":{},\"max_velocity\":{},\"energy_drift\":{},\"bearing_gap\":{bearing_gap},\"swing\":{swing:?},\"roll\":{roll:?},\"constraints\":{:?},\"velocity_rows\":{velocity_rows:?},\"reactions\":{reactions:?},\"reaction_forces\":{reaction_forces:?},\"impulse_loads\":{:?},\"reaction_power\":{power},\"linear_balance\":{},\"charts\":{charts:?},\"sections\":{sections:?},\"stationarity\":{stationarity:?},\"denominators\":{denominators:?},\"envelopes\":{envelopes:?}}}",
             tick as f64 * qx_physics::FIXED_STEP_SECONDS,
             state.velocity,
@@ -407,8 +422,15 @@ fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Recor
             e.c,
             record.report.loads,
             record.report.linear_balance
-        );
+        ));
+        serialization += format_clock.elapsed();
+        let format_time = serialization - serialization_start;
+        samples.push([
+            (tick_clock.elapsed() - format_time).as_secs_f64() * 1000.,
+            format_time.as_secs_f64() * 1000.,
+        ]);
     }
+    (output, serialization, samples)
 }
 
 #[test]
@@ -416,7 +438,26 @@ fn diagnostics(name: &str, r: &Rail, t: &mut tracking::Tracked, records: &[Recor
 fn export_extended_states() {
     for name in ["helix", "foundation"] {
         let (r, mut t, records) = run(name);
-        diagnostics(name, &r, &mut t, &records);
+        use std::io::Write;
+        use std::time::Instant;
+        let clock = Instant::now();
+        let (lines, serialization, samples) = diagnostics(name, &r, &mut t, &records);
+        let calculations = clock.elapsed() - serialization;
+        let clock = Instant::now();
+        let mut out = std::io::stdout().lock();
+        for line in &lines {
+            writeln!(out, "{line}").unwrap();
+        }
+        out.flush().unwrap();
+        let export = clock.elapsed();
+        println!(
+            "M4G_RECORD_COST {{\"fixture\":\"{name}\",\"diagnostics_ms\":{},\"serialization_ms\":{},\"export_ms\":{},\"records\":{},\"bytes\":{},\"per_tick_ms\":{samples:?}}}",
+            calculations.as_secs_f64() * 1000.,
+            serialization.as_secs_f64() * 1000.,
+            export.as_secs_f64() * 1000.,
+            records.len(),
+            lines.iter().map(|s| s.len() + 1).sum::<usize>()
+        );
     }
 }
 

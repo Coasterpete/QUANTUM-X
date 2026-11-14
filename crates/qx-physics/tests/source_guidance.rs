@@ -20,6 +20,14 @@ mod mechanisms;
 #[allow(dead_code)]
 #[path = "support/m4b_dynamics.rs"]
 mod original_dynamics;
+#[path = "support/m4g_performance.rs"]
+mod performance;
+#[allow(dead_code)]
+#[path = "support/m4g_dynamics.rs"]
+mod profiled_dynamics;
+#[allow(dead_code)]
+#[path = "support/m4g_tracking.rs"]
+mod profiled_tracking;
 #[allow(dead_code)]
 #[path = "../../qx-geometry/tests/support/rail_fixtures.rs"]
 mod rail_fixtures;

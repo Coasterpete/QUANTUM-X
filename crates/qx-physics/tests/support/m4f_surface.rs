@@ -12,6 +12,7 @@ use qx_geometry::{
 #[path = "m4b_surface.rs"]
 mod types;
 use std::cell::Cell;
+use std::time::{Duration, Instant};
 pub use types::{Failure, Jet, Result, Role, Surface};
 
 pub struct Differential {
@@ -27,6 +28,10 @@ pub struct Rail {
     pub source: ContinuousGraph,
     pub identity: SourceIdentity,
     pub jets: Cell<usize>,
+    /// Optional developer timing. Disabled for the inherited controls.
+    pub timing: Cell<bool>,
+    pub rail_time: Cell<Duration>,
+    projecting: Cell<bool>,
 }
 impl Rail {
     pub fn new(source: ContinuousGraph, identity: SourceIdentity) -> Result<Self> {
@@ -53,12 +58,23 @@ impl Rail {
             source,
             identity,
             jets: Cell::new(0),
+            timing: Cell::new(false),
+            rail_time: Cell::new(Duration::ZERO),
+            projecting: Cell::new(false),
         })
     }
     pub fn length(&self) -> f64 {
         self.source.length_m()
     }
     pub fn differential(&self, surface: Surface, s: f64) -> Result<Differential> {
+        let clock = (self.timing.get() && !self.projecting.get()).then(Instant::now);
+        let result = self.differential_inner(surface, s);
+        if let Some(clock) = clock {
+            self.rail_time.set(self.rail_time.get() + clock.elapsed());
+        }
+        result
+    }
+    fn differential_inner(&self, surface: Surface, s: f64) -> Result<Differential> {
         self.jets.set(self.jets.get() + 1);
         if !s.is_finite()
             || !surface.offset.is_finite()
@@ -134,6 +150,17 @@ impl Rail {
     /// 128 bins / 2 m half-window. Every competing minimum is rejected, even
     /// at unequal distances. This is bounded enumeration, not root certification.
     pub fn project(&self, surface: Surface, x: Vec3, hint: f64, half: f64) -> Result<(f64, Jet)> {
+        if !self.timing.get() {
+            return self.project_inner(surface, x, hint, half);
+        }
+        let clock = Instant::now();
+        self.projecting.set(true);
+        let result = self.project_inner(surface, x, hint, half);
+        self.projecting.set(false);
+        self.rail_time.set(self.rail_time.get() + clock.elapsed());
+        result
+    }
+    fn project_inner(&self, surface: Surface, x: Vec3, hint: f64, half: f64) -> Result<(f64, Jet)> {
         if !x.is_finite() || !hint.is_finite() || !half.is_finite() || half <= 0. || half > 1.6 {
             return Err(Failure::Invalid);
         }

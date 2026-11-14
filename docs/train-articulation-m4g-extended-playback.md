@@ -98,3 +98,57 @@ envelopes and tick count. Neither negative is an incomplete six-m/s target.
 
 Evidence: `stage-a-probe.log`, `stage-a-final.log`, `stage-a-independent.log`
 and `stage-a-final.summary.json`, ignored under `target/m4g/`.
+
+## Stage B — PASS as a measurement, not a real-time qualification
+
+Native serial Release observations: one complete 480-tick warm-up followed by
+five complete 480-tick runs on the unchanged 72 m foundation source. Preparation,
+initialization, compilation, control comparisons and printing are outside step
+timers. Each profiled tick is paired with an uninstrumented inherited engine;
+reports, poses, velocities, hints and continuation envelopes match exactly.
+Optional adapter timers default off. The instrumented copies of the M4D
+dynamics/tracking helpers add measurements only; their original controls and
+all bearing/support equations are preserved. These are test helpers, not a
+second production backend. Nested rail work is subtracted from the other phase
+categories; phase sums are checked against complete-step observations.
+
+| 2,400 step observations | Median ms | P95 ms | P99 ms | Maximum ms |
+| --- | ---: | ---: | ---: | ---: |
+| Uninstrumented complete step | 6.0843 | 7.1780 | 9.3649 | 13.5179 |
+| Instrumented complete step | 6.1262 | 6.9691 | 9.4094 | 17.4725 |
+| Physical evaluation/projection | 5.5417 | 6.2698 | 8.5339 | see raw summary |
+
+Both measured series missed the 4.166667 ms interval on **2,400/2,400** steps.
+The nominal simulation timestep is unchanged; offline physics does not require
+meeting that wall-clock interval. This is a distribution on one shared machine,
+not a worst-case bound, a guaranteed sustained rate, a speedup against M4F or
+an editor FPS measurement. Timing hooks and interleaved controls can affect
+cache/scheduling behavior. Full phase distributions, including exclusive
+mechanical constraints/reactions, impulse integration, post-step validation/
+tracking and miscellaneous overhead, are in `stage-b-cost-final.summary.json`.
+Rail queries dominate this observation. No numerical shortcut, widened gate or
+cache that could hide source changes was introduced for a latency claim.
+
+Recording is now buffered and separated into physical integration, diagnostic
+calculations, numeric serialization and output. All ticks retain full physical
+verification even when replay skips display frames. For 481 records per case:
+
+| Recording observation | R8/.04 twist | Foundation |
+| --- | ---: | ---: |
+| Diagnostic calculations total, ms | 7942.873 | 11001.519 |
+| Slowest per-tick diagnostic, ms | 266.031 | 316.987 |
+| Serialization total, ms | 68.257 | 76.663 |
+| Slowest per-tick serialization, ms | 2.816 | .741 |
+| Buffered trace output total, ms | 149.507 | 164.691 |
+| Trace bytes (including matrices/scene) | 11510048 | 11511908 |
+
+Diagnostics include instantaneous dense reaction solves every tick and extra
+finite-difference J/Jdot checks at six checkpoints, which explain large maxima.
+They do substantially more work than M4F's alignment-only record pass; these
+figures are not a like-for-like regression benchmark against 2.561 ms. Output
+timing measures stdout write/flush through the Cargo/redirection pipeline, not
+a durable-storage guarantee. Scene/reference preparation belongs to diagnostic
+totals, not per-tick samples. Timing observations are excluded from exact replay
+comparison; scene and all 962 diagnostic/state records remain identical to
+Stage A. Separating this work prevents it blocking physical integration and
+makes later bounded geometry/reaction caching independently reviewable.
