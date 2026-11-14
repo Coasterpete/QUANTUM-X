@@ -4,6 +4,7 @@ use crate::{
     DisplayOptions, InspectionScene,
     camera::Camera,
     gpu::{Gpu, GuiFrame},
+    lifecycle::{EditorExit, ExitReason, Smoke, SmokeConfig},
     scene::vertices,
     window::{self, WindowCommand, WindowPreferences},
 };
@@ -67,8 +68,11 @@ pub trait EditorSurface {
     /// Allow the app to present a recoverable unsaved-document prompt.
     fn request_close(&mut self) -> bool;
 }
-pub fn edit(scene: InspectionScene, surface: impl EditorSurface + 'static) -> Result<(), String> {
-    run(scene, surface, None)
+/// Runs the interactive editor until its window closes. The returned
+/// [`EditorExit`] says why the loop ended; `into_result` gives the historical
+/// `Result` contract.
+pub fn edit(scene: InspectionScene, surface: impl EditorSurface + 'static) -> EditorExit {
+    run(scene, surface, None, None).0
 }
 pub fn profile_editor(
     scene: InspectionScene,
@@ -79,14 +83,45 @@ pub fn profile_editor(
         scene,
         surface,
         Some(crate::profiling::Capture::new(config)?),
+        None,
     )
+    .0
+    .into_result()
+}
+/// Hidden-window GUI smoke test through the same event loop, window, wgpu
+/// surface and egui path as [`edit`]. Never activates or shows a window and
+/// never persists window preferences. Returns a JSON report after all window
+/// and GPU resources were released.
+pub fn smoke_test(
+    scene: InspectionScene,
+    surface: impl EditorSurface + 'static,
+    config: SmokeConfig,
+) -> serde_json::Value {
+    let smoke = Smoke::new(config, Instant::now());
+    let (exit, smoke) = run(scene, surface, None, Some(smoke));
+    let smoke = smoke.expect("smoke state is returned by run");
+    smoke.config.stage.set("done");
+    smoke.report(&exit)
 }
 fn run(
     scene: InspectionScene,
     surface: impl EditorSurface + 'static,
     capture: Option<crate::profiling::Capture>,
-) -> Result<(), String> {
-    let event_loop = EventLoop::new().map_err(|e| e.to_string())?;
+    smoke: Option<Smoke>,
+) -> (EditorExit, Option<Smoke>) {
+    let started = Instant::now();
+    let event_loop = match EventLoop::new() {
+        Ok(event_loop) => event_loop,
+        Err(e) => {
+            let exit = EditorExit {
+                reason: ExitReason::EventLoopFailed(e.to_string()),
+                window_created: false,
+                frames_presented: 0,
+                uptime_s: started.elapsed().as_secs_f64(),
+            };
+            return (exit, smoke);
+        }
+    };
     let mut app = Workspace {
         scene,
         surface: Box::new(surface),
@@ -104,17 +139,45 @@ fn run(
         drag: None,
         drag_start: None,
         needs_fit: [true; 2],
-        fatal: None,
+        exit: None,
         exit_requested: false,
         capture,
+        smoke,
+        window_created: false,
+        frames_presented: 0,
         repaint_delay: Duration::from_millis(16),
         next_redraw: Instant::now(),
     };
-    event_loop.run_app(&mut app).map_err(|e| e.to_string())?;
-    app.fatal.map_or(Ok(()), Err)
+    let loop_result = event_loop.run_app(&mut app);
+    // `exiting` normally released smoke-test resources already; this covers a
+    // loop that returned without calling it.
+    if app
+        .smoke
+        .as_ref()
+        .is_some_and(|s| s.resources_released.is_none())
+    {
+        let released = app.release();
+        app.smoke.as_mut().unwrap().resources_released = Some(released);
+    }
+    let reason = match loop_result {
+        Err(e) if !app.exit.as_ref().is_some_and(ExitReason::is_fatal) => {
+            ExitReason::EventLoopFailed(e.to_string())
+        }
+        _ => app.exit.take().unwrap_or(ExitReason::EventLoopEnded),
+    };
+    let exit = EditorExit {
+        reason,
+        window_created: app.window_created,
+        frames_presented: app.frames_presented,
+        uptime_s: started.elapsed().as_secs_f64(),
+    };
+    (exit, app.smoke.take())
 }
 struct Workspace {
     capture: Option<crate::profiling::Capture>,
+    smoke: Option<Smoke>,
+    window_created: bool,
+    frames_presented: u64,
     repaint_delay: Duration,
     next_redraw: Instant,
     scene: InspectionScene,
@@ -133,10 +196,29 @@ struct Workspace {
     drag: Option<MouseButton>,
     drag_start: Option<(f64, f64)>,
     needs_fit: [bool; 2],
-    fatal: Option<String>,
+    /// First recorded cause for leaving the event loop.
+    exit: Option<ExitReason>,
     exit_requested: bool,
 }
 impl Workspace {
+    fn finish(&mut self, event_loop: &ActiveEventLoop, reason: ExitReason) {
+        if self.exit.is_none() {
+            self.exit = Some(reason);
+        }
+        event_loop.exit();
+    }
+    /// Releases GPU work, the surface and egui input before the window. The
+    /// surface holds an `Arc<Window>`, so a sole remaining reference proves it
+    /// was dropped. Returns true when everything was released cleanly.
+    fn release(&mut self) -> bool {
+        let idle = self.gpu.take().is_none_or(|gpu| gpu.wait_idle().is_ok());
+        self.input = None;
+        let sole = self
+            .window
+            .take()
+            .is_none_or(|window| Arc::strong_count(&window) == 1);
+        idle && sole
+    }
     fn fit(&mut self, selected: bool) {
         if !selected
             && self.profile == 1
@@ -306,6 +388,9 @@ impl Workspace {
                 viewport: self.viewport,
             }),
         )?;
+        if self.gpu.as_ref().unwrap().last_draw.presented {
+            self.frames_presented += 1;
+        }
         if let Some(c) = &mut self.capture {
             c.record(
                 started,
@@ -333,7 +418,7 @@ impl ApplicationHandler for Workspace {
             let areas: Vec<_> = monitors.iter().map(window::work_area).collect();
             let placement = window::resolve(&preferences, &areas);
             let mut attributes = crate::identity::window_attributes()?;
-            if self.capture.is_some() {
+            if self.capture.is_some() || self.smoke.is_some() {
                 attributes = attributes.with_visible(false).with_active(false);
             }
             let window = Arc::new(
@@ -354,10 +439,19 @@ impl ApplicationHandler for Workspace {
                     )
                     .map_err(|e| e.to_string())?,
             );
+            self.window_created = true;
             if self.capture.is_some() {
                 let _ = window.request_inner_size(winit::dpi::PhysicalSize::new(1440, 960));
             }
-            let gpu = pollster::block_on(Gpu::new(window.clone()))?;
+            if let Some(s) = &mut self.smoke {
+                s.window_created(Instant::now());
+            }
+            let gpu = pollster::block_on(Gpu::new(window.clone(), self.smoke.is_none()))?;
+            if let Some(s) = &mut self.smoke {
+                s.gpu_ready(Instant::now(), gpu.adapter_info.clone());
+                let size = window.inner_size();
+                s.surface_size = Some([size.width, size.height]);
+            }
             self.input = Some(egui_winit::State::new(
                 self.ctx.clone(),
                 egui::ViewportId::ROOT,
@@ -380,11 +474,13 @@ impl ApplicationHandler for Workspace {
                 c.start = Instant::now();
                 c.next = c.start;
             }
+            if let Some(s) = &self.smoke {
+                s.initialized();
+            }
             Ok(())
         })();
         if let Err(e) = result {
-            self.fatal = Some(e);
-            event_loop.exit();
+            self.finish(event_loop, ExitReason::InitializationFailed(e));
         }
     }
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
@@ -401,7 +497,7 @@ impl ApplicationHandler for Workspace {
         let result = match event {
             WindowEvent::CloseRequested => {
                 if self.surface.request_close() {
-                    event_loop.exit();
+                    self.finish(event_loop, ExitReason::WindowClosed);
                 }
                 Ok(())
             }
@@ -514,20 +610,53 @@ impl ApplicationHandler for Workspace {
         }
         if let Err(error) = result {
             eprintln!("Authoring renderer: {error}");
-            self.fatal = Some(error);
-            event_loop.exit();
+            self.finish(event_loop, ExitReason::RenderingFailed(error));
         }
     }
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         if self.exit_requested {
-            event_loop.exit();
+            self.finish(event_loop, ExitReason::CloseApproved);
             return;
         }
         let now = Instant::now();
+        if let Some(s) = &self.smoke {
+            // winit may call `about_to_wait` again after `exit()`; draw nothing more.
+            if self.exit.is_some() {
+                return;
+            }
+            if s.timed_out(now) {
+                let reason = s.timeout_reason();
+                self.finish(event_loop, reason);
+                return;
+            }
+            // Hidden windows receive no OS redraw events; draw directly, as the
+            // profile capture does, and count only presented swapchain images.
+            if self.gpu.is_some() {
+                if let Err(e) = self.draw() {
+                    self.finish(event_loop, ExitReason::RenderingFailed(e));
+                    return;
+                }
+                let draw = &self.gpu.as_ref().unwrap().last_draw;
+                let (status, presented) = (draw.surface_status.clone(), draw.presented);
+                if self
+                    .smoke
+                    .as_mut()
+                    .unwrap()
+                    .record(Instant::now(), &status, presented)
+                {
+                    self.finish(event_loop, ExitReason::DiagnosticComplete);
+                    return;
+                }
+            }
+            event_loop.set_control_flow(ControlFlow::WaitUntil(
+                Instant::now() + Duration::from_millis(5),
+            ));
+            return;
+        }
         if self.capture.is_some() {
             let c = self.capture.as_mut().unwrap();
             if c.start.elapsed().as_secs_f64() >= c.config.seconds {
-                event_loop.exit();
+                self.finish(event_loop, ExitReason::DiagnosticComplete);
                 return;
             }
             let due = now >= c.next;
@@ -545,8 +674,7 @@ impl ApplicationHandler for Workspace {
                 && self.gpu.is_some()
                 && let Err(e) = self.draw()
             {
-                self.fatal = Some(e);
-                event_loop.exit();
+                self.finish(event_loop, ExitReason::RenderingFailed(e));
                 return;
             }
             let c = self.capture.as_mut().unwrap();
@@ -570,6 +698,14 @@ impl ApplicationHandler for Workspace {
         });
     }
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {
+        if let Some(s) = &self.smoke {
+            // Diagnostics never persist window preferences. Release GPU and
+            // window resources here, while the event loop is still alive.
+            s.config.stage.set("cleanup");
+            let released = self.release();
+            self.smoke.as_mut().unwrap().resources_released = Some(released);
+            return;
+        }
         if let Some(c) = &self.capture {
             let adapter = self
                 .gpu
@@ -580,8 +716,10 @@ impl ApplicationHandler for Workspace {
                 .as_ref()
                 .and_then(|w| w.current_monitor())
                 .and_then(|m| m.refresh_rate_millihertz());
-            if let Err(e) = c.finish(adapter, refresh) {
-                self.fatal = Some(e);
+            if let Err(e) = c.finish(adapter, refresh)
+                && !self.exit.as_ref().is_some_and(ExitReason::is_fatal)
+            {
+                self.exit = Some(ExitReason::DiagnosticFailed(e));
             }
             return;
         }

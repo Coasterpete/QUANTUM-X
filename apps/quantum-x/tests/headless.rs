@@ -285,3 +285,54 @@ fn mixed_examples_export_actual_splines_and_precise_cli_edit_regenerates() {
     );
     std::fs::remove_dir_all(dir).unwrap();
 }
+#[test]
+fn gui_smoke_test_rejects_invalid_routes_before_creating_a_window() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
+    let binary = env!("CARGO_BIN_EXE_quantum-x");
+    let usage = Command::new(binary)
+        .args(["--gui-smoke-test", "bogus"])
+        .output()
+        .unwrap();
+    assert!(!usage.status.success());
+    assert!(usage.stdout.is_empty(), "no report without a smoke run");
+    assert!(String::from_utf8_lossy(&usage.stderr).contains("--gui-smoke-test"));
+    let missing = temporary().join("missing.qx.json");
+    let open = Command::new(binary)
+        .args(["--gui-smoke-test", "edit"])
+        .arg(&missing)
+        .output()
+        .unwrap();
+    assert!(!open.status.success());
+    assert!(
+        open.stdout.is_empty(),
+        "no window or report for an invalid project"
+    );
+    assert!(String::from_utf8_lossy(&open.stderr).contains("could not open the editor"));
+}
+/// GPU-dependent: creates hidden native windows and a wgpu device. Run with
+/// `cargo test -p quantum-x --test headless -- --ignored gui_smoke`.
+#[test]
+#[ignore = "requires a DX12/Vulkan GPU and a desktop session"]
+fn gui_smoke_test_presents_frames_and_releases_resources() {
+    let _workflow = CLI_WORKFLOW.lock().unwrap();
+    let binary = env!("CARGO_BIN_EXE_quantum-x");
+    for (args, page) in [
+        (&["--gui-smoke-test"][..], "welcome"),
+        (&["--gui-smoke-test", "edit"], "editor"),
+    ] {
+        let started = std::time::Instant::now();
+        let run = Command::new(binary).args(args).output().unwrap();
+        // Soft timeout 20 s plus the 10 s watchdog grace bound every run.
+        assert!(started.elapsed() < std::time::Duration::from_secs(35));
+        let report: serde_json::Value = serde_json::from_slice(&run.stdout)
+            .unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&run.stdout)));
+        assert!(run.status.success(), "{report:#}");
+        assert_eq!(report["ok"], true);
+        assert_eq!(report["page"], page);
+        assert_eq!(report["hidden_window"], true);
+        assert_eq!(report["frames_presented"], report["frames_requested"]);
+        assert_eq!(report["resources_released"], true);
+        assert_eq!(report["exit"]["reason"], "diagnostic_complete");
+        assert!(report["adapter"].as_str().is_some_and(|a| !a.is_empty()));
+    }
+}

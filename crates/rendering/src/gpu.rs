@@ -31,7 +31,9 @@ pub(crate) struct Gpu {
     pending_free: Vec<egui::TextureId>,
 }
 impl Gpu {
-    pub async fn new(window: Arc<Window>) -> Result<Self, String> {
+    /// `announce` prints the selected adapter to stdout before device creation;
+    /// JSON-reporting diagnostics pass false to keep stdout machine-readable.
+    pub async fn new(window: Arc<Window>, announce: bool) -> Result<Self, String> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance
             .create_surface(window.clone())
@@ -45,7 +47,9 @@ impl Gpu {
             })
             .await
             .map_err(|e| format!("no compatible DX12/Vulkan adapter: {e}"))?;
-        println!("Inspector adapter: {:?}", adapter.get_info());
+        if announce {
+            println!("Inspector adapter: {:?}", adapter.get_info());
+        }
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
                 label: Some("QUANTUM-X inspector"),
@@ -140,6 +144,16 @@ impl Gpu {
             egui,
             pending_free: vec![],
         })
+    }
+    /// Bounded wait for submitted GPU work before the device and surface drop.
+    pub fn wait_idle(&self) -> Result<(), String> {
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: Some(std::time::Duration::from_secs(5)),
+            })
+            .map(|_| ())
+            .map_err(|e| e.to_string())
     }
     fn depth(device: &wgpu::Device, c: &wgpu::SurfaceConfiguration) -> wgpu::TextureView {
         device

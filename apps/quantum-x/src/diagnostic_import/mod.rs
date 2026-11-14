@@ -326,6 +326,8 @@ pub fn run(args: &[OsString]) -> Result<(), Box<dyn Error>> {
         println!("Evidence: {}", output.display());
         Ok(())
     } else {
-        qx_rendering::edit(scene, surface).map_err(Into::into)
+        qx_rendering::edit(scene, surface)
+            .into_result()
+            .map_err(Into::into)
     }
 }
