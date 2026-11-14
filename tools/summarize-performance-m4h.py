@@ -1,5 +1,5 @@
 """Summarize complete-step samples separately from instrumented attribution.
-python tools/summarize-performance-m4h.py COST_LOG PROFILE_LOG
+python tools/summarize-performance-m4h.py COST_LOG PROFILE_LOG [PHASE_LOG]
 """
 import json
 import math
@@ -14,6 +14,8 @@ def read(path, tag):
 
 def stats(values):
     values = sorted(values)
+    if not values or any(not math.isfinite(v) or v < 0 for v in values):
+        raise ValueError('invalid duration sample')
     def percentile(q):
         x = (len(values)-1)*q
         a = math.floor(x)
@@ -22,11 +24,14 @@ def stats(values):
     return dict(samples=len(values), median_ms=statistics.median(values), p95_ms=percentile(.95), p99_ms=percentile(.99), maximum_ms=max(values), deadline_misses=sum(x > 1000/240 for x in values))
 
 
-def summarize(cost_path, profile_path):
+def summarize(cost_path, profile_path, phase_path=None):
     costs = read(cost_path, 'M4H_COST ')
     profiles = read(profile_path, 'M4H_PROFILE ')
     if len(costs) != 4800 or len(profiles) != 1920:
         raise ValueError('missing repeated-run/profile evidence')
+    phases = read(phase_path, 'M4H_PHASE ') if phase_path else []
+    if phase_path and len(phases) != 1920:
+        raise ValueError('missing kernel phase evidence')
     summary = {}
     for name in ('helix', 'foundation'):
         rows = [r for r in costs if r['fixture'] == name]
@@ -48,6 +53,17 @@ def summarize(cost_path, profile_path):
                 'instrumented_complete': stats([r['complete_ms'] for r in p]),
                 'separate_reaction_diagnostic': stats([r['reaction_ms'] for r in p]),
             }
+            if phase_path:
+                rows = [r for r in phases if r['fixture'] == name and r['cached'] == cached]
+                if [r['tick'] for r in rows] != list(range(1, 481)):
+                    raise ValueError('incomplete J/Jdot phase ticks')
+                for r in rows:
+                    if sum(r['phases_ms']) > r['kernel_ms']+1e-9:
+                        raise ValueError('kernel phase sum exceeds complete kernel')
+                d['attribution'][str(cached)]['kernel_phases'] = {
+                    key: stats([r['phases_ms'][i] for r in rows])
+                    for i, key in enumerate(('jacobian', 'directional_curvature', 'impulses', 'advance_validation'))
+                }
         summary[name] = d
     output = Path(cost_path).with_suffix('.summary.json')
     output.write_text(json.dumps(summary, indent=2)+'\n', encoding='utf-8')

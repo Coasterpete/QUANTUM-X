@@ -1,5 +1,8 @@
 # M4H — energy consistency and source-guidance performance
 
+Native Windows/MSVC, 2026-11-13; rustc/Cargo 1.99.1, LLVM 23.1.1,
+x86_64-pc-windows-msvc, Intel Core i7-14700KF.
+
 Experimental offline research only. No production integration, editor changes,
 physical wheel contact, push, merge or PR.
 
@@ -87,6 +90,12 @@ failure preserves the previously accepted samples as well as mechanical state.
 ### Stage A results and gate
 
 Native Release: all six 480-tick runs and paired exact controls passed.
+Independent Rust state/work assertions cover all 80640 internal substeps, with
+capture bounded to one outer step at a time. Python consumes every baseline
+internal step plus selected refinement steps: 3840 baseline + 28 refinement
+samples. All 2880 outer ledgers are checked; only the 42 declared checkpoints
+emit full sparse Jacobians. A complete raw archive of every 16/64-step state
+is not claimed.
 Independent reconstruction checked 3868 raw internal steps and 42 sparse-J/PGS/reaction checkpoints.
 Maximum independently observed per-step energy closure discrepancy is 1.56248278204707e-11 J.
 
@@ -129,6 +138,32 @@ only; all integration operations and gates are unchanged.
 stabilized discrete method, rather than missing external work or a state-energy
 accounting error. No integration method replacement or production policy change
 is attempted. Stage B may investigate exact geometry reuse independently.
+
+
+### Baseline state energies and full ledger
+
+All values below are joules on the unchanged four-internal-step, two-second runs.
+Potential energy has an arbitrary fixed zero; only its changes are meaningful.
+
+| Component | R8 initial | R8 final | Foundation initial | Foundation final |
+| --- | ---: | ---: | ---: | ---: |
+| Translational K | 18943.009510322 | 14555.084930338 | 19799.999999611 | 19574.947523196 |
+| Rotational K | 68.220061225 | 52.417909495 | 0.000000000 | 0.092451856 |
+| Gravitational U | 18030.924138499 | 22404.901649247 | 1805.040000000 | 2030.312312223 |
+
+| Work/contribution | R8 | Foundation |
+| --- | ---: | ---: |
+| Gravity kick Wg,kick | -4323.384617957 | -114.391316216 |
+| Gravity path Wg,path | -4373.977510748 | -225.272312223 |
+| Discrete constraint Wc | -80.342113757 | -110.568708343 |
+| Curvature target | 18.056486156 | 0.619892842 |
+| Stabilization target | -5.693684103 | -1.622983909 |
+| Finite-sweep residual | -3.259401191 | 1.320137507 |
+| Impulse quadratic | -89.445514620 | -110.885754782 |
+
+For foundation, +110.880996 J gravity integration and -110.568708 J constraint work
+leave +.312288 J. It is a small residual of larger cancelling terms. Continuous
+reaction work is -.304200 J, which even has the opposite sign from net drift.
 
 ## Stage B — exact immutable-snapshot reuse
 
@@ -206,6 +241,14 @@ runs do not replace the uninstrumented complete-step distributions above.
 | foundation / uncached | 2614083 / 0 | 2614083 / 0 | 302400 / 0 | 785283 | 2290.538 | 840.064 | 232.676 | 36.952 |
 | foundation / cached | 370180 / 71 | 1626306 / 1256126 | 302400 / 115200 | 488706 | 426.893 | 464.012 | 272.229 | 44.127 |
 
+A source miss executes the unchanged fine and coarse cell poses, physical-station
+inverses, normalized quaternion jets through order three and refinement diagnostics.
+Physical datum/normal evaluation then derives offset P through order three and
+normal derivatives through order two, even for root queries needing fewer outputs.
+The timers group these complete operations; no claim is made about the individual
+instruction-level cost of fine versus coarse inversion or each derivative order.
+No lower-order query path is substituted to reduce work.
+
 The observed useful reuse is exact physical differentials and identical bounded
 projections, particularly repeated base constraint evaluation for directional
 Jdot and substep boundary validation. The standalone dense-source cache has
@@ -224,6 +267,12 @@ query patterns and cannot inherit the mechanical cache's hit ratio.
 | helix / cached | 4.6055 | 6.7791 | 8.2324 | 11.9022 |
 | foundation / uncached | 10.4616 | 14.4848 | 19.5412 | 23.8299 |
 | foundation / cached | 5.0120 | 6.0010 | 8.7630 | 12.5954 |
+
+The reaction diagnostic uses the original restored .8 m support windows,
+whereas mechanical integration uses the speed-driven continuation windows.
+Those larger diagnostic root searches help explain why its query footprint and
+cost differ. These are reaction/J/Jdot measurements, not full scene alignment,
+serialization, browser rendering or M4G's complete offline exporter costs.
 
 **Stage B gate: PASS for this exact-key prototype and these two fixtures.**
 Mechanical and diagnostic outputs remain bitwise identical. Geometry reuse
@@ -271,3 +320,174 @@ restart-derivative and other expected negatives remain untouched.
 
 **Stage C result:** PASS for the accepted bounded evidence, with the explicit
 R8 continuation rejection above. No full-three-second R8 or general-layout claim.
+
+## Stage D — final verification and kernel phase supplement
+
+A further serial Release experiment reconstructs each actual tracking window,
+repeats the dynamics kernel from the same pre-step state, and compares complete
+states/reports by bits to both the tracked step and inherited control. All 1920
+kernel repetitions pass. Timed components include their nested geometry work;
+they exclude outer tracking and diagnostic extraction and must not be substituted
+for complete-step distributions. Each number is a phase's individual median,
+so column medians are not an additive complete-step median. `stage-d-phases.log`
+and the augmented `stage-b-cost.summary.json` retain the full distributions.
+
+| Fixture / mode | Constraint residual/J assembly ms | Directional Jdot v ms | Impulse solve/application ms | Advance/validation ms |
+| --- | ---: | ---: | ---: | ---: |
+| helix / uncached | 0.592500 | 1.809600 | 0.094500 | 0.631450 |
+| helix / cached | 0.338750 | 1.481750 | 0.164050 | 0.724150 |
+| foundation / uncached | 1.339950 | 4.176250 | 0.158000 | 1.422000 |
+| foundation / cached | 0.381200 | 1.694850 | 0.158550 | 0.806550 |
+
+These supplementary phase-mode runs are single serial passes on a shared
+machine. Scheduling/frequency variation also changes observations of the unchanged
+PGS phase. Use the repeated, order-alternated complete-step distributions for the
+overall speed comparison, rather than inferring a speedup from any one phase.
+
+The directional-curvature phase includes base, plus and minus constraint/J
+assemblies; it is a principal consumer of source projection. Cache hits eliminate
+repeated base and boundary queries while distinct displaced queries still execute
+the original solver. PGS itself is unchanged. No J, curvature, multiplier or
+reaction solve is cached. The extra test was present in the feature workspace and
+Release builds (ignored there) and explicitly executed afterwards. Strict final
+Clippy and formatting are rerun with it present.
+
+| Native check | Passed | Failed | Ignored |
+| --- | ---: | ---: | ---: |
+| Full default debug workspace | 502 | 0 | 13 |
+| Full experimental debug workspace | 528 | 0 | 23 |
+| Release experimental geometry | 112 | 0 | 2 |
+| Release experimental physics | 145 | 0 | 20 |
+
+
+Final independent checks pass on the final Release evidence: 585 high-precision
+pose queries in 117 cells, 48 adjacent-limit pairs, both derivative spacings and
+70/90-digit rolling controls; 42 physical datum/normal cases and 12 M4F reaction
+systems; 38 M4A matrices, 29 M4B matrices, six M4C and 18 M4D systems (including
+the inherited independent geometry checks). M4H adds its own 3868 raw energy
+reconstructions, 42 sparse-J/PGS/reaction checkpoints and five late reaction
+systems. No derivative or reaction tolerance is widened.
+
+Fresh execution of the unchanged M4G Release test binary exports both 481-state
+clips twice. All 962 states, 12 reaction systems and replay compare correctly.
+The unchanged Python exporter packages them and the unchanged Node/Edge headless
+QA passes real playback controls, both clips, timestamps, scrubbing, cameras,
+filter/isolation, overlays, histories and independent 66-face pose transforms.
+One regenerated R8 PNG at 1 s was also visually inspected. The viewer deliberately
+uses the preserved M4G `stage-b-cost-final.summary.json` as its original timing
+metadata; those values are historical M4G controls, not new M4H measurements.
+M4H timings and ledger fields remain separate offline logs/JSON/report tables.
+No new viewer field or redesign was needed.
+
+All five M4H opt-in experiments were explicitly executed in Release. Other
+inherited ignored experiments remain opt-in except the explicitly executed M4G
+export. Formatting, workspace check and strict all-target Clippy (default and
+experimental feature) pass again after the final profiling test. Python compile,
+Node syntax, staged/unstaged whitespace and preservation checks pass. The final
+base comparison contains exactly 11 additions: **every pre-existing tracked file
+is byte-unchanged**, including all production sources, original tests, viewers,
+reports and dependency manifests. A normalized audit also verifies unchanged
+physical differential algebra and bounded-root bodies beneath the hooks.
+
+Final logs under ignored `target/m4h/`: `workspace-default.log`,
+`workspace-feature.log`, `release-geometry.log`, `release-physics.log`,
+`fmt-final.log`, `check-final.log`, `clippy-*-final.log`,
+`stage-d-independent-geometry.log`, `stage-d-verify-*.log`,
+`stage-d-phases.log`, `stage-d-performance-summary.log`,
+`m4g-trace.log`, `m4g-replay.log`, `m4g-independent.log`, `m4g-export.log`,
+`m4g-headless.log` and `preservation-final.log`, alongside the stage evidence.
+
+
+## Energy interpretation limits
+
+A systematic accumulated sign over two seconds does not mean every step has
+that sign. R8 has 476/478/479 negative outer-step energy increments and 4/2/1
+positive increments at 4/16/64 internal steps. Foundation has 480 positive
+increments at every refinement. In the longer R8 accepted prefix, accumulated
+loss partly reverses (-29.214501 J at tick 562 versus -29.749221 J at tick 480).
+The discrete ledger explains this too. It is not a model of physical friction
+or a universally dissipative method. The large cancelling gravity/impulse terms
+must not individually be described as a unique causal defect. The measured net
+error belongs to this kick/stabilized-impulse/advance composition; additional
+controlled experiments are needed before selecting a replacement integrator.
+
+## Remaining production blockers and recommended M4I
+
+The experimental ideal bilateral datums still allow pulling forces and omit
+unilateral wheel/rail contact, suspension, wheel spin, friction, impact, collision
+and realistic vehicle masses/inertias. Projection remains a bounded local search,
+not global uniqueness certification. Only the original continuous-source subset
+is qualified; native curves, rider-reference inversion, periodic seams, arbitrary
+sources and live editing/cache retirement are not production-qualified. R8's
+velocity-residual continuation limit remains. The integrator still drifts and
+refinement is expensive; geometry reuse changes none of these mechanics.
+
+Recommend M4I retain this ledger and original engine as controls, investigate a
+bounded alternative discrete constraint/integration treatment on the same
+fixtures, and compare its net energy balance, finite-sweep error, stabilization
+and turnaround behavior before choosing any policy. Separately measure a smaller
+physical-differential/projection cache without the nearly unused source layer;
+qualify cache budgets and source-generation replacement under explicit lifecycle
+tests. Keep real-time and longer-duration gates independent. No wheel contact,
+production promotion or final editor UX should be inferred from these results.
+
+## Reproduction
+
+Run in the M4H worktree. Ordinary fresh Cargo target directories also work.
+Generated logs/JSON/HTML/profiles are ignored evidence, not committed assets.
+Run repeated timing alone after other build/test processes finish.
+
+```powershell
+New-Item -ItemType Directory -Force target/m4h
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h energy::energy_refinement_evidence -- --ignored --nocapture --test-threads=1 > target/m4h/stage-a-energy.log 2>&1
+python tools/verify-energy-m4h.py target/m4h/stage-a-energy.log
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h reuse::repeated_complete_steps -- --ignored --nocapture --test-threads=1 > target/m4h/stage-b-cost.log 2>&1
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h reuse::geometry_and_diagnostic_attribution -- --ignored --nocapture --test-threads=1 > target/m4h/stage-b-profile.log 2>&1
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h reuse::jacobian_curvature_phase_attribution -- --ignored --nocapture --test-threads=1 > target/m4h/stage-d-phases.log 2>&1
+python tools/summarize-performance-m4h.py target/m4h/stage-b-cost.log target/m4h/stage-b-profile.log target/m4h/stage-d-phases.log
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h long:: -- --include-ignored --nocapture --test-threads=1 > target/m4h/stage-c-final.log 2>&1
+cargo test --release -p qx-physics --features experimental-source-guidance --test source_guidance_m4h long::bounded_duration -- --ignored --nocapture --test-threads=1 > target/m4h/stage-c-replay.log 2>&1
+python tools/verify-long-m4h.py target/m4h/stage-c-final.log target/m4h/stage-c-replay.log
+cargo fmt --all -- --check
+cargo check --workspace
+cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy --workspace --all-targets --features qx-physics/experimental-source-guidance -- -D warnings
+cargo test --workspace
+cargo test --workspace --features qx-physics/experimental-source-guidance
+cargo test --release -p qx-geometry --features experimental-graph-source
+cargo test --release -p qx-physics --features experimental-source-guidance -- --nocapture --test-threads=1
+
+git diff --check
+git diff --cached --check
+```
+
+New modules are integration-test support only, behind the existing experimental
+feature. No new dependency, application feature, document schema, physical model,
+production source, asset or UI is introduced. `m4h_energy` defines/reconstructs
+the ledger; `m4h_dynamics`/`m4h_tracking` add transactional observation;
+`m4h_surface` is the immutable exact-key adapter; `m4h_reuse` and `m4h_long`
+exercise measurements, controls and rejection. Python verifiers independently
+reconstruct energy, geometry transforms and matrix/reaction results.
+
+## UX, manual checks and local checkpoints
+
+Owner-authorized behavior is the offline energy/performance investigation and
+preservation of M4G. No owner-facing UX or new temporary developer UI is added.
+The existing M4G viewer remains provisional developer UI; its implementation is
+unchanged. Production workflows/presentation still require human design.
+
+No active desktop was controlled. Native app interaction, high-DPI behavior,
+live FPS/240 Hz guarantees, release packaging and production B1/contact integration
+are **not verified or claimed**. Owner-executable manual checks: open
+`target/m4h/source-guidance-m4g.html`; scrub both original two-second clips,
+inspect turnaround/shared bogie, play/pause/reset, vary speed and camera, select/
+isolate bodies and toggle overlays. The unchanged native regression command is
+`cargo run -p quantum-x --release -- edit`; initialize/play/pause/reset an existing
+project and save/reopen. These manual checks were not performed here.
+
+Local reviewed stage commits: Stage 0 `e74ba08`, A `f3102b2`, B `8b40e84`,
+C `6f515d7`; the final validation commit contains this completed report and the
+kernel-phase supplement. Branch `codex/train-articulation-m4h`, in the separate
+managed worktree created at M4G. Existing M4G/earlier worktrees and original
+README/.vscode/tooling edits are preserved. No push, PR, merge, release or
+production integration is performed. Generated evidence is intentionally ignored.

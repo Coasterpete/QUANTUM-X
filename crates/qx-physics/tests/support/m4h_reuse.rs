@@ -340,3 +340,55 @@ fn geometry_and_diagnostic_attribution() {
         }
     }
 }
+
+#[test]
+#[ignore = "serial Release isolated J/Jdot/impulse/validation kernel phases with identical tracking windows"]
+fn jacobian_curvature_phase_attribution() {
+    for name in ["helix", "foundation"] {
+        let (i, s, lead) = energy::fixture(name);
+        for cached in [false, true] {
+            let r = rail(&i, &s);
+            let control = rail(&i, &s);
+            r.reuse.set(cached);
+            r.profiling.set(true);
+            let mut a = measured_tracking::Tracked::new(model(&r, lead, true), &r, 6.).unwrap();
+            let mut b = tracking::Tracked::new(model(&control, lead, true), &control, 6.).unwrap();
+            let mut kernel_model = model(&r, lead, true);
+            for tick in 1..=480 {
+                let mut before = a.state.clone();
+                let hints = a.hints();
+                r.begin();
+                let report = a.step(&r, energy::G).unwrap();
+                let original = b.step(&control, energy::G).unwrap();
+                pair(&a, &b, &report, &original);
+                // Reconstruct precisely the model/windows that tracked.step used.
+                // This additional kernel call is separate from complete-step timers.
+                for ((s, hint), envelope) in kernel_model
+                    .supports
+                    .iter_mut()
+                    .zip(hints)
+                    .zip(&a.envelopes)
+                {
+                    s.station = hint;
+                    s.half_window = envelope.half;
+                }
+                r.begin();
+                let start = Instant::now();
+                let (repeated, p) =
+                    energy_dynamics::profiled(&kernel_model, &r, &mut before, energy::G, true)
+                        .unwrap();
+                let kernel = start.elapsed();
+                assert_eq!(report_bits(&report), report_bits(&repeated));
+                assert_eq!(state_bits(&a.state), state_bits(&before));
+                let phases = [p.evaluate, p.curvature, p.impulses, p.advance_and_validate]
+                    .map(|d| d.as_secs_f64() * 1000.);
+                println!(
+                    "M4H_PHASE {{\"fixture\":\"{name}\",\"cached\":{cached},\"tick\":{tick},\"kernel_ms\":{},\"phases_ms\":{phases:?},\"geometry_ms\":{:?},\"counts\":{:?}}}",
+                    kernel.as_secs_f64() * 1000.,
+                    r.costs.get().map(|d| d.as_secs_f64() * 1000.),
+                    r.counts.get()
+                );
+            }
+        }
+    }
+}
