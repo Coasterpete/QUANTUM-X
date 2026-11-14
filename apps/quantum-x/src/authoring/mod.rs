@@ -32,6 +32,7 @@ mod layout_ui;
 #[cfg(test)]
 mod library_tests;
 pub(crate) mod library_ui;
+pub(crate) mod m4j_scenario;
 #[cfg(test)]
 mod m5_tests;
 #[cfg(test)]

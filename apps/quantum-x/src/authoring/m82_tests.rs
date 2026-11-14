@@ -27,6 +27,100 @@ fn session() -> Session {
     s.workbench.active = Profile::Train;
     s
 }
+
+#[test]
+fn m4j_worker_opt_in_rendering_reset_rollback_and_editor_history() {
+    use qx_geometry::authoring::SectionKind;
+    let mut p = blank_project();
+    p.sections[0] = Section::straight(1, "M4J synthetic horizontal R20", 120.);
+    p.sections[0].kind = SectionKind::Arc {
+        radius_m: 20.,
+        plane_angle_rad: std::f64::consts::FRAC_PI_2,
+    };
+    p.trains.push(
+        Train::development_consist("m4j".into(), 3, DevelopmentArrangement::Conventional).unwrap(),
+    );
+    p.heartline.train_configuration_id = Some("m4j".into());
+    p.operations.physical.initial_speed_mps = 15.;
+    let mut s = Session::new(p, None, qx_style::Catalog::built_in().unwrap()).unwrap();
+    let mut metadata = s.editor.project().metadata.clone();
+    metadata.description = "Unsaved owner edit survives playback".into();
+    assert!(s.execute(vec![Command::SetMetadata(metadata)]));
+    let project = s.editor.project().clone();
+    let selected = s.selected;
+    let dirty = s.dirty();
+    let captured = scene(&project, &s.catalog, s.options).unwrap();
+    s.visible_revision = s.revision;
+    s.workbench.active = Profile::Train;
+    s.playback.experimental_velocity = true;
+    s.playback.initial_speed_mps = 15.;
+    s.playback
+        .initialize(&project, s.options, captured.train_track().unwrap(), 40.);
+    wait(&mut s, |p| p.ticks == 0);
+    let initial = s.playback.snapshot.as_ref().unwrap().clone();
+    assert!(
+        initial
+            .velocity_initialization
+            .as_ref()
+            .unwrap()
+            .max_residual
+            < 1e-9
+    );
+    s.playback.action(Action::Step);
+    wait(&mut s, |p| p.ticks == 1);
+    let first = s.playback.snapshot.as_ref().unwrap().poses.clone();
+    let ctx = egui::Context::default();
+    let display = frame(&mut s, &ctx, vec![]).1;
+    assert_eq!(display.asset_instances.len(), first.components.len());
+    for (instance, pose) in display.asset_instances.iter().zip(&first.components) {
+        let t = instance.transform[3];
+        assert!((Vec3::new(t[0], t[1], t[2]) - pose.pose.position_m).length() < 1e-9);
+    }
+    // A bad candidate on the same source must retain the old playable snapshot.
+    s.playback
+        .initialize(&project, s.options, captured.train_track().unwrap(), 0.);
+    let until = Instant::now() + Duration::from_secs(10);
+    while s.playback.pending {
+        s.playback.sync(&project, s.options);
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert!(s.playback.error.is_some());
+    assert_eq!(s.playback.snapshot.as_ref().unwrap().poses, first);
+    s.playback.action(Action::Reset);
+    // Existing wait asserts no error, so poll for the recovery packet first.
+    while s.playback.error.is_some() {
+        s.playback.sync(&project, s.options);
+        assert!(Instant::now() < until);
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    wait(&mut s, |p| p.ticks == 0);
+    assert_eq!(s.playback.snapshot.as_ref().unwrap().poses, initial.poses);
+    s.playback.action(Action::Step);
+    wait(&mut s, |p| p.ticks == 1);
+    assert_eq!(s.playback.snapshot.as_ref().unwrap().poses, first);
+    s.playback.action(Action::Play);
+    wait(&mut s, |p| p.running && p.ticks >= 3);
+    s.playback.action(Action::Pause);
+    wait(&mut s, |p| !p.running);
+    s.playback.discard();
+    assert_eq!(s.editor.project(), &project);
+    assert_eq!(s.selected, selected);
+    assert_eq!(s.dirty(), dirty);
+    assert!(s.editor.can_undo());
+    assert!(s.editor.undo());
+    assert!(s.editor.redo());
+    assert_eq!(s.editor.project(), &project);
+}
+
+#[test]
+fn m4j_launch_configuration_is_explicit_and_default_is_legacy() {
+    use super::train_playback::velocity_opt_in;
+    assert!(!velocity_opt_in(None).unwrap());
+    assert!(velocity_opt_in(Some("compatible-lead")).unwrap());
+    assert!(velocity_opt_in(Some("true")).is_err());
+    assert!(velocity_opt_in(Some("")).is_err());
+}
 fn wait(s: &mut Session, predicate: impl Fn(&Snapshot) -> bool) {
     let until = Instant::now() + Duration::from_secs(10);
     loop {

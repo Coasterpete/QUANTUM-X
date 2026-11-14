@@ -38,6 +38,7 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x selection-scenario <new-output-directory>
   quantum-x ride-camera-scenario <project.qx.json> <new-output-directory>
   quantum-x integrated-core-scenario <new-output-directory>
+  quantum-x m4j-native-scenario [project.qx.json] <new-output-directory>
   quantum-x ride-native-profile <project.qx.json> <new-output-directory> <30|60|144|legacy>
   quantum-x ride-recording <project.qx.json> <new-output-directory>
   quantum-x library [assets-root]
@@ -54,6 +55,15 @@ fn run() -> Result<(), Box<dyn Error>> {
         return diagnostic_import::run(&args[1..]);
     }
     let launch = authoring::startup::launch(&std::env::current_exe()?, &args);
+    if args.len() == 2 && args[0] == "m4j-native-scenario" {
+        return authoring::m4j_scenario::run(None, PathBuf::from(&args[1]));
+    }
+    if args.len() == 3 && args[0] == "m4j-native-scenario" {
+        return authoring::m4j_scenario::run(
+            Some(PathBuf::from(&args[1])),
+            PathBuf::from(&args[2]),
+        );
+    }
     if args.len() == 2 && args[0] == "integrated-core-scenario" {
         return authoring::expansion_scenario::run(PathBuf::from(&args[1]));
     }

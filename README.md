@@ -146,6 +146,14 @@ older application versions cannot read schema-7 operations/supports or schema-6 
 playback. Library samples and exported scenarios are numerical fixtures, not
 finished coaster designs or automatic layout recommendations.
 
+M4J adds a launch-only experimental velocity initializer. Set
+`QX_EXPERIMENTAL_TRAIN_VELOCITY=compatible-lead` before launching the native editor
+to construct mechanically compatible velocities with a designated lead running-gear
+point at the requested signed speed. The default remains the legacy initializer;
+no project schema or normal workflow changes. See the [M4J integration report](docs/train-articulation-m4j-native-integration.md)
+for limits, native evidence and owner checks, and the [M4K Simulator Mode proposal](docs/simulator-mode-architecture-m4k.md)
+for the upcoming native mode lifecycle (not implemented yet).
+
 ## Verification
 
 Run from the workspace root on native Windows:

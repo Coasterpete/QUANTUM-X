@@ -19,6 +19,8 @@ pub struct TrackSimulation {
     operations: qx_document::operations::Operations,
     circuit: bool,
     telemetry: crate::devices::TrainTelemetry,
+    initial_telemetry_speed_mps: f64,
+    velocity_initialization: Option<crate::velocity_initialization::Report>,
 }
 impl TrackSimulation {
     pub fn new(
@@ -90,7 +92,70 @@ impl TrackSimulation {
                 speed_mps: initial_speed_mps,
                 ..Default::default()
             },
+            initial_telemetry_speed_mps: initial_speed_mps,
+            velocity_initialization: None,
         })
+    }
+    /// Explicit developer opt-in; the legacy constructor and persisted semantics
+    /// remain unchanged. Speed is the signed tangent velocity of the foremost
+    /// running-gear guide point (highest initial station, first authored tie).
+    pub fn with_experimental_velocity_initialization(
+        train: qx_document::train::Train,
+        track: std::sync::Arc<qx_geometry::solver::GeneratedTrack>,
+        station_m: f64,
+        operations: qx_document::operations::Operations,
+    ) -> Result<Self> {
+        if train.components.len() > crate::velocity_initialization::MAX_BODIES {
+            return Err(format!(
+                "experimental velocity initialization bounded to {} bodies",
+                crate::velocity_initialization::MAX_BODIES
+            ));
+        }
+        let mut s = Self::with_operations(train, track, station_m, operations)?;
+        let reference = s
+            .guides
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| s.train.components[g.body].kind.is_running_gear())
+            .fold(None, |best: Option<usize>, (i, g)| {
+                if best.is_none_or(|b| g.station_m > s.guides[b].station_m) {
+                    Some(i)
+                } else {
+                    best
+                }
+            })
+            .ok_or("experimental initialization requires an explicit running-gear track guide")?;
+        let report = crate::velocity_initialization::initialize(
+            &mut s.world,
+            &s.track,
+            &s.guides,
+            &s.attitudes,
+            reference,
+            s.operations.physical.initial_speed_mps,
+            s.circuit,
+        )?;
+        // Telemetry continues to mean mass-weighted COM tangent speed; the lead
+        // reference is reported separately. Avoid a fictitious first acceleration
+        // caused by mixing these two measurements.
+        let mass: f64 = s.world.bodies.iter().map(|b| b.mass.mass_kg).sum();
+        let mut speed = 0.;
+        for (b, p) in s.world.bodies.iter().zip(&s.inspection.components) {
+            let tangent = s
+                .track
+                .sample_at_distance(p.station_m)
+                .map_err(|e| e.to_string())?
+                .frame
+                .tangent();
+            speed += b.linear_velocity_mps.dot(tangent) * b.mass.mass_kg / mass;
+        }
+        s.initial = s.world.clone();
+        s.initial_telemetry_speed_mps = speed;
+        s.telemetry.speed_mps = speed;
+        s.velocity_initialization = Some(report);
+        Ok(s)
+    }
+    pub fn velocity_initialization(&self) -> Option<&crate::velocity_initialization::Report> {
+        self.velocity_initialization.as_ref()
     }
     pub fn world(&self) -> &World {
         &self.world
@@ -201,7 +266,7 @@ impl TrackSimulation {
         self.previous = self.inspection.clone();
         self.current = self.inspection.clone();
         self.telemetry = crate::devices::TrainTelemetry {
-            speed_mps: self.operations.physical.initial_speed_mps,
+            speed_mps: self.initial_telemetry_speed_mps,
             ..Default::default()
         };
     }

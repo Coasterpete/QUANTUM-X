@@ -135,6 +135,7 @@ fn rotating_passenger_camera_and_render_interpolation_share_one_time_at_all_fram
         sim.step().unwrap();
     }
     s.playback.snapshot = Some(Snapshot {
+        velocity_initialization: None,
         poses: sim.snapshot().unwrap(),
         previous: sim.previous_snapshot().clone(),
         committed_at: now,
@@ -258,6 +259,7 @@ fn buffered_deadlines_remove_completion_time_jitter_at_30_60_and_144_hz() {
             let latest = ((t - delay) / dt).floor() as u64;
             let at = epoch + Duration::from_secs_f64(latest as f64 * dt);
             state.snapshot = Some(Snapshot {
+                velocity_initialization: None,
                 poses: clock_pose(latest),
                 previous: clock_pose(latest - 1),
                 committed_at: at,
@@ -307,6 +309,7 @@ fn exhausted_history_is_reported_without_extrapolation_and_pause_reset_show_comm
     let now = Instant::now();
     let mut state = State::default();
     state.snapshot = Some(Snapshot {
+        velocity_initialization: None,
         poses: clock_pose(20),
         previous: clock_pose(19),
         committed_at: now,
@@ -354,6 +357,7 @@ fn a_frame_latches_one_timestamp_and_pose_despite_newer_worker_packets() {
     sim.step().unwrap();
     let at = Instant::now();
     s.playback.snapshot = Some(Snapshot {
+        velocity_initialization: None,
         poses: sim.snapshot().unwrap(),
         previous: sim.previous_snapshot().clone(),
         committed_at: at,
