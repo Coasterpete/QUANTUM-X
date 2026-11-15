@@ -1974,6 +1974,8 @@ version = "0.1.0"
 dependencies = [
  "qx-document",
  "qx-geometry",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

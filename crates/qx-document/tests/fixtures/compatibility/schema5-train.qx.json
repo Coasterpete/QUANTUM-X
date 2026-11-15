@@ -1,0 +1,967 @@
+{
+  "construction": {
+    "continuous": [
+      {
+        "cap_ends": true,
+        "id": "primary-beam",
+        "material": "running",
+        "offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": {
+          "kind": "polygon",
+          "points": [
+            [
+              -0.45,
+              -0.13
+            ],
+            [
+              0.1,
+              -0.13
+            ],
+            [
+              0.1,
+              -0.25
+            ],
+            [
+              0.22,
+              -0.25
+            ],
+            [
+              0.22,
+              0.25
+            ],
+            [
+              0.1,
+              0.25
+            ],
+            [
+              0.1,
+              0.13
+            ],
+            [
+              -0.45,
+              0.13
+            ]
+          ]
+        },
+        "role": "running",
+        "rotation_rad": 0.0,
+        "visible": true
+      }
+    ],
+    "id": "validation-single",
+    "materials": [
+      {
+        "base_color": [
+          0.6200000047683716,
+          0.7200000286102295,
+          0.800000011920929
+        ],
+        "id": "running",
+        "metallic": 0.6499999761581421,
+        "roughness": 0.375
+      },
+      {
+        "base_color": [
+          0.1899999976158142,
+          0.3400000035762787,
+          0.4300000071525574
+        ],
+        "id": "structure",
+        "metallic": 0.5,
+        "roughness": 0.550000011920929
+      },
+      {
+        "base_color": [
+          0.41999998688697815,
+          0.5,
+          0.550000011920929
+        ],
+        "id": "hardware",
+        "metallic": 0.44999998807907104,
+        "roughness": 0.5
+      }
+    ],
+    "repeated": [
+      {
+        "alignment": "track_frame",
+        "end_margin_m": 0.25,
+        "id": "beam-bracket",
+        "material": "hardware",
+        "offset_m": [
+          0.0,
+          -0.5,
+          0.0
+        ],
+        "rotation_rad": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "shape": {
+          "kind": "box",
+          "size_m": [
+            0.16,
+            0.1,
+            0.65
+          ]
+        },
+        "spacing_m": 1.8,
+        "start_m": 0.25,
+        "visible": true
+      }
+    ],
+    "strategy": "single_rail",
+    "version": 1
+  },
+  "heartline": {
+    "authored_reference": "track_centerline",
+    "rider_offset": {
+      "offset_m": {
+        "x": 0.0,
+        "y": 1.25,
+        "z": 0.125
+      },
+      "type": "constant"
+    },
+    "train_configuration_id": "compat-train"
+  },
+  "initial": {
+    "gravity_mps2": 9.80665,
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "position_m": {
+      "x": 0.123456789012345,
+      "y": 10.000000000000002,
+      "z": -0.234567890123456
+    },
+    "reference_speed_mps": 20.0
+  },
+  "metadata": {
+    "author": "QUANTUM-X contributors",
+    "description": "Frozen R0.3 compatibility input reconstructed from existing migration test patterns; not a historical user file.",
+    "name": "Core foundation diagnostic",
+    "project_id": "compatibility-reconstruction"
+  },
+  "schema_version": 5,
+  "sections": [
+    {
+      "domain": "distance",
+      "extent": 50.0,
+      "id": 101,
+      "incoming_boundary": "allow_rate_jump",
+      "kind": {
+        "type": "straight"
+      },
+      "name": "Precision authored line",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "transitions": [
+          {
+            "amplitude": 0.0,
+            "end": 0.0,
+            "function": {
+              "type": "constant"
+            },
+            "id": 1,
+            "length": 50.0,
+            "start": 0.0
+          }
+        ],
+        "unit": "radians_per_metre"
+      }
+    }
+  ],
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "trains": [
+    {
+      "cars": [
+        {
+          "body_id": "car-1",
+          "bogie_ids": [
+            "gear-1-1",
+            "gear-1-2"
+          ],
+          "offset_m": 0.0
+        },
+        {
+          "body_id": "car-2",
+          "bogie_ids": [
+            "gear-2-1",
+            "gear-2-2"
+          ],
+          "offset_m": 4.0
+        },
+        {
+          "body_id": "car-3",
+          "bogie_ids": [
+            "gear-3-1",
+            "gear-3-2"
+          ],
+          "offset_m": 8.0
+        }
+      ],
+      "compatibility": {
+        "required_track_features": [],
+        "track_style_ids": [],
+        "train_style_id": null
+      },
+      "components": [
+        {
+          "asset": {
+            "path": "assets/development/body.glb",
+            "rotation": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "scale": {
+              "x": 1.0,
+              "y": 1.0,
+              "z": 1.0
+            },
+            "translation_m": {
+              "x": 0.125,
+              "y": 0.0,
+              "z": 0.0
+            }
+          },
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 3.0,
+            "y": 0.7,
+            "z": 1.4
+          },
+          "guide_references_m": [],
+          "id": "car-1",
+          "inertia_kg_m2": {
+            "x": 122.49999999999999,
+            "y": 547.9999999999999,
+            "z": 474.5
+          },
+          "kind": "car_body",
+          "mass_kg": 600.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.8,
+                "z": 0.0
+              }
+            },
+            "offset_m": -0.0,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-1-1",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": 1.2,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-1-2",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -1.2,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 3.0,
+            "y": 0.7,
+            "z": 1.4
+          },
+          "guide_references_m": [],
+          "id": "car-2",
+          "inertia_kg_m2": {
+            "x": 122.49999999999999,
+            "y": 547.9999999999999,
+            "z": 474.5
+          },
+          "kind": "car_body",
+          "mass_kg": 600.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.8,
+                "z": 0.0
+              }
+            },
+            "offset_m": -4.0,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-2-1",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -2.8,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-2-2",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -5.2,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 1.0,
+            "y": 0.1,
+            "z": 0.1
+          },
+          "guide_references_m": [],
+          "id": "drawbar-1",
+          "inertia_kg_m2": {
+            "x": 0.03333333333333334,
+            "y": 1.6833333333333333,
+            "z": 1.6833333333333333
+          },
+          "kind": "auxiliary",
+          "mass_kg": 20.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -2.0,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 3.0,
+            "y": 0.7,
+            "z": 1.4
+          },
+          "guide_references_m": [],
+          "id": "car-3",
+          "inertia_kg_m2": {
+            "x": 122.49999999999999,
+            "y": 547.9999999999999,
+            "z": 474.5
+          },
+          "kind": "car_body",
+          "mass_kg": 600.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.8,
+                "z": 0.0
+              }
+            },
+            "offset_m": -8.0,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-3-1",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -6.8,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 0.6,
+            "y": 0.3,
+            "z": 0.9
+          },
+          "guide_references_m": [
+            {
+              "x": -0.2,
+              "y": 0.0,
+              "z": 0.0
+            },
+            {
+              "x": 0.2,
+              "y": 0.0,
+              "z": 0.0
+            }
+          ],
+          "id": "gear-3-2",
+          "inertia_kg_m2": {
+            "x": 7.5,
+            "y": 9.75,
+            "z": 3.7499999999999996
+          },
+          "kind": "running_gear",
+          "mass_kg": 100.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -9.2,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        },
+        {
+          "asset": null,
+          "center_of_mass_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "dimensions_m": {
+            "x": 1.0,
+            "y": 0.1,
+            "z": 0.1
+          },
+          "guide_references_m": [],
+          "id": "drawbar-2",
+          "inertia_kg_m2": {
+            "x": 0.03333333333333334,
+            "y": 1.6833333333333333,
+            "z": 1.6833333333333333
+          },
+          "kind": "auxiliary",
+          "mass_kg": 20.0,
+          "placement": {
+            "frame": {
+              "rotation": {
+                "w": 1.0,
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              },
+              "translation_m": {
+                "x": 0.0,
+                "y": 0.0,
+                "z": 0.0
+              }
+            },
+            "offset_m": -6.0,
+            "type": "track"
+          },
+          "wheel_references_m": []
+        }
+      ],
+      "connections": [
+        {
+          "anchor_a_m": {
+            "x": 1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-1",
+          "component_b": "gear-1-1",
+          "id": "suspension-1-1",
+          "model": {
+            "frame_a": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "frame_b": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "type": "roll_lock"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": -1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-1",
+          "component_b": "gear-1-2",
+          "id": "suspension-1-2",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": 1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-2",
+          "component_b": "gear-2-1",
+          "id": "suspension-2-1",
+          "model": {
+            "frame_a": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "frame_b": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "type": "roll_lock"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": -1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-2",
+          "component_b": "gear-2-2",
+          "id": "suspension-2-2",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": -1.5,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.5,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-1",
+          "component_b": "drawbar-1",
+          "id": "coupler-1-front",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": 1.5,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": -0.5,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-2",
+          "component_b": "drawbar-1",
+          "id": "coupler-1-rear",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": 1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-3",
+          "component_b": "gear-3-1",
+          "id": "suspension-3-1",
+          "model": {
+            "frame_a": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "frame_b": {
+              "w": 1.0,
+              "x": 0.0,
+              "y": 0.0,
+              "z": 0.0
+            },
+            "type": "roll_lock"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": -1.2,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.0,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-3",
+          "component_b": "gear-3-2",
+          "id": "suspension-3-2",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": -1.5,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": 0.5,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-2",
+          "component_b": "drawbar-2",
+          "id": "coupler-2-front",
+          "model": {
+            "type": "ball"
+          }
+        },
+        {
+          "anchor_a_m": {
+            "x": 1.5,
+            "y": -0.8,
+            "z": 0.0
+          },
+          "anchor_b_m": {
+            "x": -0.5,
+            "y": 0.0,
+            "z": 0.0
+          },
+          "component_a": "car-3",
+          "component_b": "drawbar-2",
+          "id": "coupler-2-rear",
+          "model": {
+            "type": "ball"
+          }
+        }
+      ],
+      "id": "compat-train",
+      "name": "Development Conventional (3 cars)"
+    }
+  ]
+}

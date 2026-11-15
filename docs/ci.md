@@ -1,4 +1,4 @@
-# Continuous integration (R0.1 + R0.2 — checks and Windows packages)
+# Continuous integration (R0.1–R0.3 — checks, Windows packages and regression baselines)
 
 The workflow is in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 It implements Tier 1 of the approved roadmap
@@ -26,9 +26,10 @@ repository write permission.
 | --- | --- | --- |
 | Format (cargo fmt) | `cargo fmt --all -- --check`, `./tools/test-windows-packaging.ps1` (no compilation) | 15 min |
 | Clippy and tests (debug) | `cargo clippy --workspace --all-targets --locked -- -D warnings`, then `cargo test --workspace --locked --no-fail-fast` | 90 min |
+| Deterministic regression (CPU only) | `./tools/verify-regression-baseline.ps1 -Comparison Exact`: immutable schema corpus, exact debug/Release production replay | 20 min |
 | Release build and Windows package | `./tools/build-windows.ps1`, then `./tools/package-windows.ps1 -BuildReceipt ...`, then one artifact upload | 60 min |
 
-The three jobs run in parallel, each on its own runner with its own disk.
+The four jobs run in parallel, each on its own runner with its own disk.
 
 The test step runs even when clippy fails, so one push reports both results.
 
@@ -96,7 +97,7 @@ out merge SHA; `workflow_sha` records `GITHUB_SHA`. The PR head SHA can differ.
 On `main`, the package identifies the pushed/merged commit. A newer PR push can
 cancel an older run before it uploads; failed/cancelled packaging has no artifact.
 Successful release packaging may upload while another parallel job fails: use a
-package as a verified candidate only after **all three jobs are green**. Rerunning
+package as a verified candidate only after **all four jobs are green**. Rerunning
 the upload for the same workflow/name does not overwrite an existing artifact.
 
 ### Download, extract and verify (either Windows computer)
@@ -179,6 +180,8 @@ types.
     not been verified.
 - **Exception:** `docs/research/m4i-claude/` keeps its own `-text` rule, which
   preserves archival bytes.
+- R0.3 immutable fixture directories use explicit `text eol=lf` so their SHA-256
+  manifests cover identical bytes on every checkout.
 
 ## Caching and disk
 
@@ -211,8 +214,10 @@ outputs.
   (WARP/Mesa) is a later, non-blocking R0 step.
 - **Timing and performance gates** (`simulator-timing`, step budgets, frame
   rate). Shared runners are not timing-stable.
-- **The Python numerical verifiers, golden replay hashes and schema corpus.**
-  These remain later R0 steps; R0.2 adds packaging only.
+- **The existing Python numerical export verifiers.** These remain later R0
+  steps. R0.3 adds a read-only Python fixture integrity check, golden replay
+  fingerprints and schemas 1–7 in the bounded CPU regression job. See
+  [the fixture coverage and comparison contract](deterministic-regression-r03.md).
 
 Making CI a required check is a repository setting. The owner turns it on in
 branch protection once the workflow has a reliable green record.

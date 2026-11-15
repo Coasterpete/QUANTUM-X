@@ -1,0 +1,218 @@
+{
+  "construction": {
+    "continuous": [
+      {
+        "cap_ends": true,
+        "id": "rail-left",
+        "material": "running",
+        "offset_m": [
+          0.0,
+          0.0,
+          -0.55
+        ],
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 12
+        },
+        "role": "running",
+        "rotation_rad": 0.0,
+        "visible": true
+      },
+      {
+        "cap_ends": true,
+        "id": "rail-right",
+        "material": "running",
+        "offset_m": [
+          0.0,
+          0.0,
+          0.55
+        ],
+        "profile": {
+          "kind": "circle",
+          "radius_m": 0.065,
+          "sides": 12
+        },
+        "role": "running",
+        "rotation_rad": 0.0,
+        "visible": true
+      },
+      {
+        "cap_ends": true,
+        "id": "spine",
+        "material": "structure",
+        "offset_m": [
+          0.0,
+          -0.38,
+          0.0
+        ],
+        "profile": {
+          "height_m": 0.28,
+          "kind": "box",
+          "width_m": 0.24
+        },
+        "role": "structure",
+        "rotation_rad": 0.0,
+        "visible": true
+      }
+    ],
+    "id": "validation-dual",
+    "materials": [
+      {
+        "base_color": [
+          0.6200000047683716,
+          0.7200000286102295,
+          0.800000011920929
+        ],
+        "id": "running",
+        "metallic": 0.6499999761581421,
+        "roughness": 0.2800000011920929
+      },
+      {
+        "base_color": [
+          0.1899999976158142,
+          0.3400000035762787,
+          0.4300000071525574
+        ],
+        "id": "structure",
+        "metallic": 0.5,
+        "roughness": 0.550000011920929
+      },
+      {
+        "base_color": [
+          0.41999998688697815,
+          0.5,
+          0.550000011920929
+        ],
+        "id": "hardware",
+        "metallic": 0.44999998807907104,
+        "roughness": 0.5
+      }
+    ],
+    "repeated": [
+      {
+        "alignment": "track_frame",
+        "end_margin_m": 0.25,
+        "id": "cross-tie",
+        "material": "hardware",
+        "offset_m": [
+          0.0,
+          -0.16,
+          0.0
+        ],
+        "rotation_rad": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "shape": {
+          "kind": "box",
+          "size_m": [
+            0.12,
+            0.22,
+            1.22
+          ]
+        },
+        "spacing_m": 1.2,
+        "start_m": 0.25,
+        "visible": true
+      }
+    ],
+    "strategy": "dual_rail",
+    "version": 1
+  },
+  "heartline": {
+    "authored_reference": "rider_reference",
+    "rider_offset": {
+      "offset_m": {
+        "x": 0.0,
+        "y": -2.0,
+        "z": 0.0
+      },
+      "type": "constant"
+    },
+    "train_configuration_id": null
+  },
+  "initial": {
+    "gravity_mps2": 9.80665,
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "position_m": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "reference_speed_mps": 20.0
+  },
+  "metadata": {
+    "author": "QUANTUM-X contributors",
+    "description": "Five authored sections exercising force, world/rider-local geometry, both domains, banking, and construction geometry.",
+    "name": "Core foundation diagnostic",
+    "project_id": "qx-foundation-example-1"
+  },
+  "operations": {
+    "devices": [
+      {
+        "acceleration_mps2": 2.0,
+        "enabled": true,
+        "end_m": 40.0,
+        "id": 1,
+        "kind": "brake",
+        "maximum_force_n": 100000.0,
+        "name": "Brake 1",
+        "profile": [],
+        "reverse_launch": false,
+        "start_m": 38.0
+      }
+    ],
+    "layout": "open",
+    "physical": {
+      "air_density_kg_m3": 1.225,
+      "drag_area_m2": 0.0,
+      "gravity_mps2": 9.81,
+      "initial_speed_mps": 0.0,
+      "rolling_resistance_coefficient": 0.0
+    }
+  },
+  "schema_version": 7,
+  "sections": [
+    {
+      "domain": "distance",
+      "extent": 40.0,
+      "id": 1,
+      "incoming_boundary": "allow_rate_jump",
+      "kind": {
+        "plane_angle_rad": 0.0,
+        "radius_m": 20.0,
+        "type": "arc"
+      },
+      "name": "E01 station-domain known defect",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "transitions": [
+          {
+            "amplitude": 0.0,
+            "end": 0.0,
+            "function": {
+              "type": "constant"
+            },
+            "id": 1,
+            "length": 40.0,
+            "start": 0.0
+          }
+        ],
+        "unit": "radians_per_metre"
+      }
+    }
+  ],
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "supports": [],
+  "trains": []
+}

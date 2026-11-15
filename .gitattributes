@@ -12,3 +12,7 @@
 *.ico binary
 *.ttf binary
 *.blend binary
+
+# Immutable R0.3 corpus hashes cover literal bytes, including line endings.
+crates/qx-document/tests/fixtures/compatibility/* text eol=lf
+crates/qx-physics/tests/fixtures/replay/* text eol=lf

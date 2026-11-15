@@ -1,0 +1,282 @@
+{
+  "schema_version": 1,
+  "metadata": {
+    "project_id": "qx-foundation-example-1",
+    "name": "Core foundation diagnostic",
+    "author": "QUANTUM-X contributors",
+    "description": "Five authored sections exercising force, world/rider-local geometry, both domains, banking, and construction geometry."
+  },
+  "initial": {
+    "position_m": {
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "reference_speed_mps": 20.0,
+    "gravity_mps2": 9.80665
+  },
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  },
+  "sections": [
+    {
+      "id": 1,
+      "name": "Level lead-in",
+      "domain": "distance",
+      "extent": 12.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_metre",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 12.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "straight"
+      }
+    },
+    {
+      "id": 2,
+      "name": "Force-vector rise and bank",
+      "domain": "distance",
+      "extent": 60.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_metre",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 30.0,
+            "start": 0.0,
+            "end": 0.012,
+            "amplitude": 0.0,
+            "function": {
+              "type": "quintic_smoothstep"
+            }
+          },
+          {
+            "id": 2,
+            "length": 30.0,
+            "start": 0.012,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "quintic_smoothstep"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "force",
+        "normal_g": {
+          "unit": "g",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 30.0,
+              "start": 1.0,
+              "end": 1.7,
+              "amplitude": 0.0,
+              "function": {
+                "type": "quintic_smoothstep"
+              }
+            },
+            {
+              "id": 2,
+              "length": 30.0,
+              "start": 1.7,
+              "end": 1.0,
+              "amplitude": 0.0,
+              "function": {
+                "type": "quintic_smoothstep"
+              }
+            }
+          ]
+        },
+        "lateral_g": {
+          "unit": "g",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 30.0,
+              "start": 0.0,
+              "end": 0.35,
+              "amplitude": 0.0,
+              "function": {
+                "type": "quintic_smoothstep"
+              }
+            },
+            {
+              "id": 2,
+              "length": 30.0,
+              "start": 0.35,
+              "end": 0.0,
+              "amplitude": 0.0,
+              "function": {
+                "type": "quintic_smoothstep"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "name": "Rider-local recovery",
+      "domain": "distance",
+      "extent": 30.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_metre",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 30.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "rider_local",
+        "pitch_rate": {
+          "unit": "radians_per_metre",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 30.0,
+              "start": -0.008,
+              "end": -0.008,
+              "amplitude": 0.0,
+              "function": {
+                "type": "constant"
+              }
+            }
+          ]
+        },
+        "yaw_rate": {
+          "unit": "radians_per_metre",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 30.0,
+              "start": 0.006,
+              "end": 0.006,
+              "amplitude": 0.0,
+              "function": {
+                "type": "constant"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "name": "Time-domain world turn",
+      "domain": "time",
+      "extent": 1.5,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_second",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 1.5,
+            "start": -0.12,
+            "end": -0.12,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "geometric",
+        "pitch_rate": {
+          "unit": "radians_per_second",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 1.5,
+              "start": -0.08,
+              "end": -0.08,
+              "amplitude": 0.0,
+              "function": {
+                "type": "constant"
+              }
+            }
+          ]
+        },
+        "yaw_rate": {
+          "unit": "radians_per_second",
+          "transitions": [
+            {
+              "id": 1,
+              "length": 1.5,
+              "start": 0.16,
+              "end": 0.16,
+              "amplitude": 0.0,
+              "function": {
+                "type": "constant"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "name": "Construction arc",
+      "domain": "distance",
+      "extent": 20.0,
+      "incoming_boundary": "allow_rate_jump",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "unit": "radians_per_metre",
+        "transitions": [
+          {
+            "id": 1,
+            "length": 20.0,
+            "start": 0.0,
+            "end": 0.0,
+            "amplitude": 0.0,
+            "function": {
+              "type": "constant"
+            }
+          }
+        ]
+      },
+      "kind": {
+        "type": "arc",
+        "radius_m": 80.0,
+        "plane_angle_rad": 1.5707963267948966
+      }
+    }
+  ]
+}
