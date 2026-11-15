@@ -114,12 +114,15 @@ cargo run --release -p quantum-x -- edit
 cargo run --release -p quantum-x -- edit examples/mixed-authoring.qx.json
 ```
 
-`edit` enters the direct development editor. To start the branded application at
-Welcome with no document, build a local portable folder:
+`edit` enters the direct development editor. Prefer the verified portable Windows
+package from [GitHub Actions](https://github.com/Coasterpete/QUANTUM-X/actions/workflows/ci.yml)
+to run on either computer without Rust/Cargo. See [download and integrity
+instructions](docs/ci.md#download-extract-and-verify-either-windows-computer).
+For an exceptional local portable build from committed source:
 
 ```powershell
 ./tools/package-windows.ps1
-& './target/distribution/QUANTUM Dynamics-0.1.0-windows/QUANTUM Dynamics.exe'
+# Open QUANTUM Dynamics.exe inside the reported version/commit directory.
 ```
 
 Packaging refuses an existing destination. For another build, choose a new path
@@ -127,7 +130,7 @@ with `-OutputDirectory target/my-new-distribution`. Keep its `assets` directory
 beside the executables. Both `QUANTUM Dynamics.exe` and `quantum-x.exe` accept the
 development CLI; no-argument `quantum-x.exe` prints CLI help. The portable build
 is unsigned and has no installer, updater or file associations. Packaging does
-not publish a GitHub Release or upload binaries. Linux/macOS support is not
+not publish a GitHub Release; CI uploads a temporary workflow artifact. Linux/macOS support is not
 claimed by the Windows verification.
 
 ## First authoring steps

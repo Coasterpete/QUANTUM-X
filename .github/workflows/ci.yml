@@ -1,4 +1,4 @@
-# R0.1 — CPU-only CI baseline (docs/roadmaps/production-readiness-v1.md §7.1, Tier 1).
+# R0.1 + R0.2 — CPU-only checks and verified Windows development packaging.
 # Runs on a standard GitHub-hosted Windows runner with no GPU. Nothing here
 # creates a window, a graphics device or a software adapter; GPU smokes stay
 # local (Tier 3) until a separate, non-blocking Tier 2 experiment proves them.
@@ -47,6 +47,9 @@ jobs:
           rustc -Vv
       - name: cargo fmt --all -- --check
         run: cargo fmt --all -- --check
+      - name: Packaging script regression checks (no build)
+        shell: pwsh
+        run: ./tools/test-windows-packaging.ps1
 
   test:
     name: Clippy and tests (debug)
@@ -85,7 +88,7 @@ jobs:
           if (Test-Path target) { "target: {0:N1} GB" -f ((Get-ChildItem target -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB) }
 
   release:
-    name: Release build
+    name: Release build and Windows package
     runs-on: windows-2025
     timeout-minutes: 60
     steps:
@@ -104,7 +107,37 @@ jobs:
           shared-key: release
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo build --workspace --release --locked
-        run: cargo build --workspace --release --locked
+        # Exactly one Cargo build; records its compiler-artifact and embeds
+        # provenance. No second compilation or Cargo invocation in packaging.
+        shell: pwsh
+        run: ./tools/build-windows.ps1 -ReceiptPath "$env:RUNNER_TEMP/windows-release-build.json"
+      - name: Package and verify existing executable (CPU only)
+        id: package
+        shell: pwsh
+        run: |
+          $receipt = Get-Content "$env:RUNNER_TEMP/windows-release-build.json" -Raw | ConvertFrom-Json
+          $name = "QUANTUM Dynamics-$($receipt.build_info.version)-$($receipt.build_info.source_commit.Substring(0, 12))-windows"
+          ./tools/package-windows.ps1 -BuildReceipt "$env:RUNNER_TEMP/windows-release-build.json" -OutputDirectory "$env:RUNNER_TEMP/distribution/$name"
+      - name: Upload verified Windows development package
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: ${{ steps.package.outputs.artifact_name }}
+          # Parent wildcard preserves the versioned top-level folder in the ZIP.
+          # The runner creates exactly one package and no separate local ZIP.
+          path: ${{ runner.temp }}/distribution/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 6
+          include-hidden-files: true
+      - name: Record artifact download
+        shell: pwsh
+        env:
+          ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+          ARTIFACT_DIGEST: ${{ steps.upload.outputs.artifact-digest }}
+        run: |
+          "- [Download verified package]($env:ARTIFACT_URL) (14-day retention; GitHub sign-in and repository read access required)" >> $env:GITHUB_STEP_SUMMARY
+          "- Artifact archive SHA-256: $env:ARTIFACT_DIGEST" >> $env:GITHUB_STEP_SUMMARY
       - name: Disk space after build
         if: ${{ always() }}
         shell: pwsh
