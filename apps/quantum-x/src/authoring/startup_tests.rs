@@ -24,7 +24,11 @@ impl Fixture {
             super::session::new_project_id()
         ));
         std::fs::create_dir_all(&root).unwrap();
-        let mut app = App::welcome().unwrap();
+        // Start from default workbench preferences and no preference file, as
+        // the offscreen diagnostics do. `App::welcome` would load the
+        // developer's real %LOCALAPPDATA% workbench, making results depend on
+        // the machine (a CI runner has none).
+        let mut app = App::offscreen().unwrap();
         app.recent = Recent::load_path(Some(root.join("recent.json")));
         app.refresh_recents();
         Self { root, app }

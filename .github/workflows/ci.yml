@@ -1,0 +1,111 @@
+# R0.1 — CPU-only CI baseline (docs/roadmaps/production-readiness-v1.md §7.1, Tier 1).
+# Runs on a standard GitHub-hosted Windows runner with no GPU. Nothing here
+# creates a window, a graphics device or a software adapter; GPU smokes stay
+# local (Tier 3) until a separate, non-blocking Tier 2 experiment proves them.
+# See docs/ci.md for behavior and local reproduction.
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# A newer push to the same pull request cancels its older run. Runs on main
+# are never cancelled, so every merge commit gets a complete result.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  CARGO_TERM_COLOR: always
+  # CI builds from a restored cache; incremental artifacts only add disk use.
+  CARGO_INCREMENTAL: "0"
+  # Smaller debug info for test binaries (file/line backtraces are kept).
+  # Optimization and test behavior are unchanged.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: "1"
+
+jobs:
+  fmt:
+    name: Format (cargo fmt)
+    runs-on: windows-2025
+    timeout-minutes: 15
+    steps:
+      - name: Match the laptop's line-ending conversion
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: |
+          rustup --version
+          rustup toolchain install
+          rustc -Vv
+      - name: cargo fmt --all -- --check
+        run: cargo fmt --all -- --check
+
+  test:
+    name: Clippy and tests (debug)
+    runs-on: windows-2025
+    timeout-minutes: 90
+    steps:
+      - name: Match the laptop's line-ending conversion
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: |
+          rustup --version
+          rustup toolchain install
+          rustc -Vv
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: debug
+          # Only main writes the cache; pull requests restore it.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Disk space before build
+        shell: pwsh
+        run: Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}
+      - name: cargo clippy --workspace --all-targets --locked -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: cargo test --workspace --locked --no-fail-fast
+        # Runs even if clippy failed, so one push reports both results.
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --locked --no-fail-fast
+      - name: Disk space after build
+        if: ${{ always() }}
+        shell: pwsh
+        run: |
+          Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}
+          if (Test-Path target) { "target: {0:N1} GB" -f ((Get-ChildItem target -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum / 1GB) }
+
+  release:
+    name: Release build
+    runs-on: windows-2025
+    timeout-minutes: 60
+    steps:
+      - name: Match the laptop's line-ending conversion
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain (rust-toolchain.toml)
+        run: |
+          rustup --version
+          rustup toolchain install
+          rustc -Vv
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: release
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: cargo build --workspace --release --locked
+        run: cargo build --workspace --release --locked
+      - name: Disk space after build
+        if: ${{ always() }}
+        shell: pwsh
+        run: Get-PSDrive -PSProvider FileSystem | Format-Table Name, @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}}, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}}
