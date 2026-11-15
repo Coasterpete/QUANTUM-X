@@ -1,4 +1,12 @@
 fn main() {
+    // The packaging build supplies provenance before its single Cargo build.
+    // Ordinary developer builds remain usable, but cannot masquerade as one.
+    println!("cargo:rerun-if-env-changed=QX_BUILD_PROVENANCE");
+    let provenance = std::env::var("QX_BUILD_PROVENANCE")
+        .unwrap_or_else(|_| r#"{"verified_build":false}"#.to_owned());
+    serde_json::from_str::<serde_json::Value>(&provenance).expect("valid build provenance JSON");
+    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
+    std::fs::write(out_dir.join("build-info.json"), provenance).expect("write build provenance");
     println!("cargo:rerun-if-changed=../../product.json");
     let icon = "../../assets/icons/quantum-dynamics/QUANTUM_Dynamics.ico";
     println!("cargo:rerun-if-changed={icon}");
@@ -26,7 +34,6 @@ fn main() {
     let numeric = format!("{},0", version.replace('.', ","));
     let name = identity["name"].as_str().unwrap();
     let filename = identity["windows_executable"].as_str().unwrap();
-    let out_dir = std::path::PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     // Stage the owner's ICO unchanged; ordinary builds never invoke Blender or
     // regenerate artwork. Resource 101 is also loaded by qx-rendering::identity.
     let staged_icon = out_dir.join("quantum-dynamics.ico");

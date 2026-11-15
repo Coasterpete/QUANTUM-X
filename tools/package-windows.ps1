@@ -1,31 +1,40 @@
-param([string]$OutputDirectory)
+param(
+    [string]$OutputDirectory,
+    # Reuse the single build from build-windows.ps1; this mode never invokes Cargo.
+    [string]$BuildReceipt
+)
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'windows-build-common.ps1')
 $workspace = Split-Path -Parent $PSScriptRoot
 Push-Location $workspace
+$oldAssetsRoot = $env:QX_ASSETS_ROOT
 try {
     $identity = Get-Content -LiteralPath (Join-Path $workspace 'product.json') -Raw | ConvertFrom-Json
-    $metadataText = & cargo metadata --locked --no-deps --format-version 1
-    if ($LASTEXITCODE -ne 0) { throw 'Cargo metadata failed' }
-    $metadata = $metadataText | ConvertFrom-Json
-    $package = $metadata.packages | Where-Object name -eq 'quantum-x'
-    if (-not $package) { throw 'Development package quantum-x not found' }
-    # Cargo supplies the exact artifact. Never pick an arbitrary executable or
-    # mutate target/release/quantum-x.exe. A cached build still validates freshness.
-    $messages = & cargo build --locked --release -p quantum-x --message-format=json-render-diagnostics
-    if ($LASTEXITCODE -ne 0) { throw 'Release build failed' }
-    $artifact = $messages | ForEach-Object { $_ | ConvertFrom-Json } |
-        Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'quantum-x' -and $_.executable } |
-        Select-Object -Last 1
-    if (-not $artifact -or -not $artifact.executable.EndsWith('.exe')) { throw 'A native Windows executable is required' }
-    $source = $artifact.executable
+    if (-not $BuildReceipt) {
+        # Explicit local fallback. Canonical packages come from Actions instead.
+        $BuildReceipt = Join-Path ([IO.Path]::GetTempPath()) ("qx-build-{0}.json" -f [guid]::NewGuid().ToString('N'))
+        & (Join-Path $PSScriptRoot 'build-windows.ps1') -ReceiptPath $BuildReceipt
+    }
+    $sourceState = Get-PackageSource
+    $receipt = Read-WindowsBuildReceipt $BuildReceipt $sourceState
+    $package = $receipt.build_info
+    $source = $receipt.executable
+    $embeddedText = & $source --build-info
+    if ($LASTEXITCODE -ne 0) { throw 'Executable cannot report build provenance' }
+    $embedded = $embeddedText | ConvertFrom-Json
+    if (($embedded | ConvertTo-Json -Depth 6 -Compress) -cne ($package | ConvertTo-Json -Depth 6 -Compress)) {
+        throw 'Executable embedded provenance does not match build receipt'
+    }
     $info = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($source)
-    if ($info.ProductName -ne $identity.name) { throw 'Embedded product metadata is incorrect' }
+    if ($info.ProductName -ne $identity.name -or $info.ProductVersion -ne $package.version) { throw 'Embedded product metadata/version is incorrect' }
+    $runtime = & (Join-Path $PSScriptRoot 'verify-windows-runtime.ps1') -Executable $source
     $iconVerifier = Join-Path $PSScriptRoot 'verify-windows-icon.ps1'
     $sourceIcon = Join-Path $workspace 'assets/icons/quantum-dynamics/QUANTUM_Dynamics.ico'
     # A missing/stale/different icon must fail packaging, including cached builds.
     $iconCheck = & $iconVerifier -Executable $source -Icon $sourceIcon
     if (-not $OutputDirectory) {
-        $OutputDirectory = Join-Path $metadata.target_directory "distribution/QUANTUM Dynamics-$($package.version)-windows"
+        $shortCommit = $package.source_commit.Substring(0, 12)
+        $OutputDirectory = Join-Path $receipt.target_directory "distribution/QUANTUM Dynamics-$($package.version)-$shortCommit-windows"
     }
     $destination = [System.IO.Path]::GetFullPath($OutputDirectory)
     if (Test-Path -LiteralPath $destination) { throw "Destination exists; choose a new -OutputDirectory: $destination" }
@@ -33,6 +42,9 @@ try {
     Copy-Item -LiteralPath $source -Destination (Join-Path $destination $identity.windows_executable)
     Copy-Item -LiteralPath $source -Destination (Join-Path $destination $identity.development_executable)
     Copy-Item -LiteralPath (Join-Path $workspace 'product.json') -Destination $destination
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'verify-package.ps1') -Destination $destination
+    $package | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $destination 'build-info.json') -Encoding utf8
+    $runtime | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $destination 'runtime-check.json') -Encoding utf8
     $assetsDestination = Join-Path $destination 'assets'
     New-Item -ItemType Directory -Path $assetsDestination | Out-Null
     foreach ($folder in @('catalog', 'tracks', 'trains', 'development', 'materials')) {
@@ -62,7 +74,7 @@ try {
     $notices = Join-Path $destination 'notices'
     New-Item -ItemType Directory -Path $notices | Out-Null
     foreach ($file in @('LICENSE-MIT','LICENSE-APACHE')) {
-        if (Test-Path -LiteralPath (Join-Path $workspace $file)) { Copy-Item -LiteralPath (Join-Path $workspace $file) -Destination $notices }
+        Copy-Item -LiteralPath (Join-Path $workspace $file) -Destination $notices
     }
     Copy-Item -LiteralPath (Join-Path $workspace 'assets/fonts/OverpassMono/OFL.txt') -Destination (Join-Path $notices 'OverpassMono-OFL.txt')
     Copy-Item -LiteralPath (Join-Path $workspace 'assets/editor-icons/LICENSE-LUCIDE') -Destination $notices
@@ -94,6 +106,13 @@ All construction/operation changes require Apply or Cancel and support undo and 
 Experimental playback applies dimensioned forces at 240 Hz; stations, lifts, blocks and structural analysis remain unavailable.
 News is unavailable in this Alpha build.
 This unsigned portable folder has no installer, updater or file associations.
+Extract the complete folder before launching. Rust and Cargo are not required.
+Before first launch, run powershell -NoProfile -ExecutionPolicy Bypass -File .\verify-package.ps1
+SHA256SUMS covers every file except itself, in ordinal path order with LF and UTF-8 (no BOM).
+It detects corruption; it is not a signature or a guarantee of publisher identity.
+build-info.json and --build-info identify the exact source, compiler and workflow build.
+This is an unsigned x64 Windows MSVC development build. A compatible graphics driver is required.
+CPU-only package checks do not verify GPU startup or visual quality on your computer.
 "@ | Set-Content -LiteralPath (Join-Path $destination 'README.txt') -Encoding utf8
     $distribution = [ordered]@{
         product = $identity.name
@@ -111,6 +130,10 @@ This unsigned portable folder has no installer, updater or file associations.
     }
     $distribution | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'distribution.json') -Encoding utf8
     # Launch the real packaged PE through its noninteractive entry points only.
+    # Clear overrides and run outside the checkout to prove adjacent assets work.
+    $env:QX_ASSETS_ROOT = $null
+    Push-Location $destination
+    try {
     $public = Join-Path $destination $identity.windows_executable
     $legacy = Join-Path $destination $identity.development_executable
     $packagedIconChecks = @(
@@ -147,7 +170,35 @@ This unsigned portable folder has no installer, updater or file associations.
             if ($LASTEXITCODE -ne 0 -or ($fileText | ConvertFrom-Json).page -ne 'editor') { throw 'Explicit project-file launch is broken' }
         }
     }
+    } finally { Pop-Location }
+    # Recheck inputs after copying and executing the checks, before authorizing
+    # upload. No cache, build directory or older distribution is modified.
+    $after = Get-PackageSource
+    if ($after.commit -cne $sourceState.commit -or $after.tree -cne $sourceState.tree) { throw 'Source changed during packaging' }
+    $null = Read-WindowsBuildReceipt $BuildReceipt $after
+    foreach ($name in @($identity.windows_executable, $identity.development_executable)) {
+        if ((Get-FileHash -LiteralPath (Join-Path $destination $name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $receipt.executable_sha256) { throw "Packaged executable changed: $name" }
+    }
+    Write-PackageManifest $destination
+    $integrity = & (Join-Path $PSScriptRoot 'verify-package.ps1') -Directory $destination
+    if ($env:GITHUB_OUTPUT) {
+        "directory=$destination" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+        "artifact_name=$(Split-Path -Leaf $destination)" | Add-Content -LiteralPath $env:GITHUB_OUTPUT
+    }
+    if ($env:GITHUB_STEP_SUMMARY) {
+        @"
+### Verified Windows development package
+- Source commit: $($package.source_commit)
+- Workflow checkout: $($package.workflow_sha) (PR runs package the tested merge commit)
+- Artifact: $(Split-Path -Leaf $destination)
+- Uncompressed bytes: $($integrity.bytes)
+- Files verified: $($integrity.files)
+- SHA256SUMS SHA-256: $($integrity.manifest_sha256)
+- One workspace release compilation; packaging reused its hashed, provenance-bound executable.
+"@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+    }
     Write-Output "Portable distribution verified: $destination"
 } finally {
+    $env:QX_ASSETS_ROOT = $oldAssetsRoot
     Pop-Location
 }

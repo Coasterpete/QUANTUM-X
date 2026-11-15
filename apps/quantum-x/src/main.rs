@@ -44,6 +44,7 @@ const USAGE: &str = "QUANTUM Dynamics authoring diagnostics (development only)
   quantum-x ride-recording <project.qx.json> <new-output-directory>
   quantum-x library [assets-root]
   quantum-x --version
+  quantum-x --build-info
   quantum-x benchmark
   quantum-x physics-diagnostic
   quantum-x diagnostic-import <track.csv> <supports.xml|-> [--render <new-directory>] [--construction <generic-dual|box-spined-100>]
@@ -128,6 +129,13 @@ fn run() -> Result<(), Box<dyn Error>> {
             qx_rendering::identity::product().name,
             env!("CARGO_PKG_VERSION"),
             qx_rendering::identity::product().repository
+        );
+        return Ok(());
+    }
+    if args.len() == 1 && args[0] == "--build-info" {
+        println!(
+            "{}",
+            include_str!(concat!(env!("OUT_DIR"), "/build-info.json"))
         );
         return Ok(());
     }
