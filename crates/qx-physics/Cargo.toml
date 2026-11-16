@@ -12,3 +12,7 @@ experimental-source-guidance = ["qx-geometry/experimental-graph-source"]
 qx-geometry = { path = "../qx-geometry" }
 qx-document = { path = "../qx-document" }
 
+[dev-dependencies]
+serde.workspace = true
+serde_json.workspace = true
+

@@ -1,0 +1,186 @@
+{
+  "construction": {
+    "continuous": [
+      {
+        "cap_ends": true,
+        "id": "primary-beam",
+        "material": "running",
+        "offset_m": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "profile": {
+          "kind": "polygon",
+          "points": [
+            [
+              -0.45,
+              -0.13
+            ],
+            [
+              0.1,
+              -0.13
+            ],
+            [
+              0.1,
+              -0.25
+            ],
+            [
+              0.22,
+              -0.25
+            ],
+            [
+              0.22,
+              0.25
+            ],
+            [
+              0.1,
+              0.25
+            ],
+            [
+              0.1,
+              0.13
+            ],
+            [
+              -0.45,
+              0.13
+            ]
+          ]
+        },
+        "role": "running",
+        "rotation_rad": 0.0,
+        "visible": true
+      }
+    ],
+    "id": "validation-single",
+    "materials": [
+      {
+        "base_color": [
+          0.6200000047683716,
+          0.7200000286102295,
+          0.800000011920929
+        ],
+        "id": "running",
+        "metallic": 0.6499999761581421,
+        "roughness": 0.375
+      },
+      {
+        "base_color": [
+          0.1899999976158142,
+          0.3400000035762787,
+          0.4300000071525574
+        ],
+        "id": "structure",
+        "metallic": 0.5,
+        "roughness": 0.550000011920929
+      },
+      {
+        "base_color": [
+          0.41999998688697815,
+          0.5,
+          0.550000011920929
+        ],
+        "id": "hardware",
+        "metallic": 0.44999998807907104,
+        "roughness": 0.5
+      }
+    ],
+    "repeated": [
+      {
+        "alignment": "track_frame",
+        "end_margin_m": 0.25,
+        "id": "beam-bracket",
+        "material": "hardware",
+        "offset_m": [
+          0.0,
+          -0.5,
+          0.0
+        ],
+        "rotation_rad": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "shape": {
+          "kind": "box",
+          "size_m": [
+            0.16,
+            0.1,
+            0.65
+          ]
+        },
+        "spacing_m": 1.8,
+        "start_m": 0.25,
+        "visible": true
+      }
+    ],
+    "strategy": "single_rail",
+    "version": 1
+  },
+  "heartline": {
+    "authored_reference": "track_centerline",
+    "rider_offset": {
+      "offset_m": {
+        "x": 0.0,
+        "y": 1.25,
+        "z": 0.125
+      },
+      "type": "constant"
+    },
+    "train_configuration_id": null
+  },
+  "initial": {
+    "gravity_mps2": 9.80665,
+    "orientation": {
+      "w": 1.0,
+      "x": 0.0,
+      "y": 0.0,
+      "z": 0.0
+    },
+    "position_m": {
+      "x": 0.123456789012345,
+      "y": 10.000000000000002,
+      "z": -0.234567890123456
+    },
+    "reference_speed_mps": 20.0
+  },
+  "metadata": {
+    "author": "QUANTUM-X contributors",
+    "description": "Frozen R0.3 compatibility input reconstructed from existing migration test patterns; not a historical user file.",
+    "name": "Core foundation diagnostic",
+    "project_id": "compatibility-reconstruction"
+  },
+  "schema_version": 4,
+  "sections": [
+    {
+      "domain": "distance",
+      "extent": 50.0,
+      "id": 101,
+      "incoming_boundary": "allow_rate_jump",
+      "kind": {
+        "type": "straight"
+      },
+      "name": "Precision authored line",
+      "reference_speed_mps": null,
+      "roll_rate": {
+        "transitions": [
+          {
+            "amplitude": 0.0,
+            "end": 0.0,
+            "function": {
+              "type": "constant"
+            },
+            "id": 1,
+            "length": 50.0,
+            "start": 0.0
+          }
+        ],
+        "unit": "radians_per_metre"
+      }
+    }
+  ],
+  "style": {
+    "family_id": "hybrid",
+    "style_id": "hybrid-100"
+  }
+}

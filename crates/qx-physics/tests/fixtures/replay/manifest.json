@@ -1,0 +1,27 @@
+{
+  "format_version": 1,
+  "solver": "TrackSimulation::with_operations; default legacy initializer; sampled captive guides",
+  "source_commit": "69834bcfedf0607d852f6f88c508df5b3ebce606",
+  "target": "x86_64-pc-windows-msvc",
+  "compiler": "rustc 1.100.0 (0ef1bc386 2026-11-09)\nbinary: rustc\ncommit-hash: 0ef1bc386059596dada8fb65b50425aab2ea637a\ncommit-date: 2026-11-09\nhost: x86_64-pc-windows-msvc\nrelease: 1.100.0\nLLVM version: 23.1.5",
+  "capture_profile": "dev",
+  "generation_options": {
+    "max_step_m": 0.1,
+    "max_samples": 200000,
+    "max_rotation_per_step_rad": 0.15,
+    "curvature_warning_per_m": 0.5,
+    "spline_arc_length": "unused: all replay sections are graph primitives"
+  },
+  "sha256": {
+    "banked_curve.json": "4ede735b436ea7ec70af4cc078f77d5fb73196051fe9b4af4b17e758aaf73200",
+    "brake_reverse.json": "94cb917be1defdea2abb14b8589927feecf953c2b7925dd199c15332bf08ce7a",
+    "circuit_seam.json": "9dd5e505b71e256097bb2fdfc79279578e4f6dd20b9342a5211332ec0785f0d5",
+    "grade.json": "5ffd42dd4739a4d16ae039a8fd1166978d7ee61e20018521fb800fb77714f316",
+    "launch.json": "11c8d6bb6cb8ccd0d308e92db393d8c6251d022c06a285890392a909423fc805",
+    "level.json": "5a1ceb4183cdee62de89708ec78d821a225b99658d1dd69550bbd877f5880bd1",
+    "rotating_seats.json": "5b7c92027686236f85ec5b03f89a452b1d5f4e6596a4c00d21db99d2bdf9aca7"
+  },
+  "processor": "Intel64 Family 6 Model 183 Stepping 1, GenuineIntel",
+  "rustflags": null,
+  "encoded_rustflags": null
+}

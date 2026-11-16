@@ -1,0 +1,79 @@
+{
+  "format_version": 1,
+  "cases": [
+    {
+      "input": "schema1-foundation.qx.json",
+      "expected": "schema1-foundation.expected.json",
+      "schema": 1,
+      "provenance": "Saved example: b2fdce9:examples/foundation.qx.json (unchanged at 69834bc)"
+    },
+    {
+      "input": "schema2-mixed.qx.json",
+      "expected": "schema2-mixed.expected.json",
+      "schema": 2,
+      "provenance": "Saved example: 6b8b2ca:examples/mixed-authoring.qx.json (unchanged at 69834bc)"
+    },
+    {
+      "input": "schema3-heartline.qx.json",
+      "expected": "schema3-heartline.expected.json",
+      "schema": 3,
+      "provenance": "Saved example: 497980d:examples/heartline-reference.qx.json (unchanged at 69834bc)"
+    },
+    {
+      "input": "schema4-construction.qx.json",
+      "expected": "schema4-construction.expected.json",
+      "schema": 4,
+      "provenance": "Reconstructed: construction_workflow migration pattern, nondefault construction and precision fields"
+    },
+    {
+      "input": "schema5-hermite.qx.json",
+      "expected": "schema5-hermite.expected.json",
+      "schema": 5,
+      "provenance": "Reconstructed: transition_regions schema_five_hermite test, IDs 41/42, amplitude, endpoint slopes and explicit jump"
+    },
+    {
+      "input": "schema5-train.qx.json",
+      "expected": "schema5-train.expected.json",
+      "schema": 5,
+      "provenance": "Reconstructed: train_workflow/vehicle_workflow migration patterns, three-car mechanics, early absent asset pivot"
+    },
+    {
+      "input": "schema6-nurbs.qx.json",
+      "expected": "schema6-nurbs.expected.json",
+      "schema": 6,
+      "provenance": "Reconstructed: transition_regions/integrated_features, frozen scalar NURBS with discontinuity and train"
+    },
+    {
+      "input": "schema7-e01-known-defect.qx.json",
+      "expected": "schema7-e01-known-defect.expected.json",
+      "schema": 7,
+      "provenance": "Reconstructed: audit E01 scratch probe, 40m authored / 36m physical, brake 38-40m; intentionally retains defect"
+    },
+    {
+      "input": "schema7-integrated.qx.json",
+      "expected": "schema7-integrated.expected.json",
+      "schema": 7,
+      "provenance": "Reconstructed: integrated_features, launch keys, brake curve, Shuttle, supports, mechanics, construction"
+    }
+  ],
+  "sha256": {
+    "schema1-foundation.expected.json": "49bdbb44c09abdf81c802d9715c859a5148d115f733d3f3178a56a2d03abd190",
+    "schema1-foundation.qx.json": "4e38891b69048b4f31a7ff0ab103dfe5e3d91f0d5495656cf724d4f7f2628075",
+    "schema2-mixed.expected.json": "d1e5aa9908953a9ad441d68cb9f472319b08c1c418a1d917907ca51a7b1e4685",
+    "schema2-mixed.qx.json": "fbd2e81e9ed03510a9d0817d8b9e37820fbbe1c6a249dbc22d34ebe4f46bb14e",
+    "schema3-heartline.expected.json": "a877e588bbe85dfccffa7afbad7a61ac329438b7f9fe8cfa19a105681ae92102",
+    "schema3-heartline.qx.json": "3f5274bdec8678469018ca449b91d9322eb50a63972a525e024df3031a76e82c",
+    "schema4-construction.expected.json": "77eedb843ab4dfa97cba7263d5dbcc5ec3554f1da12e00389837cf91785bdb3a",
+    "schema4-construction.qx.json": "84a0e3deaaa4cc5a0ae05f94e8db8cc5e51f082d123260389b9cf7e643f9ed8c",
+    "schema5-hermite.expected.json": "8f14caf979156dd43a4e4932ccb150c667fb756273252e4d7f3ff08e60fc9339",
+    "schema5-hermite.qx.json": "a875c4288b099d9683ec62eab7dadf429d2d7d96cac74c3b2c0944c2c26da3f4",
+    "schema5-train.expected.json": "f008d6870baff6ad1341ab21dd983a71367db76840f386dcea56afd3270bee0c",
+    "schema5-train.qx.json": "bc7f57d5b8476fb1dba3831610002c3374c0d60422424fe4a8a7aa75c37d959a",
+    "schema6-nurbs.expected.json": "8f14caf979156dd43a4e4932ccb150c667fb756273252e4d7f3ff08e60fc9339",
+    "schema6-nurbs.qx.json": "98c4cfb959fd1f325e1934ad283b1ec66e30f55bface495f5b128ea48801085d",
+    "schema7-e01-known-defect.expected.json": "8490da1f3b20555db24691da19fbb3a2e44899822f78286fd2e391cb40c3df2f",
+    "schema7-e01-known-defect.qx.json": "d561b08184f5ef246ada35fa20b81fc977dca000fb70fb3b629cf975e0c998b4",
+    "schema7-integrated.expected.json": "bc144364cfe4e21ea3dbbe2df507a6d57cfedd73dd871c2399f12c53b7380dbf",
+    "schema7-integrated.qx.json": "d552163fc9a1d244bcb5cf0de37a0eed3ab2b7de8b5a22b60e2fd0ef1bfad7ad"
+  }
+}
