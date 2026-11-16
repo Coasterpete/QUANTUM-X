@@ -30,8 +30,8 @@ steps (not merely their non-blocking parent checks) concluded **success**.
 | Editor native | 5 presented frames | 5 presented frames | Existing blank-editor smoke route and native surface |
 | Simulator native | 11 frames; 72 paused ticks | 12 frames; 64 paused ticks | Existing same-window Editor → Simulator → Editor script; Play/Pause/Reset; editor restored |
 
-Both Simulator scripts finished `Done`, drew nine Simulator frames, matched
-initial state after Reset and restored the editor. Tick/frame counts can differ
+Both Simulator scripts finished `Done`, drew eight/nine Simulator frames
+respectively, matched initial state after Reset and restored the editor. Tick/frame counts can differ
 because the existing script waits for asynchronous snapshots and requires **at
 least 48 fixed ticks** and **at least five presented frames**. The solver remains
 at 1/240 s; these counts are not a physics determinism comparator or timing gate.
