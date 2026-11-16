@@ -150,7 +150,7 @@ try {
     Assert-True ($r.Stdout -ceq $argument -and -not $env:QX_TEST_VALUE) 'Child environment leaked or changed text'
     $echoScript = Join-Path $scratch 'echo arguments.ps1'
     Write-TestText $echoScript 'param([string]$Value) [Console]::Write($Value)'
-    $r = Invoke-DesktopProcess $hostExe @('-NoProfile','-NonInteractive','-File',$echoScript,'space and value') $scratch $envMap 5
+    $r = Invoke-DesktopProcess $hostExe @('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$echoScript,'space and value') $scratch $envMap 5
     Assert-True ($r.Stdout -ceq 'space and value') 'Quoted process argument was changed'
     Assert-True ([QuantumDesktopVerification.ProcessRunner]::Quote('trailing\') -ceq '"trailing\\"') 'Trailing slash quoting is invalid'
     Assert-True ([QuantumDesktopVerification.ProcessRunner]::Quote('a"b') -ceq '"a\"b"') 'Embedded quote escaping is invalid'
