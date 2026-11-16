@@ -50,6 +50,12 @@ jobs:
       - name: Packaging script regression checks (no build)
         shell: pwsh
         run: ./tools/test-windows-packaging.ps1
+      - name: Desktop verifier regression checks (CPU only, no application/window)
+        shell: pwsh
+        run: |
+          ./tools/test-desktop-verification.ps1
+          powershell -NoProfile -ExecutionPolicy Bypass -File tools/test-desktop-verification.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell desktop verifier tests failed' }
 
   test:
     name: Clippy and tests (debug)

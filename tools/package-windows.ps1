@@ -43,6 +43,12 @@ try {
     Copy-Item -LiteralPath $source -Destination (Join-Path $destination $identity.development_executable)
     Copy-Item -LiteralPath (Join-Path $workspace 'product.json') -Destination $destination
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'verify-package.ps1') -Destination $destination
+    # R0.5 also works against older extracted packages when run from tools/.
+    # Ship the same standalone runner for subsequent packages, without a build.
+    foreach ($file in @('verify-desktop.ps1', 'desktop-verification.ps1', 'desktop-process.cs',
+                        'desktop-manual-checklist.md', 'desktop-manual-checklist.json')) {
+        Copy-Item -LiteralPath (Join-Path $PSScriptRoot $file) -Destination $destination
+    }
     $package | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $destination 'build-info.json') -Encoding utf8
     $runtime | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath (Join-Path $destination 'runtime-check.json') -Encoding utf8
     $assetsDestination = Join-Path $destination 'assets'
@@ -113,6 +119,10 @@ It detects corruption; it is not a signature or a guarantee of publisher identit
 build-info.json and --build-info identify the exact source, compiler and workflow build.
 This is an unsigned x64 Windows MSVC development build. A compatible graphics driver is required.
 CPU-only package checks do not verify GPU startup or visual quality on your computer.
+For R0.5 native hardware checks (no rebuild), run from PowerShell:
+powershell -NoProfile -ExecutionPolicy Bypass -File .\verify-desktop.ps1 -PackageDirectory . -OutputDirectory C:\scratch\new-desktop-evidence -MachineLabel unspecified
+Choose a NEW evidence folder outside this package. report.json and summary.md are automated evidence.
+Complete the generated manual-checklist.md/json separately; native hidden-window smokes do not verify visual quality.
 "@ | Set-Content -LiteralPath (Join-Path $destination 'README.txt') -Encoding utf8
     $distribution = [ordered]@{
         product = $identity.name

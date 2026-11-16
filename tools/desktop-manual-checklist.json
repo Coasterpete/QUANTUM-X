@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "kind": "manual_owner_verification",
+  "machine_label": "",
+  "application_source_commit": "",
+  "performed_utc": null,
+  "instructions": "Owner records only checks actually performed. Use passed, failed, not_performed or not_applicable with observations. Do not put private paths or names here. Automated report.json is separate and does not import these results.",
+  "checks": [
+    { "id": "welcome", "status": "not_performed", "observations": "" },
+    { "id": "editor", "status": "not_performed", "observations": "" },
+    { "id": "save-open-undo-redo", "status": "not_performed", "observations": "" },
+    { "id": "simulator", "status": "not_performed", "observations": "" },
+    { "id": "resize-minimize-restore", "status": "not_performed", "observations": "" },
+    { "id": "dpi-scaling", "status": "not_performed", "observations": "" },
+    { "id": "multi-monitor", "status": "not_performed", "observations": "" },
+    { "id": "rendering-shutdown", "status": "not_performed", "observations": "" }
+  ]
+}

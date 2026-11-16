@@ -1,0 +1,147 @@
+{
+  "format_version": 1,
+  "milestone": "R0.5",
+  "run_kind": "initial-run-before-final-script-review",
+  "started_utc": "2026-11-16T02:17:29.3280823Z",
+  "completed_utc": "2026-11-16T02:17:48.8750041Z",
+  "machine_label": "local-windows",
+  "application": {
+    "version": "0.1.0",
+    "source_commit": "c9a004771ba41b99847838e4072e44bcce2f326d",
+    "source_tree": "b4f577b813d70a0b01147e2b4e11b137135c33aa",
+    "build_id": "d0a5b3dbfa98410ea8abd88e4d111bf6",
+    "target": "x86_64-pc-windows-msvc",
+    "profile": "release",
+    "executable_sha256": "8ce5c041eae7597043fa48cb686e2f63de7d0ad28eb22eead659e3d7eef3efed"
+  },
+  "package_integrity": {
+    "status": "passed",
+    "files": 104,
+    "bytes": 180710810,
+    "manifest_sha256": "53f7f78c69ee049b44bff365c60380f25eb670cbf053a1ce09638a16e9122cf5",
+    "expected_manifest_checked": false,
+    "error": null
+  },
+  "system": {
+    "status": "passed",
+    "os": {
+      "Caption": "Microsoft Windows 11 Pro",
+      "Version": "10.0.26300",
+      "BuildNumber": "26300",
+      "OSArchitecture": "64-bit"
+    },
+    "gpu_inventory": [
+      {
+        "Name": "NVIDIA GeForce RTX 4070",
+        "AdapterCompatibility": "NVIDIA",
+        "DriverVersion": "32.0.16.1742",
+        "DriverDate": "2026-09-30T00:00:00Z"
+      }
+    ],
+    "error": null
+  },
+  "automated_status": "passed",
+  "manual_status": "not_performed",
+  "cases": [
+    {
+      "name": "build-info",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true
+    },
+    {
+      "name": "version",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true
+    },
+    {
+      "name": "self-check",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true
+    },
+    {
+      "name": "startup-welcome",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true
+    },
+    {
+      "name": "startup-editor",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true
+    },
+    {
+      "name": "native-welcome",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true,
+      "frames_presented": 5,
+      "exit_reason": "diagnostic_complete",
+      "resources_released": true,
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 4070\", vendor: 4318, device: 10118, device_type: DiscreteGpu, device_pci_bus_id: <omitted>, driver: \"NVIDIA\", driver_info: \"617.42\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }"
+    },
+    {
+      "name": "native-editor",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true,
+      "frames_presented": 5,
+      "exit_reason": "diagnostic_complete",
+      "resources_released": true,
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 4070\", vendor: 4318, device: 10118, device_type: DiscreteGpu, device_pci_bus_id: <omitted>, driver: \"NVIDIA\", driver_info: \"617.42\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }"
+    },
+    {
+      "name": "native-simulator",
+      "status": "passed",
+      "started": true,
+      "exit_code": 0,
+      "timed_out": false,
+      "terminated": true,
+      "frames_presented": 21,
+      "exit_reason": "diagnostic_complete",
+      "resources_released": true,
+      "adapter": "AdapterInfo { name: \"NVIDIA GeForce RTX 4070\", vendor: 4318, device: 10118, device_type: DiscreteGpu, device_pci_bus_id: <omitted>, driver: \"NVIDIA\", driver_info: \"617.42\", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }",
+      "script": {
+        "name": "simulator_round_trip",
+        "step": "Done",
+        "paused_ticks": 52,
+        "reset_matches_initial": true,
+        "editor_restored": true
+      }
+    }
+  ],
+  "additional_roadmap_checks": [
+    {
+      "status": "not_run",
+      "name": "simulator-timing",
+      "reason": "Separate owner hardware timing campaign; not a smoke or FPS result"
+    },
+    {
+      "status": "not_run",
+      "name": "cross-machine-golden-replay",
+      "reason": "R0.3 test runner is not in the development package; no Cargo invoked"
+    },
+    {
+      "status": "not_applicable",
+      "name": "installer-uninstaller",
+      "reason": "Portable package; installer is a future milestone"
+    }
+  ]
+}

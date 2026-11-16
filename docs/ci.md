@@ -4,6 +4,11 @@ R0.4 adds a **separate, non-blocking**
 [software GPU feasibility experiment](software-gpu-r0.4.md). Nothing in the
 Tier 1 workflow described below installs or selects a software adapter.
 
+R0.5 adds [native desktop verification](desktop-verification-r0.5.md) for an
+already extracted package on either owner computer, without rebuilding. Its
+CPU-only script tests run in the Format job under Windows PowerShell 5.1 and
+PowerShell 7; the actual hardware smokes and manual checks remain Tier 3.
+
 The workflow is in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml).
 It implements Tier 1 of the approved roadmap
 ([production-readiness-v1.md](roadmaps/production-readiness-v1.md) §7.1).
