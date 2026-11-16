@@ -34,19 +34,21 @@ impl Gpu {
     /// `announce` prints the selected adapter to stdout before device creation;
     /// JSON-reporting diagnostics pass false to keep stdout machine-readable.
     pub async fn new(window: Arc<Window>, announce: bool) -> Result<Self, String> {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
+        let instance = crate::adapter::instance()?;
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| format!("cannot create native surface: {e}"))?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
+        let adapter = crate::adapter::request_adapter(
+            &instance,
+            wgpu::RequestAdapterOptions {
                 compatible_surface: Some(&surface),
                 power_preference: wgpu::PowerPreference::LowPower,
                 force_fallback_adapter: false,
                 ..Default::default()
-            })
-            .await
-            .map_err(|e| format!("no compatible DX12/Vulkan adapter: {e}"))?;
+            },
+        )
+        .await
+        .map_err(|e| format!("no compatible DX12/Vulkan adapter: {e}"))?;
         if announce {
             println!("Inspector adapter: {:?}", adapter.get_info());
         }
