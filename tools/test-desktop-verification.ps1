@@ -61,6 +61,7 @@ $fake = {
             if ($script:mode -eq 'software') { $data.adapter = 'AdapterInfo { device_type: Cpu, backend: Dx12 }' }
             if ($script:mode -eq 'frames') { $data.frames_presented = 0 }
             if ($script:mode -eq 'reset') { $data.script.reset_matches_initial = $false }
+            if ($script:mode -eq 'privacy') { $data.exit.detail = 'diagnostic path C:\private\driver\"quoted"'; $data.adapter += ', device_pci_bus_id: "0000:01:00.0"' }
             $r.Stdout = $data | ConvertTo-Json -Depth 10
             if ($script:mode -eq 'timeout') { $r.TimedOut = $true; $r.ExitCode = -1 }
             if ($script:mode -eq 'launch') { $r.Started = $false; $r.Error = 'Win32Exception'; $r.ExitCode = $null }
@@ -90,11 +91,17 @@ try {
     Assert-Fails { Invoke-DesktopVerification $package $evidence } 'new evidence'
     Assert-Fails { Invoke-DesktopVerification $package (Join-Path $package 'evidence') } 'non-overlapping'
     Assert-Fails { Invoke-DesktopVerification $package $scratch } 'non-overlapping'
+    Assert-Fails { Invoke-DesktopVerification 'C:\' (Join-Path $scratch 'root') } 'filesystem root'
     Assert-Fails { Test-DesktopPackage $package ('0' * 64) } 'expected CI'
     Write-TestText (Join-Path $package 'quantum-x.exe') 'corrupt'
     $r = Run-Fixture $package success
     Assert-True ($r.package_integrity.status -eq 'failed' -and $invocations -eq 0) 'Corrupt package executed code'
     $package = New-TestPackage
+    $r = Run-Fixture $package privacy
+    $saved = Read-DesktopJson (Join-Path $evidence 'report.json')
+    Assert-True ($saved.automated_status -eq 'passed' -and @($saved.automated_cases).Count -eq 8) 'Sanitization corrupted JSON structure'
+    $savedNative = @($saved.automated_cases | Where-Object { $_.name -eq 'native-welcome' })[0].evidence
+    Assert-True ($savedNative.exit.detail -notmatch 'C:' -and $savedNative.adapter -notmatch '0000:01') 'Structured report exposed a path or PCI location'
     # Move only the synthetic fixture file within this unique test workspace.
     Move-Item -LiteralPath (Join-Path $package 'QUANTUM Dynamics.exe') -Destination (Join-Path $scratch 'held.exe')
     Write-PackageManifest $package

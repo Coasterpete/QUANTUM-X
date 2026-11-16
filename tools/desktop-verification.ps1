@@ -35,7 +35,8 @@ function Test-DesktopPackage([string]$Directory, [string]$ExpectedManifestSha256
     Assert-DesktopPlainPath $Directory
     if (-not (Test-Path -LiteralPath $Directory -PathType Container)) { throw 'Package directory is missing or is not an extracted folder' }
     # Walk without following links; bound the input before the existing trusted
-    # integrity verifier hashes it. Never execute a verifier from the package.
+    # integrity verifier hashes it. Use the verifier beside this runner, never
+    # a script selected by the target package's metadata.
     $pending = [Collections.Generic.Stack[string]]::new()
     $pending.Push($Directory)
     $count = 0; $bytes = 0L
@@ -130,6 +131,9 @@ function Invoke-DesktopVerification {
     if ([Environment]::OSVersion.Platform -ne 'Win32NT') { throw 'Desktop verification requires Windows' }
     $package = [IO.Path]::GetFullPath($PackageDirectory).TrimEnd('\','/')
     $output = [IO.Path]::GetFullPath($OutputDirectory).TrimEnd('\','/')
+    if ($package -ieq [IO.Path]::GetPathRoot([IO.Path]::GetFullPath($PackageDirectory)).TrimEnd('\','/')) {
+        throw 'Choose the extracted package folder, not a filesystem root'
+    }
     if ($output -ieq $package -or $output.StartsWith($package + '\', [StringComparison]::OrdinalIgnoreCase) -or
         $package.StartsWith($output + '\', [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Evidence and package directories must be separate, non-overlapping folders'
@@ -173,11 +177,35 @@ function Invoke-DesktopVerification {
         if ($Limit -gt 0 -and $Value.Length -gt $Limit) { $Value = $Value.Substring(0,$Limit) }
         $Value
     }
+    function ConvertTo-DesktopSanitizedValue($Value) {
+        if ($null -eq $Value) { return $null }
+        if ($Value -is [string]) { return (Protect-DesktopText $Value) }
+        if ($Value -is [Collections.IDictionary]) {
+            $clean = [ordered]@{}
+            foreach ($key in $Value.Keys) { $clean[$key] = ConvertTo-DesktopSanitizedValue $Value[$key] }
+            return $clean
+        }
+        if ($Value -is [pscustomobject]) {
+            $clean = [ordered]@{}
+            foreach ($property in $Value.PSObject.Properties) { $clean[$property.Name] = ConvertTo-DesktopSanitizedValue $property.Value }
+            return [pscustomobject]$clean
+        }
+        if ($Value -is [Collections.IEnumerable]) {
+            $clean = [Collections.Generic.List[object]]::new()
+            foreach ($item in $Value) { $clean.Add((ConvertTo-DesktopSanitizedValue $item)) }
+            return ,($clean.ToArray())
+        }
+        return $Value
+    }
     function Write-DesktopText([string]$Name, [string]$Value) {
-        # Never truncate serialized JSON into an invalid document. Its inputs
-        # are bounded captures/metadata; text logs retain the 64 KiB cap.
-        $limit = if ($Name.EndsWith('.json')) { 0 } else { 65536 }
-        [IO.File]::WriteAllText((Join-Path $output $Name), (Protect-DesktopText $Value $limit), [Text.UTF8Encoding]::new($false))
+        # Sanitize JSON string values before serializing, so Windows paths with
+        # escaped quotes/backslashes cannot corrupt the JSON escape sequences.
+        # Never truncate a serialized report into an invalid document.
+        if ($Name.EndsWith('.json')) {
+            $parsed = $Value | ConvertFrom-Json
+            $Value = ConvertTo-DesktopSanitizedValue $parsed | ConvertTo-Json -Depth 30
+        } else { $Value = Protect-DesktopText $Value }
+        [IO.File]::WriteAllText((Join-Path $output $Name), $Value, [Text.UTF8Encoding]::new($false))
     }
     function Save-DesktopReport {
         Write-DesktopText 'report.json' ($report | ConvertTo-Json -Depth 30)
