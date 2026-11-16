@@ -1,0 +1,201 @@
+{
+  "milestone": "R0.4",
+  "verdict": "Works",
+  "verdict_scope": "Existing offscreen Welcome/Editor and hidden-window native Welcome/Editor/same-window Simulator on WARP; two independent hosted trials",
+  "date_local": "2026-11-15 America/New_York",
+  "base_main": "ee213a1ad6c0069a07cce0de90edebf8301e0743",
+  "branch_head_tested": "c4ee6c99403ded6518798f7931f3e220cd7387db",
+  "checkout_tested": "11878aaae96efea4a3ac14594c9878e9382c32be",
+  "workflow_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43782066066",
+  "run_attempt": 1,
+  "environment": {
+    "image": "win25-vs2026",
+    "image_version": "20261103.298.1",
+    "os": "Microsoft Windows NT 10.0.26100.0"
+  },
+  "wgpu_version": "30.0.1",
+  "adapter": {
+    "accepted": true,
+    "backend": "Dx12",
+    "device_type": "Cpu",
+    "driver": "1.0.20.0",
+    "driver_info": "",
+    "name": "Microsoft Basic Render Driver",
+    "requested": "warp"
+  },
+  "installation": {
+    "url": "https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/1.0.20",
+    "package_sha256": "E5FE5DE661CE98B58EF9CFB736E73C0A7A2623D3BBF5F14839B2D55566D87E40",
+    "file_version": "1.0.20.0.20260527.5",
+    "dll_sha256": "2A08692CBA4C130593329255627FB915D666C90CDA53D284594BC8438FD4F49D",
+    "signature_status": "Valid",
+    "signer": "CN=Microsoft Corporation, O=Microsoft Corporation, L=Redmond, S=Washington, C=US"
+  },
+  "trials": [
+    {
+      "trial": 1,
+      "job_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43782066066/job/133021282657",
+      "experiment_step_conclusion": "success",
+      "artifact_name": "software-gpu-r04-warp-1-11878aaae96efea4a3ac14594c9878e9382c32be-1",
+      "artifact_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43782066066/artifacts/14188284911",
+      "artifact_digest": "sha256:77f70de2dbc583bf2862a2a27375cab9764706d442472c5128a4040fca530ee9",
+      "passed": true,
+      "cases": [
+        {
+          "path": "offscreen-welcome",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "capture_size": [
+            1280,
+            800
+          ],
+          "render_report": "Microsoft Basic Render Driver Dx12 / ; 250 line vertices, 38426 visible pixels; 1280x800; GPU upload 0.000 ms, 0 bytes, 0 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.083 ms"
+        },
+        {
+          "path": "offscreen-editor",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "capture_size": [
+            1280,
+            800
+          ],
+          "render_report": "Microsoft Basic Render Driver Dx12 / ; 3346 line vertices, 70758 visible pixels; 1280x800; GPU upload 18.088 ms, 6144912 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.018 ms"
+        },
+        {
+          "path": "native-welcome",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 5,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true
+        },
+        {
+          "path": "native-editor",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 5,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true
+        },
+        {
+          "path": "native-simulator",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 11,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true,
+          "script": {
+            "name": "simulator_round_trip",
+            "step": "Done",
+            "simulator_frames_drawn": 8,
+            "paused_ticks": 72,
+            "reset_matches_initial": true,
+            "editor_restored": true
+          }
+        }
+      ]
+    },
+    {
+      "trial": 2,
+      "job_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43782066066/job/133021282457",
+      "experiment_step_conclusion": "success",
+      "artifact_name": "software-gpu-r04-warp-2-11878aaae96efea4a3ac14594c9878e9382c32be-1",
+      "artifact_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43782066066/artifacts/14187949156",
+      "artifact_digest": "sha256:638bfe407dc914924264611fca7392d25b98446612dcc20342b2756e1a1ae145",
+      "passed": true,
+      "cases": [
+        {
+          "path": "offscreen-welcome",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "capture_size": [
+            1280,
+            800
+          ],
+          "render_report": "Microsoft Basic Render Driver Dx12 / ; 250 line vertices, 38426 visible pixels; 1280x800; GPU upload 0.000 ms, 0 bytes, 0 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.079 ms"
+        },
+        {
+          "path": "offscreen-editor",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "capture_size": [
+            1280,
+            800
+          ],
+          "render_report": "Microsoft Basic Render Driver Dx12 / ; 3346 line vertices, 70758 visible pixels; 1280x800; GPU upload 23.668 ms, 6144912 bytes, 1 uploads (second unchanged upload reused); GLB 0 unique GPU resources / 0 primitive instances / 0 textures, asset upload 0.011 ms"
+        },
+        {
+          "path": "native-welcome",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 5,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true
+        },
+        {
+          "path": "native-editor",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 5,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true
+        },
+        {
+          "path": "native-simulator",
+          "passed": true,
+          "exit_code": 0,
+          "timed_out": false,
+          "frames_presented": 12,
+          "frames_minimum": 5,
+          "window_created": true,
+          "last_surface_status": "success",
+          "resources_released": true,
+          "script": {
+            "name": "simulator_round_trip",
+            "step": "Done",
+            "simulator_frames_drawn": 9,
+            "paused_ticks": 64,
+            "reset_matches_initial": true,
+            "editor_restored": true
+          }
+        }
+      ]
+    }
+  ],
+  "initial_validation_failure": {
+    "workflow_url": "https://github.com/Coasterpete/QUANTUM-X/actions/runs/43781841008",
+    "checkout": "5d17f3c87bc60a5be91c3c3abfb190fd19fa8705",
+    "experiment_steps": "failure in both trials",
+    "detail": "All application processes exited 0 and native reports passed. New wrapper incorrectly required frames_presented == frames_requested. Both Simulator scripts presented 12 frames (minimum 5) and paused at 64 ticks. Corrected wrapper to match unchanged Smoke::complete minimum-frame contract and require exit/report count agreement; reran on fresh runners. No rendering, physics, fixture, tolerance or application-smoke change."
+  },
+  "recommendation": "Continue as opt-in/non-blocking Tier 2; do not promote before the proposed 20-success criterion and owner acceptance.",
+  "unverified": [
+    "Visible desktop composition and visual correctness",
+    "Hardware GPU and driver behavior",
+    "Performance/FPS or physics timing",
+    "DPI, resize/minimize, focus, multi-monitor and device recovery",
+    "Recording and material-probe entry points",
+    "Future separate Simulator window",
+    "Mesa Vulkan (not needed after WARP succeeded)"
+  ],
+  "manual_desktop_verification": false
+}

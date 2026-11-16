@@ -5,6 +5,11 @@ This is the non-blocking Tier 2 experiment from
 It neither replaces hardware validation nor changes UI, physics, schemas or
 normal adapter preferences. R0.5 and R1 are outside this pass.
 
+**Recorded verdict: Works** for all five paths in two independent hosted WARP
+trials. See the [evidence and recommendation](evidence/r0.4/README.md) and
+[compact diagnostics](evidence/r0.4/summary.json), including the initial wrapper
+defect and its verified correction. Continue non-blocking; no promotion yet.
+
 ## Procedure
 
 The separate [workflow](../.github/workflows/software-gpu-experiment.yml) runs two
@@ -88,8 +93,8 @@ pwsh -File tools/verify-software-gpu.ps1 -Executable C:/scratch/r04-app/quantum-
 
 Inspect each job's step outcome and `summary.json`; a green non-blocking workflow
 alone **does not mean the experiment passed**. A fail is never converted to an
-offscreen-only success. The durable, small result record and verdict will be
-linked here after actual hosted runs. Mixed repeat outcomes mean **Flaky**;
+offscreen-only success. The durable result record above links actual hosted
+runs. Mixed repeat outcomes mean **Flaky**;
 consistent failures mean **Not feasible in the tested environment**, scoped to
 the failing paths. Successful trials mean **Works** only for the executed paths,
 with the sample size stated. None meets the provisional 20-success promotion
