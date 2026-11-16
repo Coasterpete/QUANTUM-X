@@ -1,0 +1,96 @@
+# R0.4 Tier 2 feasibility only. No required jobs depend on this workflow.
+name: Software GPU experiment (non-blocking)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/software-gpu-experiment.yml'
+      - 'tools/*software-gpu*.ps1'
+      - 'crates/rendering/**'
+      - 'apps/quantum-x/src/**'
+      - 'Cargo.lock'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: software-gpu-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: '0'
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  RUST_BACKTRACE: '1'
+
+jobs:
+  warp:
+    name: Experimental WARP trial ${{ matrix.trial }}
+    runs-on: windows-2025
+    continue-on-error: true
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        trial: [1, 2]
+    steps:
+      - name: Match repository line endings
+        run: git config --global core.autocrlf true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned toolchain
+        run: |
+          rustup toolchain install
+          rustc -Vv
+      - name: Test evidence rejection (CPU only)
+        shell: pwsh
+        run: ./tools/test-software-gpu-evidence.ps1
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          shared-key: debug
+          # Restore Tier 1's compilation cache, never write experimental files back.
+          save-if: false
+      - name: Build existing development CLI
+        run: cargo build -p quantum-x --locked
+      - name: Install pinned WARP beside a temporary executable
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/r04-app"
+          $install = New-Item -ItemType Directory -Path "$env:RUNNER_TEMP/r04-install"
+          Copy-Item -LiteralPath target/debug/quantum-x.exe -Destination $app.FullName
+          # Same package/version/layout as gfx-rs/wgpu's install_warp.rs at
+          # a1d029a731855a6c8d49b717b0601ff3e2f05817. No machine-wide install.
+          $url = 'https://www.nuget.org/api/v2/package/Microsoft.Direct3D.WARP/1.0.20'
+          $archive = Join-Path $install.FullName 'warp.zip'
+          Invoke-WebRequest -Uri $url -OutFile $archive -TimeoutSec 120
+          $hash = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash
+          if ($hash -cne 'E5FE5DE661CE98B58EF9CFB736E73C0A7A2623D3BBF5F14839B2D55566D87E40') { throw 'WARP package SHA-256 mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath "$install/package"
+          $dll = Get-Item "$install/package/build/native/bin/x64/d3d10warp.dll"
+          $signature = Get-AuthenticodeSignature -LiteralPath $dll.FullName
+          if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notlike '*O=Microsoft Corporation*') { throw 'Invalid Microsoft WARP signature' }
+          Copy-Item -LiteralPath $dll.FullName -Destination $app.FullName
+          [ordered]@{
+            url = $url; package_sha256 = $hash; file_version = $dll.VersionInfo.FileVersion
+            dll_sha256 = (Get-FileHash -LiteralPath $dll.FullName -Algorithm SHA256).Hash
+            signature_status = [string]$signature.Status; signer = $signature.SignerCertificate.Subject
+          } | ConvertTo-Json | Set-Content "$install/installation.json"
+      - name: Exercise offscreen and native paths independently
+        shell: pwsh
+        env:
+          QX_SOFTWARE_GPU: warp
+        run: ./tools/verify-software-gpu.ps1 -Executable "$env:RUNNER_TEMP/r04-app/quantum-x.exe" -OutputDirectory "$env:RUNNER_TEMP/r04-evidence"
+      - name: Upload experiment evidence (including failures)
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: software-gpu-r04-warp-${{ matrix.trial }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/r04-evidence
+            ${{ runner.temp }}/r04-install/installation.json
+          if-no-files-found: warn
+          retention-days: 3

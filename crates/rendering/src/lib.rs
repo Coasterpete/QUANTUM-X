@@ -1,4 +1,5 @@
 //! Development-only native inspection. GPU and window resources stay here.
+mod adapter;
 pub mod asset;
 mod asset_gpu;
 mod camera;

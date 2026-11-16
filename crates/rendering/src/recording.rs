@@ -53,14 +53,16 @@ impl ViewportRecorder {
         if !(640..=4096).contains(&width) || !(480..=4096).contains(&height) {
             return Err("recording size outside supported bounds".into());
         }
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
+        let instance = crate::adapter::instance()?;
+        let adapter = crate::adapter::request_adapter(
+            &instance,
+            wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
                 ..Default::default()
-            })
-            .await
-            .map_err(|e| e.to_string())?;
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
         let timing = adapter.features().contains(wgpu::Features::TIMESTAMP_QUERY);
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {

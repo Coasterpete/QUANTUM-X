@@ -45,11 +45,11 @@ async fn render(
     height: u32,
     input: &mut dyn FnMut(&egui::Context, usize) -> Vec<egui::Event>,
 ) -> Result<String, String> {
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions::default())
-        .await
-        .map_err(|e| e.to_string())?;
+    let instance = crate::adapter::instance()?;
+    let adapter =
+        crate::adapter::request_adapter(&instance, wgpu::RequestAdapterOptions::default())
+            .await
+            .map_err(|e| e.to_string())?;
     let info = adapter.get_info();
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor::default())

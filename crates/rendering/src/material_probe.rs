@@ -404,11 +404,11 @@ pub fn verify_material_rendering(
 /// appearance resources, as happens after missing-map recovery in the Editor.
 fn verify_mesh_material_reload(scene: &InspectionScene) -> Result<(), String> {
     pollster::block_on(async {
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions::default())
-            .await
-            .map_err(|e| e.to_string())?;
+        let instance = crate::adapter::instance()?;
+        let adapter =
+            crate::adapter::request_adapter(&instance, wgpu::RequestAdapterOptions::default())
+                .await
+                .map_err(|e| e.to_string())?;
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor::default())
             .await
