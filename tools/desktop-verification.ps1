@@ -274,6 +274,7 @@ function Invoke-DesktopVerification {
             $timeout = if ($case.page) { $NativeTimeoutSeconds } else { $CommandTimeoutSeconds }
             $record = [ordered]@{ name = $case.name; executable = $case.executable; arguments = $case.args
                 status = 'not_run'; started = $false; timeout_s = $timeout; timed_out = $false
+                outer_timed_out = $false; application_timed_out = $false
                 exit_code = $null; terminated = $null; elapsed_s = $null; capture_complete = $null
                 stdout_bytes = 0; stderr_bytes = 0; logs_truncated = $false; evidence = $null; error = $null }
             $cases.Add($record)
@@ -284,12 +285,23 @@ function Invoke-DesktopVerification {
             }
             try {
                 $r = & $ProcessRunner (Join-Path $package $case.executable) $case.args $package $environment $timeout
-                $record.started = $r.Started; $record.timed_out = $r.TimedOut; $record.exit_code = $r.ExitCode
+                $record.started = $r.Started; $record.timed_out = $r.TimedOut; $record.outer_timed_out = $r.TimedOut; $record.exit_code = $r.ExitCode
                 $record.terminated = $r.Terminated; $record.elapsed_s = $r.ElapsedSeconds; $record.capture_complete = $r.CaptureComplete
                 $record.stdout_bytes = $r.StdoutBytes; $record.stderr_bytes = $r.StderrBytes
                 $record.logs_truncated = $r.StdoutBytes -gt 65536 -or $r.StderrBytes -gt 65536
                 Write-DesktopText ($case.name + '.stdout.txt') $r.Stdout
                 Write-DesktopText ($case.name + '.stderr.txt') $r.Stderr
+                # A native watchdog/soft deadline can exit before our outer
+                # limit. Keep its stage/exit JSON even when the process fails.
+                if ($case.page -and $r.Stdout -and -not $record.logs_truncated) {
+                    try {
+                        $record.evidence = $r.Stdout | ConvertFrom-Json
+                        if ($record.evidence.result -in @('timeout','hard_timeout')) {
+                            $record.application_timed_out = $true
+                            $record.timed_out = $true
+                        }
+                    } catch { } # Raw bounded logs retain incomplete/invalid JSON.
+                }
                 if (-not $r.Started) { throw "Process failed to start: $($r.Error)" }
                 if ($r.TimedOut) { throw "Process exceeded $timeout s; termination attempted for its process tree" }
                 if (-not $r.Terminated -or -not $r.CaptureComplete -or $r.Error) { throw 'Process termination or stream capture failed' }

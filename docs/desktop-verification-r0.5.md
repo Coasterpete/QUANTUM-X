@@ -87,6 +87,10 @@ first 64 KiB retained per stream. Excess output fails incomplete evidence.
 Timeouts attempt termination of only the spawned process tree, with additional
 bounded termination/stream waits. No other application is killed. OS/GPU
 inventory has a separate 30 s limit; failure fails the overall automated result.
+Native failure JSON is retained even after a nonzero exit. `timed_out` covers
+either outer termination or the application's own soft/watchdog report;
+`outer_timed_out` and `application_timed_out` distinguish them and preserve the
+reported failing stage.
 
 The collector does not read existing logs, projects, profiles, network details,
 hostname, serials or monitor EDID. Known local paths/profile/user/computer strings

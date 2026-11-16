@@ -64,6 +64,7 @@ $fake = {
             if ($script:mode -eq 'privacy') { $data.exit.detail = 'diagnostic path C:\private\driver\"quoted"'; $data.adapter += ', device_pci_bus_id: "0000:01:00.0"' }
             $r.Stdout = $data | ConvertTo-Json -Depth 10
             if ($script:mode -eq 'timeout') { $r.TimedOut = $true; $r.ExitCode = -1 }
+            if ($script:mode -eq 'inner-timeout') { $r.ExitCode = 3; $r.Stdout = '{"ok":false,"result":"hard_timeout","stage":"gpu"}' }
             if ($script:mode -eq 'launch') { $r.Started = $false; $r.Error = 'Win32Exception'; $r.ExitCode = $null }
             if ($script:mode -eq 'malformed') { $r.Stdout = 'not JSON' }
             if ($script:mode -eq 'flood') { $r.StdoutBytes = 70000 }
@@ -110,7 +111,7 @@ try {
     $r = Run-Fixture (Join-Path $scratch 'absent') success
     Assert-True ($r.automated_status -eq 'failed' -and $invocations -eq 0) 'Missing package did not fail closed'
     $package = New-TestPackage
-    foreach ($mode in @('identity','startup','software','frames','reset','timeout','launch','malformed','flood')) {
+    foreach ($mode in @('identity','startup','software','frames','reset','timeout','inner-timeout','launch','malformed','flood')) {
         $r = Run-Fixture $package $mode
         Assert-True ($r.automated_status -eq 'failed') "Invalid evidence accepted: $mode"
         Assert-True ($r.automated_cases.Count -eq 8) "Incomplete failure report: $mode"
@@ -119,6 +120,10 @@ try {
         if ($mode -eq 'startup') {
             $log = Get-Content (Join-Path $evidence 'startup-welcome.stderr.txt') -Raw
             Assert-True (-not $log.Contains($env:USERPROFILE)) 'Log exposed private profile path'
+        }
+        if ($mode -eq 'inner-timeout') {
+            $native = @($r.automated_cases | Where-Object { $_.name -eq 'native-welcome' })[0]
+            Assert-True ($native.timed_out -and $native.application_timed_out -and -not $native.outer_timed_out -and $native.evidence.stage -eq 'gpu') 'Application watchdog stage/timeout was lost'
         }
     }
     $r = Invoke-DesktopVerification -PackageDirectory $package -OutputDirectory (Join-Path $scratch 'inventory-failure') `
