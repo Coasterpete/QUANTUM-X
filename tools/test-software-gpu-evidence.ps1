@@ -9,7 +9,7 @@ $report = [pscustomobject]@{
     ok = $true; hidden_window = $true; page = 'welcome'
     frames_requested = 5; frames_presented = 5; resources_released = $true
     adapter = 'AdapterInfo { name: Microsoft Basic Render Driver, backend: Dx12 }'
-    exit = [pscustomobject]@{ reason = 'diagnostic_complete'; window_created = $true }
+    exit = [pscustomobject]@{ reason = 'diagnostic_complete'; window_created = $true; frames_presented = 5 }
     script = [pscustomobject]@{
         name = 'simulator_round_trip'; step = 'Done'; simulator_frames_drawn = 6
         paused_ticks = 48; reset_matches_initial = $true; editor_restored = $true
@@ -38,10 +38,19 @@ Assert-Rejected { Assert-SoftwareGpuEvidence $adapter native welcome $null $fals
 $report.frames_presented = 0
 Assert-Rejected { Assert-SoftwareGpuEvidence $adapter native welcome $report $false }
 $report.frames_presented = 5
+$report.exit.frames_presented = 4
+Assert-Rejected { Assert-SoftwareGpuEvidence $adapter native welcome $report $false }
+$report.exit.frames_presented = 5
+$report.frames_presented = 4
+Assert-Rejected { Assert-SoftwareGpuEvidence $adapter native welcome $report $false }
+$report.frames_presented = 5
 $report.resources_released = $false
 Assert-Rejected { Assert-SoftwareGpuEvidence $adapter native welcome $report $false }
 $report.resources_released = $true
 $report.page = 'simulator'
+# Real scripted native runs legitimately present more than the minimum five.
+$report.frames_presented = 12
+$report.exit.frames_presented = 12
 Assert-SoftwareGpuEvidence $adapter native simulator $report $false
 $checks++
 $report.script.editor_restored = $false

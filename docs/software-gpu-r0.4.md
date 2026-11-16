@@ -47,7 +47,7 @@ stdout reports remain intact. Ordinary launches emit no new diagnostics.
 | --- | --- | --- |
 | Welcome offscreen | `render-welcome welcome.png` | WARP identity, exit 0, PNG readback, capture metadata, nonzero visible pixels |
 | Editor offscreen | `render-editor examples/foundation.qx.json editor.png track 1280 800` | Same, using actual editor controls and synthetic reference track |
-| Welcome native | `--gui-smoke-test welcome` | Hidden HWND, compatible surface/device, five presented frames, cleanup, successful JSON |
+| Welcome native | `--gui-smoke-test welcome` | Hidden HWND, compatible surface/device, at least five presented frames, cleanup, successful JSON |
 | Editor native | `--gui-smoke-test edit` | Same, using the existing blank development editor route |
 | Existing Simulator mode | `--gui-smoke-test simulator` | Existing development fixture and Editor → Simulator → Editor script; presented frames, at least 48 physics ticks, Pause/Reset, original state restored |
 

@@ -13,12 +13,15 @@ function Assert-SoftwareGpuEvidence {
     if ($Kind -ne 'native') { throw 'Unknown rendering evidence kind' }
     if (-not $Report -or $Report.ok -ne $true -or $Report.hidden_window -ne $true -or
         $Report.page -cne $Page -or $Report.frames_requested -lt 1 -or
-        $Report.frames_presented -ne $Report.frames_requested -or
+        $Report.frames_presented -lt $Report.frames_requested -or
+        $Report.exit.frames_presented -ne $Report.frames_presented -or
         $Report.resources_released -ne $true -or $Report.exit.reason -cne 'diagnostic_complete' -or
         $Report.exit.window_created -ne $true -or
         $Report.adapter -cnotlike '*Microsoft Basic Render Driver*Dx12*') {
         throw 'Native report did not prove window creation, presentation and cleanup'
     }
+    # SmokeConfig.frames is a minimum; Simulator keeps presenting until its
+    # existing asynchronous mode/worker round trip is complete (Smoke::complete).
     if ($Page -eq 'simulator' -and
         ($Report.script.name -cne 'simulator_round_trip' -or $Report.script.step -cne 'Done' -or
          $Report.script.simulator_frames_drawn -lt 1 -or $Report.script.paused_ticks -lt 48 -or
